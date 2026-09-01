@@ -69,3 +69,6 @@ go.work
 
 .claude
 .serena
+
+# Build output (see Makefile)
+/bin/

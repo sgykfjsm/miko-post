@@ -451,7 +451,7 @@ app.jsonl -> app.jsonl.20260827114203
 Distribution assumes the Go toolchain. Install with `go install`:
 
 ```bash
-go install <module-path>/cmd/mp@latest
+go install github.com/sgykfjsm/miko-post/cmd/mp@latest
 ```
 
-Replace `<module-path>` with the repository's final Go module path. The installed executable name is `mp`. Platform-specific application bundles, code signing, notarization, and separate installers are outside the v0.1 distribution requirement.
+The installed executable name is `mp`. Platform-specific application bundles, code signing, notarization, and separate installers are outside the v0.1 distribution requirement.
