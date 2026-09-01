@@ -249,7 +249,7 @@ neither can be retrofitted later without rewriting every story.
 - [ ] T087 [P] Write `README.md` with install, configuration, and usage, and add a commented example settings file at `testdata/config/example.toml`
 - [x] T088 [P] Replace the `<module-path>` placeholder in `docs/design.md` §14 with `github.com/sgykfjsm/miko-post` (research R-001, resolves A-007)
 - [ ] T089 Verify `go vet ./...` and `go build ./...` are clean and that `go test -race ./...` passes
-- [ ] T090 Verify `go install github.com/sgykfjsm/miko-post/cmd/mp@latest` produces a working `mp` whose log records carry a non-empty version and commit from `ReadBuildInfo` (research R-009)
+- [ ] T090 Verify `go install github.com/sgykfjsm/miko-post/cmd/mp@latest` produces a working `mp` whose log records carry a non-empty version, and a commit recovered from the pseudo-version when `@latest` resolves to an untagged commit. A **tagged** install records no commit and correctly reports `unknown` — assert that, do not treat it as a failure (research R-009)
 - [ ] T091 Execute all nine scenarios in [quickstart.md](./quickstart.md) end to end and record the results
 
 ---

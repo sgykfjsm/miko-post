@@ -16,12 +16,30 @@ belongs in `tasks.md`.
 ## Build
 
 ```bash
+# Preferred: assembles the linker flags with the correct symbol paths and
+# marks the build dirty when the tree has uncommitted or untracked changes.
+make build
+
+# Unstamped; falls back to the build info the toolchain embeds.
 go build -o ./bin/mp ./cmd/mp
 
-# With version stamping (R-009); go install falls back to ReadBuildInfo
-go build -ldflags "-X main.version=0.1.0 -X main.commit=$(git rev-parse --short HEAD)" \
+# Explicit stamping (R-009). The variables live in internal/version, not in
+# main, and the linker silently ignores an -X flag naming a symbol that does
+# not exist — so a wrong path here produces an unstamped binary with no error.
+go build -ldflags "\
+  -X github.com/sgykfjsm/miko-post/internal/version.version=0.1.0 \
+  -X github.com/sgykfjsm/miko-post/internal/version.commit=$(git rev-parse --short HEAD)" \
   -o ./bin/mp ./cmd/mp
+
+# Confirm what a build would embed, without building:
+make stamp
 ```
+
+`VERSION` and `COMMIT` may be overridden, from the command line or the
+environment. Both must match `[A-Za-z0-9._+/-]+`; anything else fails the build
+rather than being rewritten into a different release label. Note that make reads
+the environment, so an ambient `VERSION` in your shell affects a plain
+`make build`.
 
 ## Automated validation
 

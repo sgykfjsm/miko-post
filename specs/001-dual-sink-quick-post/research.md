@@ -162,14 +162,40 @@ contacting live external services".
 
 **Resolves**: A-008; constrains FR-066.
 
-- **Decision**: `-ldflags "-X main.version=... -X main.commit=..."` at build time, injected into an
-  `internal/version` package by `cmd/mp`. When the flags are absent — which is the normal case for
-  `go install`, the documented v0.1 distribution channel — fall back to
-  `runtime/debug.ReadBuildInfo()`, reading the module version and the `vcs.revision` build setting.
-- **Rationale**: `go install` cannot pass ldflags, so a stamp-only approach would leave the
-  documented install path with empty version fields in every log record. `ReadBuildInfo` fills
-  exactly that gap. Both sources are read once at startup and cached, and the fields are omitted
-  from records when `include_version` / `include_git_commit` are false (FR-055).
+- **Decision**: stamp `internal/version` directly with
+  `-ldflags "-X github.com/sgykfjsm/miko-post/internal/version.version=... -X ...internal/version.commit=..."`.
+  `cmd/mp` reads the values through accessors; it does not relay them, so there are no `main`-level
+  variables to stamp. `make build` and `make install` assemble these flags, and `make stamp` prints
+  what a build would embed. When the flags are absent, fall back to `runtime/debug.ReadBuildInfo()`.
+- **Rationale**: an end user running `go install <path>@latest` passes no linker flags, so a
+  stamp-only approach would leave the documented install path with empty version fields in every log
+  record. `ReadBuildInfo` fills that gap. Both sources are read once at startup and cached, and the
+  fields are omitted from records when `include_version` / `include_git_commit` are false (FR-055).
+- **What the fallback can and cannot recover** — measured against a local `file://` module proxy
+  serving this module, since the real `@latest` cannot be exercised until the module is published
+  (recorded here because the observation is not otherwise visible in the repository):
+  - A build from a git working tree records `vcs.revision`, so the commit is exact and full-length.
+  - A build from the **module cache**, which is what `go install <path>@<version>` produces, records
+    **no** `vcs` settings at all. For an untagged `@latest` the module version is a pseudo-version
+    (`v0.0.0-20260901063448-50c860568dd2`) whose final field is the 12-character commit prefix, so
+    the commit is recovered from it. For a **tagged** install nothing identifies the commit and
+    `Commit()` reports `unknown`; the version is still exact.
+  - Consequently `git_commit` is `unknown` for tagged installs. That is accepted for v0.1 rather
+    than worked around, and T090 is worded accordingly.
+  - Observed, proxy install of an untagged pseudo-version:
+    `mp v0.0.0-20260901170000-aaaabbbbcccc (aaaabbbbcccc)` — commit recovered, and `go version -m`
+    confirms the binary carries no `vcs.*` settings at all. The same install of the pre-fix code
+    reported `(unknown)`.
+  - Observed, proxy install of a tagged version: `mp v0.1.0 (unknown)`.
+  - **Trap when re-verifying**: Go reuses an extracted module from `GOMODCACHE`, so a stale
+    extraction silently yields a pre-fix result. Use a fresh `GOMODCACHE`, and note that
+    `GOPRIVATE`/`GONOPROXY` bypass a `file://` proxy entirely and fetch from the real remote.
+  - Pseudo-version parsing validates Go's grammar rather than field shape: an ordinary prerelease
+    tag such as `v1.0.0-alpha.20260901063448-deadbeef1234` has a timestamp-shaped and a hex-shaped
+    trailing field but is **not** a pseudo-version, and must not yield a commit.
+- **Correction**: an earlier draft of this decision claimed `go install` cannot pass ldflags. It can
+  (`go install -ldflags "..." <path>@<version>` works). The fallback is justified by what end users
+  actually do, not by a toolchain limitation.
 - **Alternatives considered**: `go generate` writing a Go source file — rejected: puts build
   metadata under version control and it goes stale.
 
