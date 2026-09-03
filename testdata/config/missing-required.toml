@@ -1,0 +1,17 @@
+# Both sinks enabled with none of their required keys supplied, plus two
+# out-of-range values.
+#
+# Exercises accumulation (FR-055, FR-058): a single load must report every one
+# of these, not just the first.
+
+[sink.telegram]
+enabled = true
+
+[sink.obsidian]
+enabled = true
+
+[posting]
+sink_timeout_seconds = 0
+
+[gui]
+error_close_seconds = -1

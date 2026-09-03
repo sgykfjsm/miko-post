@@ -34,10 +34,13 @@ import (
 // GoString, MarshalJSON and LogValue below implement all five, and every one of
 // them routes Err through the single errMarker, so there is one redaction
 // decision rather than five. This is the same four-method redaction pattern
-// data-model.md defines for the credential type, plus Formatter, which the
-// credential does not need because it has no exported fields to dump. Err stays
-// exported so the diagnostic logger can still reach it deliberately as r.Err —
-// the guards stop accidental renders, not intentional ones.
+// data-model.md defines for the credential type, plus Formatter. config.Secret
+// needs Formatter too — an earlier version of this comment said it did not,
+// on the reasoning that the credential type has no exported fields to dump,
+// which is wrong: fmt reaches unexported fields through reflection, so %d on a
+// bare Secret rendered the token. Err stays exported so the diagnostic logger
+// can still reach it deliberately as r.Err — the guards stop accidental
+// renders, not intentional ones.
 //
 // Hold a SinkResult as a named field, never embedded. The guards are promoted
 // along with the fields, so an embedding struct would render and marshal as a

@@ -1,0 +1,39 @@
+# Every key in contracts/config-schema.md, written explicitly.
+#
+# Used by the loader tests to prove that a fully populated document decodes to
+# exactly the values it names, so a missing struct tag or a mistyped TOML key
+# fails the test rather than silently falling back to a default that happens to
+# match.
+
+[sink.telegram]
+enabled = true
+bot_token = "fixture-token-not-a-real-credential"
+chat_id = "-1001234567890"
+thread_id = 42
+parse_mode = "MarkdownV2"
+fallback_to_plain_text = true
+http_timeout_seconds = 15
+
+[sink.obsidian]
+enabled = true
+daily_note_dir = "/tmp/miko-post-fixture-vault/daily"
+filename_format = "2006-01-02.md"
+time_format = "15:04"
+create_if_missing = true
+
+[posting]
+sink_timeout_seconds = 45
+
+[gui]
+success_close_seconds = 5
+error_close_seconds = 20
+
+[logging]
+format = "jsonl"
+path = "/tmp/miko-post-fixture-vault/app.jsonl"
+rotate_size_mib = 5
+rotate_after_days = 3
+message_on_error_only = false
+stack_trace = false
+include_version = false
+include_git_commit = false

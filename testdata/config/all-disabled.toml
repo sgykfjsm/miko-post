@@ -1,0 +1,8 @@
+# Every sink disabled. A valid document: FR-018's startup error belongs to the
+# front door (T081), not to settings validation, so Load must accept this.
+
+[sink.telegram]
+enabled = false
+
+[sink.obsidian]
+enabled = false
