@@ -1,0 +1,80 @@
+current_goal: >-
+  Deliver v0.1 of miko-post (feature 001-dual-sink-quick-post): one Go binary that posts a short
+  message to Telegram and today's Obsidian daily note concurrently and independently, from a CLI
+  and a GUI front door, through one shared posting core.
+
+status: in-execution
+
+completed:
+  - id: batch-1
+    summary: Go module, package skeleton, internal/version with build-info fallback, Makefile
+    tasks: [T001, T002, T004, T005, T088]
+    commit: 0a00212
+    pr: 93
+    state: merged
+  - id: batch-2
+    summary: Posting core contracts - Message, SinkResult, Sink interface, with table-driven tests
+    tasks: [T006, T007, T008, T009, T010]
+    issues: [7, 8, 9, 10, 11]
+    commit: 447cf53
+    squashed_as: 3214bbd
+    pr: 97
+    state: merged
+    merged_at: 2026-09-03T00:59:00Z
+    review_verdict: passed-with-notes
+    review_cycles: 3
+    fix_passes: 2
+
+in_progress: []
+
+blockers: []
+
+time_sensitive:
+  - issue: 98
+    note: decision on note-event ownership must be honored when T025/T030/T040 are written
+    deadline: before batch-5 (orchestrator)
+  - issue: 94
+    note: git_commit reads "unknown" on tagged installs; open maintainer decision
+    deadline: before tagging v0.1.0
+
+next_best_action: >-
+  Run run-batch-cycle for Batch 3 - Settings (T011-T020, issues #12-#21), which pins
+  github.com/pelletier/go-toml/v2 and unblocks US6.
+
+remaining_batches:
+  - {id: 3, name: Settings, tasks: "T011-T020", pins: "go-toml/v2"}
+  - {id: 4, name: Logging foundation, tasks: "T021-T024"}
+  - {id: 5, name: Orchestrator, tasks: "T025-T026", pins: "ulid/v2", requires: [2, 3, 4]}
+  - {id: 6, name: "US1 MVP (CLI)", tasks: "T027-T040"}
+  - {id: 7, name: "US2 GUI", tasks: "T041-T051", pins: "fyne/v2"}
+  - {id: 8, name: "US3 sink independence", tasks: "T052-T058"}
+  - {id: 9, name: "US4 formatting rescue", tasks: "T059-T064"}
+  - {id: 10, name: "US5 diagnostics", tasks: "T065-T074"}
+  - {id: 11, name: "US6 settings resolution", tasks: "T075-T083"}
+  - {id: 12, name: "Polish and gates", tasks: "T084-T091"}
+
+touched_files:
+  - internal/post/message.go
+  - internal/post/message_test.go
+  - internal/post/result.go
+  - internal/post/result_test.go
+  - internal/post/sink.go
+  - specs/001-dual-sink-quick-post/tasks.md
+  - .specify/integrations/claude.manifest.json
+
+unfiled_followups:
+  location: ~/.agents/review-runs/sgykfjsm__miko-post/20260902T040356Z-79b5bd57/
+  count: 6
+  note: >-
+    Accepted as non-blocking during the Batch 2 review but never filed as GitHub issues. Highest
+    value: xml.Marshal still reaches SinkResult.Err; the method-enumeration test skips
+    argument-taking methods and logs the skip invisibly under make check; the %p residual relies on
+    an unenforced "every error stored in Err is a pointer" invariant that belongs in T056's
+    acceptance notes.
+
+assumptions:
+  - >-
+    The batch decomposition above is re-derived by run-batch-cycle's triage step each run; it is
+    recorded here for orientation, not as a binding plan.
+
+last_updated: 2026-09-03
