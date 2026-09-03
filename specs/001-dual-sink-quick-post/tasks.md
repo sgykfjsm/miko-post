@@ -51,11 +51,11 @@ neither can be retrofitted later without rewriting every story.
 
 ### Message and results
 
-- [ ] T006 [P] Implement the `Message` type holding only the original untrimmed text, plus `Validate()` using `strings.TrimSpace`, in `internal/post/message.go` (FR-009 – FR-011)
-- [ ] T007 [P] Write the table-driven whitespace-rejection test covering ASCII spaces, U+3000 full-width spaces, tabs, line breaks, and mixtures, and asserting a valid message is delivered untrimmed, in `internal/post/message_test.go` (FR-009 – FR-011, spec Edge Cases)
-- [ ] T008 [P] Implement `SinkResult` with separate display `Reason` and diagnostic `Err` fields, and the aggregate success rule, in `internal/post/result.go` (FR-017, FR-059, FR-061)
-- [ ] T009 [P] Write aggregation tests covering all-success, partial-failure, and all-failure result sets in `internal/post/result_test.go` (FR-059 – FR-062, SC-004)
-- [ ] T010 [P] Define the two-method `Sink` interface (`Name`, `Send`) in `internal/post/sink.go` (data-model.md)
+- [x] T006 [P] Implement the `Message` type holding only the original untrimmed text, plus `Validate()` using `strings.TrimSpace`, in `internal/post/message.go` (FR-009 – FR-011)
+- [x] T007 [P] Write the table-driven whitespace-rejection test covering ASCII spaces, U+3000 full-width spaces, tabs, line breaks, and mixtures, and asserting a valid message is delivered untrimmed, in `internal/post/message_test.go` (FR-009 – FR-011, spec Edge Cases)
+- [x] T008 [P] Implement `SinkResult` with separate display `Reason` and diagnostic `Err` fields, and the aggregate success rule, in `internal/post/result.go` (FR-017, FR-059, FR-061)
+- [x] T009 [P] Write aggregation tests covering all-success, partial-failure, and all-failure result sets in `internal/post/result_test.go` (FR-059 – FR-062, SC-004)
+- [x] T010 [P] Define the two-method `Sink` interface (`Name`, `Send`) in `internal/post/sink.go` (data-model.md)
 
 ### Settings
 
