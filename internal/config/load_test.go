@@ -168,6 +168,64 @@ func TestLoadRejectsUnknownAndMisplacedKeys(t *testing.T) {
 	}
 }
 
+// TestLoadAggregatesEveryUnknownKey pins the plural rendering of a strict
+// decode failure.
+//
+// Every committed fixture and every case in TestLoadNeverEchoesTheDocument
+// happens to produce exactly one strict error, so the singular branch was the
+// only one ever executed and the aggregated shape — the count, the list, and
+// the fact that the *last* offender is reported at all — was unpinned. An
+// implementation that reported only strict.Errors[0] passed the whole suite.
+//
+// The document is written to a temporary directory rather than committed as a
+// fixture so it can carry the credential sentinel: FR-043 applies no less to
+// the plural branch, and this is the branch that builds the longest message out
+// of the most pieces of the failure.
+func TestLoadAggregatesEveryUnknownKey(t *testing.T) {
+	unsetToken(t)
+
+	document := "[sink.telegram]\nenabled = true\nchat_id = \"-100123\"\n" +
+		"bot_token = \"" + sentinel + "\"\n" +
+		"surprise = 1\nanother = 2\n\n[logging]\nnope = true\n"
+
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(path, []byte(document), 0o600); err != nil {
+		t.Fatalf("write document: %v", err)
+	}
+
+	_, err := config.Load(path)
+	if err == nil {
+		t.Fatal("expected a load error")
+	}
+
+	message := err.Error()
+
+	// The count and the per-key list are both asserted: the count alone would
+	// pass for a message that miscounted its own list, and the list alone would
+	// pass for a message that dropped the header.
+	if !strings.Contains(message, "3 unknown or misplaced keys") {
+		t.Errorf("the error should count the offending keys, got:\n%v", err)
+	}
+
+	for _, key := range []string{
+		"sink.telegram.surprise",
+		"sink.telegram.another",
+		"logging.nope",
+	} {
+		if !strings.Contains(message, key) {
+			t.Errorf("the error should name %s, got:\n%v", key, err)
+		}
+	}
+
+	if !strings.Contains(message, path) {
+		t.Errorf("the error should name the settings path %q, got:\n%v", path, err)
+	}
+
+	if strings.Contains(message, sentinel) {
+		t.Errorf("the aggregated load error echoed the credential: %v", err)
+	}
+}
+
 // TestLoadNeverEchoesTheDocument is the FR-043 gate on the load path.
 //
 // go-toml's own error rendering prints the offending line together with the

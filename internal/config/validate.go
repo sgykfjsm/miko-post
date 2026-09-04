@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode"
 )
 
 // Accepted values for the two keys that are validated but inert in v0.1
@@ -42,7 +43,25 @@ var acceptedParseModes = []string{ParseModeMarkdownV2, ParseModeMarkdown, ParseM
 // zero nanosecond count under ".000" — would report a real layout as literal
 // text. 2026-09-03 21:47:53.123456789 UTC is a Thursday in September, which
 // collides with none of them.
+//
+// It is fixed, and layout *detection* must keep using it rather than the wall
+// clock: "is this a layout?" has one right answer for a given string, and an
+// answer that moved with the clock would make the rule flaky — "15:04" is
+// indistinguishable from literal text for exactly the one minute a day at which
+// it renders as itself.
 var layoutProbeTime = time.Date(2026, 9, 3, 21, 47, 53, 123456789, time.UTC)
+
+// pathSeparators are the characters a rendered filename may never contain.
+//
+// Both spellings are rejected on every platform rather than deferring to
+// filepath.Separator, deliberately. A settings file is portable — the same
+// document is expected to work wherever the user carries their vault — so a
+// rule that changed with GOOS would accept "2006\01\02.md" on Unix as a
+// filename containing two literal backslashes and then silently turn it into a
+// directory hierarchy the moment the same file is read on Windows. Rejecting
+// both everywhere makes the accepted set the intersection, which is the only
+// set that means the same thing wherever the document is opened.
+const pathSeparators = `/\`
 
 // ValidationError reports every problem found in one settings document.
 //
@@ -105,10 +124,41 @@ func (p *problems) addf(format string, args ...any) {
 // as a document, and the actionable message the requirement calls for is a
 // front-door concern.
 func (s Settings) Validate() error {
+	// time.Now() carries time.Local, and that Location is the point: FR-051
+	// makes the Obsidian sink render its date and time at local wall-clock time,
+	// so a problem message that quoted any other rendering would be showing the
+	// user a filename their sink is never going to write.
+	//
+	// Message fidelity is all it buys, and that is deliberate. The rendered-value
+	// *rules* are instant-independent once the zone name is refused — the
+	// argument is on rendersZoneName — so a wrong clock here could not turn a
+	// rejection into an acceptance, only make the rejection harder to act on.
+	// The rules must not be made to depend on this instant again: a check that
+	// consulted the wall clock for its verdict would be asking a question whose
+	// answer the attacker schedules.
+	return s.validateAt(time.Now())
+}
+
+// validateAt is Validate with the wall clock supplied.
+//
+// The seam exists so the instant-dependent parts can be pinned at a stated
+// instant: that layout detection ignores this argument, and that the accepted
+// set does not move across a real zone transition. Reaching for $TZ instead
+// would not work — the time.Local *variable* is resolved once per process, so a
+// test that set it would be racing the rest of the binary — and assigning to
+// time.Local would make the whole package's tests order-dependent. Passing the
+// instant keeps every case hermetic and parallel.
+//
+// Note what resolving time.Local once does not give you, because a previous fix
+// rested on the opposite and was wrong: it fixes the Location, and a Location is
+// not a zone. It selects among arbitrarily many by instant, so nothing about
+// this argument makes the zone at validation the zone at the write. See
+// rendersZoneName for the rule that removes the zone from the question instead.
+func (s Settings) validateAt(now time.Time) error {
 	var found problems
 
 	s.Sink.Telegram.validate(&found)
-	s.Sink.Obsidian.validate(&found)
+	s.Sink.Obsidian.validate(&found, now)
 	s.Posting.validate(&found)
 	s.GUI.validate(&found)
 	s.Logging.validate(&found)
@@ -154,7 +204,7 @@ func (t TelegramSettings) validate(found *problems) {
 	}
 }
 
-func (o ObsidianSettings) validate(found *problems) {
+func (o ObsidianSettings) validate(found *problems, now time.Time) {
 	if o.Enabled {
 		switch {
 		case strings.TrimSpace(o.DailyNoteDir) == "":
@@ -165,15 +215,25 @@ func (o ObsidianSettings) validate(found *problems) {
 		}
 	}
 
-	validateLayout(found, "sink.obsidian.filename_format", o.FilenameFormat)
+	// Being a layout and rendering something usable are independent questions,
+	// so the rendered checks run on their own rather than behind the layout
+	// check: "../daily.md" is both literal text and an escape from the vault,
+	// and a user who fixes only the problem they were told about would just
+	// rediscover the other one on the next run.
+	if rendered, ok := validateLayout(found, "sink.obsidian.filename_format", o.FilenameFormat, now); ok {
+		validateRenderedFilename(found, "sink.obsidian.filename_format", o.FilenameFormat, rendered)
+	}
 
 	// The suffix check is separate from the layout check so a format that is a
 	// valid layout but not a Markdown filename reports the actual problem.
 	if o.FilenameFormat != "" && !strings.HasSuffix(o.FilenameFormat, ".md") {
-		found.addf("sink.obsidian.filename_format must end in .md (got %q)", o.FilenameFormat)
+		found.addf("sink.obsidian.filename_format must end in .md (got %q)",
+			elide(o.FilenameFormat))
 	}
 
-	validateLayout(found, "sink.obsidian.time_format", o.TimeFormat)
+	if rendered, ok := validateLayout(found, "sink.obsidian.time_format", o.TimeFormat, now); ok {
+		validateRenderedTimePrefix(found, "sink.obsidian.time_format", o.TimeFormat, rendered)
+	}
 }
 
 func (p PostingSettings) validate(found *problems) {
@@ -228,17 +288,222 @@ func (l LoggingSettings) validate(found *problems) {
 // note in history to one file named YYYY-MM-DD.md.
 //
 // What actually distinguishes a layout from literal text is whether formatting
-// an instant through it changes anything. That is the check.
-func validateLayout(found *problems, key, value string) {
+// an instant through it changes anything. That is the check, and it runs on the
+// fixed probe rather than on now: detection has one right answer per string, so
+// deciding it against the wall clock would make the rule flaky.
+//
+// The rendering is returned rather than discarded because being a layout is
+// only half of what these two keys have to satisfy: what a layout *renders*
+// ends up in a filesystem path and in a note's text, and nothing else in this
+// package would otherwise look at it. ok is false when there is nothing worth
+// rendering, so a caller can chain a rendered-value rule without repeating the
+// empty case.
+//
+// One rendering is enough, and that is a consequence of the zone-name rule
+// rather than an assumption. See rendersZoneName: with the MST element refused,
+// every remaining reference element renders out of a fixed alphabet — digits,
+// Go's own English month and day names, and " +-,.:" — none of which contains a
+// path separator, a control character, or a lone dot. So every character the
+// rendered-value rules can object to comes from the layout's own literal text,
+// which is the same at every instant. Checking a second instant would therefore
+// reach the same verdict by construction, and checking *which* second instant
+// was never a question the code could win: an attacker who can supply a zone can
+// also supply its transition schedule, so any fixed number of extra samples is
+// one sample short.
+func validateLayout(found *problems, key, value string, now time.Time) (rendered string, ok bool) {
 	if value == "" {
 		found.addf("%s must not be empty", key)
 
-		return
+		return "", false
+	}
+
+	if rendersZoneName(value) {
+		found.addf("%s must not render the zone name: %q contains Go's MST element, and the "+
+			"text that element emits comes from the machine's zone database rather than from "+
+			"this document — $TZ may name an arbitrary TZif file, and nothing constrains the "+
+			"abbreviation inside it to look like a zone name, so the rendered value can be a "+
+			"path traversal or a line break; write the offset instead, for example Z07:00 "+
+			"or -0700, which render digits and sign characters only", key, elide(value))
+
+		// The rendered-value rules are skipped rather than run on this value.
+		// What it renders is not a property of the document — it is a property
+		// of the machine — and reporting a problem about a rendering that is
+		// going to change the moment the required fix is applied would be worse
+		// than not reporting it. Quoting that text would also put an arbitrary
+		// environment-supplied string into the user's error and the JSONL log.
+		//
+		// Layout detection is skipped with it, and loses nothing: a value
+		// carrying the MST element always formats to something other than
+		// itself, because the element emits the probe's zone name in place of
+		// the three characters "MST", so the detection below could never have
+		// fired for it.
+		return "", false
 	}
 
 	if layoutProbeTime.Format(value) == value {
 		found.addf("%s is not a Go time layout: %q contains no time reference elements "+
 			"and would render the same text every day; use the reference date, "+
-			"for example 2006-01-02 for the date and 15:04 for the time", key, value)
+			"for example 2006-01-02 for the date and 15:04 for the time", key, elide(value))
+	}
+
+	return now.Format(value), true
+}
+
+// zoneNameProbeA and zoneNameProbeB are one instant read twice, differing in
+// nothing but the name of the zone it is read in.
+var (
+	zoneNameProbeA = layoutProbeTime.In(time.FixedZone("AAA", 0))
+	zoneNameProbeB = layoutProbeTime.In(time.FixedZone("BBB", 0))
+)
+
+// rendersZoneName reports whether a layout emits the zone abbreviation.
+//
+// That element is refused in both format keys because it is the one element
+// whose output is neither the document's text nor a digit: it copies the zone
+// abbreviation through verbatim, and that string is outside the trust boundary.
+// Go loads an arbitrary TZif when $TZ is an absolute path and places no
+// character constraint on the abbreviation it finds there, so a crafted file
+// turns the entirely contract-legal "2006-01-02MST.md" into an escape from the
+// vault, or defeats FR-048's one-entry-one-line promise with a newline.
+//
+// Refusing the element, rather than inspecting what it happens to render right
+// now, is the only rule that holds. A Location is not a zone: it holds
+// arbitrarily many, and picks one per instant. America/New_York — an ordinary
+// zone, no crafted file — renders "2026-01-15EST.md" in January and
+// "2026-07-15EDT.md" in July through one Location. So a check that formatted an
+// instant and approved the result would be approving one of the zones a
+// Location can produce, while the write happens at another instant with another
+// zone. A hostile TZif can carry a POSIX footer giving it recurring transitions,
+// which makes the attacker, not the validator, the one who chooses how many
+// instants would have had to be sampled.
+//
+// The comparison is the detection, so that the question is answered by Go's own
+// formatter rather than by a second implementation of its layout grammar. The
+// two probes are the same instant at the same offset, so the abbreviation is the
+// only thing that can differ between the outputs; they differ exactly when the
+// layout contains the element.
+//
+// strings.Contains(value, "MST") would be wrong, and in the surprising
+// direction. Go's scanner consumes a layout left to right, so the M in
+// "03:04PMST.md" is taken by the PM element and "ST" is ordinary literal text —
+// a substring test would reject that safe layout. There is nothing to miss in
+// the other direction, because the grammar has no literal "MST": any MST the
+// scanner reaches at a chunk boundary *is* the element, so "2006-MST-01.md",
+// which reads exactly like a user typing the three letters on purpose, formats
+// to "2026-UTC-09.md". A user cannot ask for those characters literally in the
+// first place, so refusing the element takes nothing away from them.
+func rendersZoneName(layout string) bool {
+	return zoneNameProbeA.Format(layout) != zoneNameProbeB.Format(layout)
+}
+
+// messageValueRunes is how much of a layout or of its rendering a problem
+// message quotes.
+const messageValueRunes = 120
+
+// elide bounds a document value before it is interpolated into a problem
+// message.
+//
+// Both values these messages quote — the layout and what it renders — come
+// straight from the settings file and have no length rule of their own, and the
+// message multiplies them: one problem interpolates both, and a document can
+// trip several problems at once. FR-058 puts the result in front of the user,
+// where the GUI has a small fixed window to render it in, and FR-064 puts it in
+// a JSONL log line, where a multi-megabyte field is charged against rotation
+// thresholds measured in MiB. Without a bound a 155-byte layout produced a
+// 50 MB error.
+//
+// The budget is counted in runes and cut on a rune boundary because the result
+// is about to be %q-quoted: slicing bytes could split a multi-byte rune and put
+// U+FFFD in a message whose whole job is to show the user what they typed.
+// 120 is chosen to be several times any real date layout, so an honest document
+// is never elided and the elision is itself a signal.
+//
+// This bounds the *message* only. Whether the keys should carry a length rule
+// of their own — a rendered name over NAME_MAX fails at the write, not here —
+// is a separate question and is deliberately not answered by this function.
+func elide(value string) string {
+	// Fast path on bytes: a rune count can never exceed the byte count, so a
+	// value this short is under budget without decoding it.
+	if len(value) <= messageValueRunes {
+		return value
+	}
+
+	runes := []rune(value)
+	if len(runes) <= messageValueRunes {
+		return value
+	}
+
+	return string(runes[:messageValueRunes]) + "…"
+}
+
+// validateRenderedFilename rejects a filename layout that renders something
+// other than a plain name.
+//
+// Neither existing rule constrains this. The layout check asks only whether the
+// string is a layout, and the .md suffix check is satisfied by any string
+// ending in those three characters — a traversal prefix included. The gap
+// matters because data-model.md fixes the composition as
+// filepath.Join(daily_note_dir, now.Format(filename_format)), so every
+// character the layout renders lands in the path:
+//
+//   - "2006/01/02.md" is a plausible typo for a nested date hierarchy, and it
+//     is the reason this check cannot live in the sink. It renders
+//     "2026/09/03.md", and the sink opens its target with O_APPEND|O_WRONLY|
+//     O_CREATE and no MkdirAll, so the subdirectory is never created and that
+//     destination fails with ENOENT every day until someone edits the file.
+//   - "../../../../etc/cron.d/2006-01-02.md" renders an escape from the vault.
+//     The sink appends with the user's privileges, so accepting it turns a
+//     settings file into an append-anywhere primitive.
+//   - A NUL truncates the path at the syscall boundary, and any other control
+//     character produces a name that cannot be typed back or read out of the
+//     error messages and log lines this value later appears in.
+//
+// FR-055 and FR-058 want every settings problem surfaced before any sink
+// starts, and validation is the only moment at which the user is still looking
+// at the file they typed the layout into — so the guard belongs here rather
+// than at the point of the first failed write.
+func validateRenderedFilename(found *problems, key, value, rendered string) {
+	// A ".." path *element* can only be the whole rendered name once every
+	// separator is refused: anything longer needs a separator to make ".." an
+	// element, and that separator is rejected on the same line. A leading
+	// separator falls out of the same rule.
+	if strings.ContainsAny(rendered, pathSeparators) || rendered == ".." {
+		found.addf("%s must render a plain filename, but %q renders %q; the rendered value is "+
+			"joined onto sink.obsidian.daily_note_dir, so a path separator or a .. element "+
+			"would write into a directory the sink never creates or outside the vault entirely",
+			key, elide(value), elide(rendered))
+	}
+
+	// Reported through %q so the message stays readable and stays on one line:
+	// writing the offending character out raw would put a NUL or a newline into
+	// the user-facing error and into the log line that records it.
+	//
+	// This runs even when the separator rule already fired, because the two are
+	// separate defects with separate fixes; the loop stops at the first control
+	// character because naming every one of them would say nothing more.
+	for _, r := range rendered {
+		if unicode.IsControl(r) {
+			found.addf("%s must not render control characters, but %q renders %q, "+
+				"which contains U+%04X", key, elide(value), elide(rendered), r)
+
+			break
+		}
+	}
+}
+
+// validateRenderedTimePrefix rejects a time layout that renders a line break.
+//
+// FR-048 requires one entry to be exactly one physical UTF-8 line, and FR-047's
+// <br> normalization applies to the message body only — nothing downstream
+// touches the time prefix. So a layout of "15:04\n" splits every entry across
+// two physical lines with nothing to rejoin them, corrupting the note silently
+// and identically on every later post. Only CR and LF are refused: any other
+// control character in a time prefix is ugly, but it does not break the one
+// structural promise the note format makes.
+func validateRenderedTimePrefix(found *problems, key, value, rendered string) {
+	if strings.ContainsAny(rendered, "\r\n") {
+		found.addf("%s must render a single line, but %q renders %q; a daily-note entry is "+
+			"exactly one physical line and nothing rejoins a time prefix that was split",
+			key, elide(value), elide(rendered))
 	}
 }

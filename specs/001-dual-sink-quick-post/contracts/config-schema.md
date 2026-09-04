@@ -49,9 +49,30 @@ unformatted rescue.
 |---|---|---|---|
 | `enabled` | bool | `false` | — |
 | `daily_note_dir` | string | — | Required when enabled; absolute path |
-| `filename_format` | string | `"2006-01-02.md"` | Go `time.Format` layout, includes `.md` |
-| `time_format` | string | `"15:04"` | Go `time.Format` layout |
+| `filename_format` | string | `"2006-01-02.md"` | Go `time.Format` layout, includes `.md`. Must not contain the `MST` zone-name element (see below). Must **render** a plain filename: no `/` or `\` (both, on every platform), no `..` element, no control character — it is joined onto `daily_note_dir`. |
+| `time_format` | string | `"15:04"` | Go `time.Format` layout. Must not contain the `MST` zone-name element (see below). Must **render** a single line: no CR or LF (FR-048). |
 | `create_if_missing` | bool | `true` | Governs FR-046 |
+
+Both format keys reject Go's `MST` zone-name element. It is the only reference element whose output
+is neither the document's own text nor a digit: it copies the zone abbreviation through verbatim, and
+that string comes from the environment — `$TZ` may name an arbitrary TZif file and nothing constrains
+the abbreviation inside it, so `"2006-01-02MST.md"` can render a path traversal and `"15:04 MST"` can
+render a line break.
+
+Rejecting the element is the rule, rather than inspecting what it renders, because a fixed `Location`
+does not imply a fixed zone: one `Location` selects among arbitrarily many zones by instant
+(`America/New_York` renders `EST` in January and `EDT` in July), so no fixed number of sampled
+instants is sound — the transition schedule is an input, not a constant. With the element refused,
+every remaining element renders from digits, Go's English month and day names, and `` +-,.: ``, so the
+rendered value is instant-independent and one rendering decides the rules above.
+
+The numeric offsets — `Z0700`, `Z07:00`, `Z07`, `Z070000`, `Z07:00:00`, `-0700`, `-07:00`, `-07`,
+`-070000`, `-07:00:00` — remain accepted and are the supported way to put the zone in a name. Note
+that Go's layout grammar has no literal `MST`: any `MST` its scanner reaches at a chunk boundary is
+the element, so this restriction removes nothing a user could otherwise have expressed.
+
+Problem messages quote the layout and its rendering elided to a fixed rune budget, so that a large
+document cannot inflate the FR-058 message or the FR-064 log line.
 
 ### `[posting]`
 

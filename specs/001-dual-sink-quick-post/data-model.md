@@ -95,8 +95,16 @@ are normative (FR-054). See [contracts/config-schema.md](./contracts/config-sche
 full key list, types, defaults, and per-key validation rules.
 
 **Load sequence**: resolve path → read → strict-decode → apply defaults → resolve the credential
-from the environment → validate → **all-sinks-disabled check** (FR-018). Any failure aborts before
-a sink is constructed (FR-058). Validation accumulates every problem and reports them together.
+from the environment → validate. Any failure aborts before a sink is constructed (FR-058).
+Validation accumulates every problem and reports them together.
+
+FR-018's **all-sinks-disabled check** is deliberately *not* part of `config.Load`. A document with
+every sink disabled is a valid document, so `Load` accepts it; the check is a startup rule each
+front door applies before any post is attempted — T081 for the CLI, spanning
+`internal/config/validate.go` and `internal/cli/cli.go`, and T082 for the GUI, whose startup-error
+window is where it surfaces (FR-030). T083 covers only routing a load or validation failure to the
+front door that was used, not applying this rule. Sink construction (T036) and main wiring (T039)
+therefore cannot assume `Load` already enforced it.
 
 **Credential** (FR-042, FR-043, FR-069): held in a dedicated `Secret` type whose `String()`,
 `GoString()`, `MarshalJSON()`, and `slog.LogValue()` all return a redaction marker. The real value
