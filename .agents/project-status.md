@@ -14,7 +14,7 @@ independently, from either a CLI or a GUI front door, through one shared posting
 per PR, driven by the `run-batch-cycle` skill.
 
 - Phase 1 Setup — complete (Batch 1, `0a00212`, PR #93)
-- Phase 2 Foundational — **2 of 4 concerns complete** (posting core contracts, settings)
+- Phase 2 Foundational — **3 of 4 concerns complete** (posting core contracts, settings, diagnostics); the orchestrator remains
 - Phases 3-9 (six user stories, polish) — not started
 
 ## Completed
@@ -29,7 +29,14 @@ per PR, driven by the `run-batch-cycle` skill.
 
 ## In progress
 
-Nothing. PR #100 is merged; no work is mid-flight.
+**Batch 4 — Logging foundation.** PR #106, branch `sgykfjsm/batch-4-logging`, open and reviewed
+`passed-with-notes` after one fix cycle. T021–T024 complete (issues #22–#25). Adds
+`internal/logging`: the twelve stable event names as typed `Event` constants with a test that scans
+the package's own source so an unregistered addition cannot pass silently, and the `slog`
+JSON-handler logger. 100.0% statement coverage. No new dependency — `slog` is stdlib.
+
+The PR also carries three `.agents` bookkeeping commits that had no PR of their own (the Batch 3
+merge record, the review-follow-up filing record, and a stale-state correction).
 
 ## Review follow-ups
 
@@ -48,7 +55,9 @@ None blocking. Two items are time-sensitive rather than blocking:
 
 ## Next best action
 
-Run `run-batch-cycle` for **Batch 4 — Logging foundation** (T021-T024, issues #22-#25).
+Merge PR #106, then run `run-batch-cycle` for **Batch 5 — Orchestrator** (T025–T026, issues
+#26–#27). Batch 5 pins `oklog/ulid/v2` and must honour issue #98's settled `Targeter` decision
+while the code is being written, not afterwards.
 
 ## Important decisions
 
@@ -63,6 +72,9 @@ Run `run-batch-cycle` for **Batch 4 — Logging foundation** (T021-T024, issues 
 | 7 | `Load` never renders the settings document: go-toml's `DecodeError.String()` echoes context from the enclosing table header, reproducing `bot_token` for any defect in `[sink.telegram]`. Position and key path only. | `internal/config/load.go`, PR #100 |
 | 8 | The two Obsidian format keys are validated by what they **render**, and Go's `MST` element is rejected so the rendering is zone-independent. Sampling instants cannot work: a `Location` is not a zone, and a hostile TZif makes the transition schedule the attacker's. | `internal/config/validate.go`, `contracts/config-schema.md`, PR #100 |
 | 9 | FR-018's all-sinks-disabled check stays out of `config.Load` — a front-door rule (T081 CLI, T082 GUI). `data-model.md` and `plan.md` amended. | `data-model.md`, `plan.md`, PR #100 |
+| 10 | The logging type with no logging methods: `Logger.Post(messageID)` returns the only type that can emit. `message_id` is contractually on every record, and an attribute callers are asked to remember is one they forget — requiring it to *construct* the emitter makes the omission inexpressible. The event name travels in slog's message slot for the same reason: slog always emits a message, so the field cannot go missing. | `internal/logging/logger.go`, PR #106 |
+| 11 | `Open` returns no error and no `*Degradation`. FR-076 requires a diagnostics failure to change nothing about the post, and an error return invites the caller that treats it as fatal or holds a nil `*Logger`; a second `*Degradation` return invited emitting FR-076's single warning twice. A discarding logger is still a logger, and `Degraded()` is the one source of truth — it also covers a write that fails after a successful open. | `internal/logging/logger.go`, PR #106 |
+| 12 | `Open` refuses a non-regular file at the log path before opening it. `os.OpenFile` on a FIFO blocks inside `open(2)` until a reader attaches, so a named pipe at the log path stopped the post dead — no degradation, no warning, nothing. `os.Stat` not `Lstat`, so a symlink to a regular file still works. | `internal/logging/logger.go`, PR #106 |
 
 ## Touched files
 
@@ -72,5 +84,7 @@ Run `run-batch-cycle` for **Batch 4 — Logging foundation** (T021-T024, issues 
 - `go.mod`, `go.sum` — go-toml/v2@v2.4.3 as a direct requirement
 - `specs/001-dual-sink-quick-post/` — `tasks.md` (T011-T020 complete), and amendments to
   `contracts/config-schema.md`, `data-model.md`, `plan.md`
+- `internal/logging/` — `events.go`, `logger.go`, their tests, `logger_unix_test.go` (the FIFO
+  case, build-tagged `unix`), and `export_test.go`
 - `internal/post/result.go` — one comment corrected
 - `.specify/integrations/claude.manifest.json` — spec-kit installer timestamp, unrelated to the feature

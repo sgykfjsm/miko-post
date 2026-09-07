@@ -85,8 +85,11 @@ const (
 // Options configures Open.
 type Options struct {
 	// Path is the resolved log file path. Use ResolvePath to apply the
-	// "empty means the default" rule before filling this in. Ignored when
-	// Writer is set.
+	// "empty means the default" rule before filling this in.
+	//
+	// When Writer is set nothing here is opened, but the value is still
+	// recorded as the path a Degradation names — so a rotating writer's write
+	// failure can still say which file it was.
 	Path string
 
 	// Source is the front door opening the logger.
@@ -99,6 +102,19 @@ type Options struct {
 	// FR-074): rotation owns a file's whole lifecycle — deciding before every
 	// write whether to rename and reopen — so it cannot be layered onto a
 	// *os.File this package opened and holds. The tests use the same seam.
+	//
+	// Whatever plugs in here inherits two obligations this package discharges
+	// for the file it opens itself, because setting Writer means openLogFile
+	// never runs:
+	//
+	//  1. Refuse a non-regular file before opening it. os.OpenFile on a FIFO
+	//     blocks inside open(2) until a reader attaches, which stops the post
+	//     dead — no degradation, no warning, nothing. See openLogFile.
+	//  2. Open for appending and never truncate, so earlier runs survive
+	//     (FR-074).
+	//
+	// Neither is enforceable from here. A writer supplied to this field is
+	// trusted with them.
 	//
 	// A supplied Writer is not closed by Close; whoever supplied it owns it.
 	Writer io.Writer
@@ -131,7 +147,18 @@ type Degradation struct {
 // Exactly one, per run, is the requirement — so a front door calls
 // Logger.Degraded once when it renders results (T074) rather than warning at
 // each failed write, which on a full disk would be once per record.
+//
+// The empty-path form is a separate sentence rather than the same one with a
+// gap in it. Two declared situations reach it — no path could be resolved at
+// all, and the Options.Writer seam used without a Path (T068-T070) — and in
+// both of them the single-sentence form renders as "could not be written to :
+// reason", which reads as a truncated message rather than as the fact that
+// there is no path to name.
 func (d *Degradation) Warning() string {
+	if d.Path == "" {
+		return fmt.Sprintf("warning: diagnostics could not be written: %v", d.Err)
+	}
+
 	return fmt.Sprintf("warning: diagnostics could not be written to %s: %v", d.Path, d.Err)
 }
 
@@ -160,18 +187,13 @@ type Logger struct {
 	source  Source
 	path    string
 
-	// file is the log file when this package opened it, and nil when the
-	// caller supplied a Writer or when opening failed. Only a file this
-	// package opened is closed by Close.
-	file *os.File
-
 	// openErr is set when the directory or file could not be opened, in which
 	// case records are discarded. Reported by Degraded.
 	openErr error
 }
 
-// Open returns a Logger that is always usable, plus a Degradation when
-// diagnostics are not reaching disk (FR-075, FR-076).
+// Open returns a Logger that is always usable, even when diagnostics are not
+// reaching disk (FR-075, FR-076).
 //
 // There is deliberately no error return. FR-076 requires that a diagnostics
 // failure change nothing about the post — every enabled sink still runs, still
@@ -181,10 +203,17 @@ type Logger struct {
 // *Logger and panics on the first record. A logger that discards is a logger,
 // so there is no state in which the caller has nothing to log to.
 //
+// There is deliberately no *Degradation return either, although there was one.
+// It could only ever have been Degraded(), and having both invited the caller
+// that emits FR-076's single warning twice: once on what Open handed back, and
+// once from the Degraded() call that Warning's own comment asks for at render
+// time. Degraded() is the one source of truth, and it is also the only one that
+// can report a write that failed after a successful open.
+//
 // The directory is created first (FR-075). When either the directory or the
-// file cannot be opened, the returned Logger writes to nothing and the
-// Degradation names the path and the reason for the caller's single warning.
-func Open(opts Options) (*Logger, *Degradation) {
+// file cannot be opened, the returned Logger writes to nothing and Degraded
+// names the path and the reason for the caller's single warning.
+func Open(opts Options) *Logger {
 	source := opts.Source
 	if source != SourceCLI && source != SourceGUI {
 		source = sourceUnknown
@@ -196,12 +225,21 @@ func Open(opts Options) (*Logger, *Degradation) {
 		build:  buildAttrs(opts),
 	}
 
-	var target io.Writer
+	var (
+		target io.Writer
+		// owned is the destination Close is allowed to close, and stays nil
+		// for a supplied writer. It is held by safeWriter rather than by
+		// Logger so that closing and writing are the same critical section;
+		// see safeWriter.close.
+		owned io.Closer
+	)
 
 	switch {
 	case opts.Writer != nil:
 		// A supplied writer owns its own destination, so no directory is
-		// created and no path is recorded as failing.
+		// created and no file is opened. logger.path keeps whatever the caller
+		// resolved so a write failure can still name it — the path is not this
+		// package's to open here, which is not the same as being unknown.
 		target = opts.Writer
 	default:
 		file, err := openLogFile(opts.Path)
@@ -210,12 +248,12 @@ func Open(opts Options) (*Logger, *Degradation) {
 			// keeps working.
 			logger.openErr = err
 		} else {
-			logger.file = file
 			target = file
+			owned = file
 		}
 	}
 
-	logger.writer = &safeWriter{target: target}
+	logger.writer = &safeWriter{target: target, owned: owned}
 	logger.handler = slog.NewJSONHandler(logger.writer, &slog.HandlerOptions{
 		// Info is the floor because the API exposes only Info and Error; see
 		// PostLogger.
@@ -223,7 +261,7 @@ func Open(opts Options) (*Logger, *Degradation) {
 		ReplaceAttr: replaceAttr,
 	})
 
-	return logger, logger.Degraded()
+	return logger
 }
 
 // openLogFile creates the log directory when missing (FR-075) and opens the
@@ -245,12 +283,68 @@ func openLogFile(path string) (*os.File, error) {
 		return nil, fmt.Errorf("create the log directory: %w", err)
 	}
 
+	// Anything that is not a regular file is refused before it is opened.
+	//
+	// This is not defensive tidiness: os.OpenFile on a FIFO blocks inside
+	// open(2) until a reader attaches, so a named pipe at the log path made
+	// Open never return — no degradation, no warning, no records, and the post
+	// never ran at all. That is worse than the failure FR-076 was written for,
+	// because FR-076's whole promise is that diagnostics never block a post.
+	// Refusing here routes the same situation through the ordinary openErr
+	// path: one warning, and the post proceeds.
+	//
+	// Stat and not Lstat, deliberately. A symlink pointing at a regular file
+	// is a legitimate way to place the log on another volume, and Lstat would
+	// reject it. Following the link is safe on the same basis as the rest of
+	// this path: writing here already requires write access to a directory
+	// this package created 0o700 and the user chose.
+	//
+	// A TOCTOU window remains between this Stat and the OpenFile below —
+	// nothing stops the path becoming a FIFO in between. It is accepted for
+	// that same reason: exploiting it needs write access to that directory,
+	// and closing it properly would mean O_NONBLOCK, which is not portable and
+	// whose semantics on a regular file differ per platform. Stat closes the
+	// realistic trigger, which is a pipe someone left there or a path typed
+	// into logging.path by mistake.
+	//
+	// A Stat error is deliberately not turned into a degradation. fs.ErrNotExist
+	// is the ordinary create path, and for any other error — a permission
+	// problem on the directory, an I/O failure — the OpenFile below is about to
+	// produce the real one, which is better than a second-hand version of it
+	// invented here.
+	if info, statErr := os.Stat(path); statErr == nil && !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("the log path is %s, not a regular file", fileKind(info.Mode()))
+	}
+
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, logFilePerm)
 	if err != nil {
 		return nil, fmt.Errorf("open the log file: %w", err)
 	}
 
 	return file, nil
+}
+
+// fileKind names what is sitting at the log path, for the one warning FR-076
+// allows.
+//
+// The mode string is the fallback rather than the answer: "the log path is
+// p---------" tells a user nothing, and the point of naming it is that "the log
+// path is a named pipe" is immediately actionable.
+func fileKind(mode os.FileMode) string {
+	switch {
+	case mode.IsDir():
+		return "a directory"
+	case mode&os.ModeNamedPipe != 0:
+		return "a named pipe"
+	case mode&os.ModeSocket != 0:
+		return "a socket"
+	case mode&os.ModeCharDevice != 0:
+		return "a character device"
+	case mode&os.ModeDevice != 0:
+		return "a block device"
+	default:
+		return fmt.Sprintf("of an unsupported type (mode %s)", mode)
+	}
 }
 
 // buildAttrs returns the build-identity attributes for every record, omitting
@@ -332,12 +426,15 @@ func (l *Logger) Degraded() *Degradation {
 // to implement io.Closer: this package did not open it and cannot know whether
 // the caller is done with it. Closing a discarding logger is a no-op, so a
 // deferred Close is correct on whatever Open returned.
+//
+// Idempotent, because a deferred Close plus an explicit one is the ordinary
+// shape and the second call must not become an error a front door has to
+// special-case. The handle is released and dropped inside safeWriter's own
+// lock, which also means a straggler write racing Close is discarded rather
+// than latching a "file already closed" degradation — spending FR-076's one
+// warning on the shutdown itself would be worse than losing the record.
 func (l *Logger) Close() error {
-	if l.file == nil {
-		return nil
-	}
-
-	return l.file.Close()
+	return l.writer.close()
 }
 
 // PostLogger emits records for one post.
@@ -393,58 +490,144 @@ func (p *PostLogger) log(level slog.Level, event Event, attrs []slog.Attr) {
 // that loses the less important value of the two.
 //
 // A collision is a bug at the call site; the emitting tasks build their
-// attributes from the vocabulary above. Only the top level is checked, because
-// only the top level is where these keys mean anything — a "level" key inside
-// a group is a different field.
+// attributes from the vocabulary above.
+//
+// A *named* group is not traversed, because a key inside one is a different
+// field: "level" inside slog.Group("upstream", …) is upstream's level, it lands
+// in the record as upstream.level, and rewriting or dropping it would silently
+// destroy a caller's data. An *empty-key* group is traversed, because slog does
+// not open a group for an empty key — its members are emitted at the top level,
+// where the record's own keys live, and ReplaceAttr sees len(groups) == 0 for
+// each of them. Without recursion, slog.Group("", slog.String("event", …))
+// walked straight past a filter that only inspects attr.Key and put a second
+// event key in the record. The value is resolved first so the same shape
+// reached through a LogValuer — slog.Any("", v) where v.LogValue() returns a
+// group, which is exactly what post.SinkResult.LogValue returns — is visible
+// here rather than only after the handler expands it.
+//
+// The recursion is the whole chain rather than one level: nested empty-key
+// groups all inline to the top level too.
 //
 // The common case allocates nothing: attrs is returned as it came unless a
-// collision is actually present.
+// reserved key or an empty key is actually present. An empty key alone is
+// enough to pay for the copy because that is the shape whose contents have to
+// be examined, and it does not occur in the attributes the emitting tasks
+// build.
 func reserved(attrs []slog.Attr) []slog.Attr {
-	collision := false
+	suspect := false
 
 	for _, attr := range attrs {
-		if isReservedKey(attr.Key) {
-			collision = true
+		if isReservedKey(attr.Key) || attr.Key == "" {
+			suspect = true
 
 			break
 		}
 	}
 
-	if !collision {
+	if !suspect {
 		return attrs
 	}
 
 	kept := make([]slog.Attr, 0, len(attrs))
 
 	for _, attr := range attrs {
-		if !isReservedKey(attr.Key) {
-			kept = append(kept, attr)
+		if isReservedKey(attr.Key) {
+			continue
 		}
+
+		if attr.Key == "" {
+			// Resolved once, and the resolved value is what is kept on both
+			// arms below.
+			//
+			// Keeping the original attr on the non-group arm was a hole in
+			// this filter rather than an efficiency: the handler would resolve
+			// it a second time, so a LogValuer that answers differently on the
+			// second call could return a plain value here — passing the group
+			// check — and an empty-key group full of forged identity keys to
+			// the handler. That is the whole defect this recursion exists to
+			// stop, reached through the one attribute the recursion did not
+			// keep hold of. Resolving once and forwarding what we resolved
+			// means the handler renders the value this filter actually
+			// inspected, so there is no second answer to differ.
+			//
+			// It also stops a caller's LogValue being invoked twice per
+			// record, which for a valuer with a side effect or a cost was
+			// wrong on its own.
+			value := attr.Value.Resolve()
+
+			if value.Kind() == slog.KindGroup {
+				// Re-wrapped with the empty key it came with, so it still
+				// inlines exactly where it would have; only its members
+				// changed.
+				kept = append(kept, slog.Attr{Value: slog.GroupValue(reserved(value.Group())...)})
+
+				continue
+			}
+
+			kept = append(kept, slog.Attr{Value: value})
+
+			continue
+		}
+
+		kept = append(kept, attr)
 	}
 
 	return kept
 }
 
-// isReservedKey reports whether key is one this package writes itself.
+// isReservedKey reports whether key would collide with one of the record's own.
+//
+// Two name sets belong here, and only "level" is in both. The first is what
+// this package writes — the keys above, which are what a consumer greps for.
+// The second is what replaceAttr renames *from*: it manufactures ts out of
+// slog.TimeKey and event out of slog.MessageKey, so an attribute keyed "time"
+// or "msg" is not merely a near miss, it is renamed *into* an identity key
+// after passing the filter. "msg" is one character from the contract's own
+// message field and is the habitual slog spelling, so a call site will reach
+// for it.
+//
+// Two switch statements rather than one case list, because keyLevel and
+// slog.LevelKey are both "level" and a single switch carrying the same constant
+// twice does not compile. Both are named anyway: the sets are separate reasons,
+// so the next key added to either one has an obvious home, and slog's constants
+// are used rather than "time"/"msg" literals so a toolchain that renamed them
+// would move this filter with them.
 func isReservedKey(key string) bool {
+	// What this package writes.
 	switch key {
 	case keyTimestamp, keyLevel, keyEvent, keySource, keyMessageID,
 		keyAppVersion, keyGitCommit:
 		return true
-	default:
-		return false
 	}
+
+	// What replaceAttr renames from.
+	switch key {
+	case slog.TimeKey, slog.LevelKey, slog.MessageKey:
+		return true
+	}
+
+	return false
 }
 
 // replaceAttr renames slog's three built-in keys to the contract's names and
 // lowercases the level (FR-066, contracts/log-events.md).
 //
 // The timestamp keeps its slog.Time value rather than being reformatted here,
-// so the handler's own RFC 3339 rendering applies: a numeric zone offset from
-// the local zone, with millisecond precision. Whole seconds — as the contract's
-// illustrative record shows — would be valid RFC 3339 too, but two sinks in one
-// post routinely complete inside the same second, and reading a post's trace in
-// order is most of what the log is for.
+// so the handler's own rendering applies: a numeric offset from the local zone,
+// and sub-second precision, which is what matters — two sinks in one post
+// routinely complete inside the same second, and reading a post's trace in
+// order is most of what the log is for. Whole seconds, as the contract's
+// illustrative record shows, would be valid RFC 3339 too but would not order.
+//
+// The exact shape of the fractional part is the JSON handler's, not this
+// package's, and it is worth knowing precisely because it is easy to state
+// wrongly: slog's JSON handler formats with time.RFC3339Nano, so the fraction
+// carries whatever the clock supplied (microseconds in practice here, not
+// milliseconds — only slog's *text* handler truncates to milliseconds), and
+// RFC3339Nano strips trailing zeros, so the fraction is variable-width and
+// absent altogether on a whole second. Every one of those forms is a valid
+// RFC 3339 timestamp, which is what contracts/log-events.md asks for; a
+// consumer must parse the field rather than slice it.
 //
 // The groups guard matters: ReplaceAttr is called for attributes inside groups
 // as well, and SinkResult.LogValue emits a group carrying its own "reason" and
@@ -492,11 +675,17 @@ func replaceAttr(groups []string, a slog.Attr) slog.Attr {
 // The mutex is not redundant with slog's. slog's JSON handler holds its own
 // lock across the write, so Write is already serialised against itself — but
 // firstErr is called from the front door while sinks are still posting, and
-// that read races the write without this.
+// that read races the write without this. Close is in the same critical
+// section for the same reason.
 type safeWriter struct {
 	mu     sync.Mutex
 	target io.Writer
 	err    error
+
+	// owned is the destination this package opened and may close, and is nil
+	// when the caller supplied the writer. Cleared by close, which is what
+	// makes Close idempotent.
+	owned io.Closer
 }
 
 // Write forwards p and always reports it as fully written.
@@ -508,8 +697,41 @@ func (s *safeWriter) Write(p []byte) (int, error) {
 		return len(p), nil
 	}
 
-	if _, err := s.target.Write(p); err != nil && s.err == nil {
+	n, err := s.target.Write(p)
+
+	// A short count with no error is treated as a failure. io.Writer forbids
+	// it, but a wrapper that returns one anyway would otherwise be completely
+	// silent — and it is not a partial success: slog hands this method one
+	// whole record, trailing newline included, in a single Write, so any
+	// n < len(p) ends the line inside the JSON object.
+	if err == nil && n < len(p) {
+		err = fmt.Errorf("wrote %d of %d bytes", n, len(p))
+	}
+
+	if err != nil && s.err == nil {
 		s.err = err
+	}
+
+	if 0 < n && n < len(p) {
+		// Best effort: terminate the truncated line so the *next* record still
+		// decodes on its own. Without this the next record is appended onto the
+		// fragment and one unreadable line costs two records instead of one,
+		// which is what FR-064's per-line guarantee is there to bound.
+		//
+		// "Best effort" is the whole claim, and the bound holds only when the
+		// writer can accept this one byte. A writer that short-writes *every*
+		// call returns 0 for a one-byte write too, so the newline never lands
+		// and every later record joins the same fragment — N records in one
+		// unreadable line rather than two. It is not looped, because a writer
+		// that always returns 0 would spin here, and spinning inside a log
+		// write is worse than a merged line: FR-076's first duty is not to
+		// block the post. Such a writer violates io.Writer either way, and the
+		// latched error above still raises the one warning.
+		//
+		// The result is deliberately discarded. This is a repair, not a record;
+		// if it fails, the cause is already the error kept above, and letting it
+		// displace that would replace a real reason with a symptom.
+		_, _ = s.target.Write([]byte{'\n'})
 	}
 
 	return len(p), nil
@@ -521,4 +743,26 @@ func (s *safeWriter) firstErr() error {
 	defer s.mu.Unlock()
 
 	return s.err
+}
+
+// close releases an owned destination once, and does nothing on every later
+// call or for a writer this package did not open.
+//
+// target is cleared along with the handle so a write arriving after Close —
+// a straggler goroutine, a deferred emit — is discarded like any other write
+// to a logger with no destination, rather than failing against a closed file
+// and latching a degradation that describes the shutdown instead of a problem.
+func (s *safeWriter) close() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.owned == nil {
+		return nil
+	}
+
+	owned := s.owned
+	s.owned = nil
+	s.target = nil
+
+	return owned.Close()
 }

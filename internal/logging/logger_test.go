@@ -31,8 +31,8 @@ func newBufferLogger(t *testing.T, opts logging.Options) (*logging.Logger, *byte
 	buffer := &bytes.Buffer{}
 	opts.Writer = buffer
 
-	logger, degraded := logging.Open(opts)
-	if degraded != nil {
+	logger := logging.Open(opts)
+	if degraded := logger.Degraded(); degraded != nil {
 		t.Fatalf("Open with a supplied writer reported degradation: %v", degraded.Err)
 	}
 
@@ -373,6 +373,301 @@ func TestReservedKeysCannotBeShadowed(t *testing.T) {
 	}
 }
 
+// ownedKeys are the record keys this package writes. A caller attribute must
+// not be able to put a second copy of any of them into a record, in any shape.
+var ownedKeys = []string{"ts", "level", "event", "source", "message_id", "app_version", "git_commit"}
+
+// forgedArgs are attributes that each try to shadow one owned key, plus one
+// legitimate attribute that must survive.
+//
+// "time" and "msg" are in the list because they are not near misses: the
+// handler manufactures ts out of slog.TimeKey and event out of slog.MessageKey,
+// so an attribute under either name is *renamed into* an identity key. "msg" in
+// particular is one character from the contract's own message field and is the
+// habitual slog spelling, so a call site will reach for it.
+//
+// Returned as []any because slog.Group takes args that way; forgedAttrs is the
+// same list for the call sites that need []slog.Attr.
+func forgedArgs() []any {
+	return []any{
+		slog.String("ts", "FORGED-TS"),
+		slog.String("level", "FORGED-LEVEL"),
+		slog.String("event", "FORGED-EVENT"),
+		slog.String("source", "FORGED-SOURCE"),
+		slog.String("message_id", "FORGED-ID"),
+		slog.String("app_version", "FORGED-VERSION"),
+		slog.String("git_commit", "FORGED-COMMIT"),
+		slog.String("time", "FORGED-TS"),
+		slog.String("msg", "FORGED-EVENT"),
+		slog.String("sink", "obsidian"),
+	}
+}
+
+func forgedAttrs() []slog.Attr {
+	args := forgedArgs()
+	attrs := make([]slog.Attr, 0, len(args))
+
+	for _, arg := range args {
+		attrs = append(attrs, arg.(slog.Attr))
+	}
+
+	return attrs
+}
+
+// forgedValuer resolves to an empty-key group, which is the shape a LogValuer
+// reaches the handler as. post.SinkResult.LogValue returns a group already, so
+// this is not a hypothetical construction.
+type forgedValuer struct{}
+
+func (forgedValuer) LogValue() slog.Value {
+	return slog.GroupValue(forgedAttrs()...)
+}
+
+// shiftingValuer resolves to a plain string the first time and to an empty-key
+// group of forged identity keys after that.
+//
+// It exists to pin one property: whatever this package resolves in order to
+// judge an attribute is what it must forward, so the handler cannot be shown a
+// different value than the filter inspected. Not safe to share between records
+// — each test that uses it constructs its own.
+type shiftingValuer struct {
+	resolved int
+}
+
+func (s *shiftingValuer) LogValue() slog.Value {
+	s.resolved++
+
+	if s.resolved == 1 {
+		return slog.StringValue("harmless")
+	}
+
+	return slog.GroupValue(forgedAttrs()...)
+}
+
+// TestNoAttributeShapeCanDuplicateAnOwnedKey covers the identity fields against
+// every nesting shape a caller attribute can arrive in.
+//
+// TestReservedKeysCannotBeShadowed above covers the flat shape. It is not
+// enough, because slog does not open a group for an *empty* key: the members of
+// slog.Group("", …) are emitted at the top level, and ReplaceAttr sees
+// len(groups) == 0 for each of them. A filter that inspects only attr.Key sees
+// one attribute named "" — not a reserved name — and passes the whole group,
+// putting a second event, level, source, message_id and ts into the record with
+// the forged values *last*, which is the copy most decoders keep.
+//
+// The same shape arrives through slog.Any("", v) when v.LogValue() returns a
+// group, so the value has to be resolved before it can be judged.
+func TestNoAttributeShapeCanDuplicateAnOwnedKey(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		attrs []slog.Attr
+	}{
+		{
+			name:  "flat attributes",
+			attrs: forgedAttrs(),
+		},
+		{
+			name:  "an empty-key group",
+			attrs: []slog.Attr{slog.Group("", forgedArgs()...)},
+		},
+		{
+			// A chain of empty-key groups all inlines to the top level, so one
+			// level of unwrapping is not enough.
+			name:  "nested empty-key groups",
+			attrs: []slog.Attr{slog.Group("", slog.Group("", forgedArgs()...))},
+		},
+		{
+			name:  "a LogValuer resolving to an empty-key group",
+			attrs: []slog.Attr{slog.Any("", forgedValuer{})},
+		},
+		{
+			// The shape that defeats resolving a value for the check and then
+			// forwarding the original attr. forgedValuer above answers the
+			// same way every time, so that mistake still passes it: the
+			// handler resolves a second time and gets the same group. This one
+			// answers differently, so the check sees a plain string and the
+			// handler sees a group full of forged identity keys.
+			//
+			// A LogValuer is documented as cheap and expected to be pure, so
+			// this is a call-site bug rather than an attack. It belongs here
+			// anyway: the filter's whole job is to keep the record's identity
+			// fields from depending on a call site being correct.
+			name:  "a LogValuer that answers differently the second time",
+			attrs: []slog.Attr{slog.Any("", &shiftingValuer{})},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			logger, buffer := newBufferLogger(t, logging.Options{
+				Source:     logging.SourceCLI,
+				AppVersion: "0.1.0",
+				GitCommit:  "abc1234",
+			})
+
+			logger.Post("real-id").Info(logging.EventMessageReceived, test.attrs...)
+
+			raw := buffer.Bytes()
+
+			records := decodeRecords(t, raw)
+			if len(records) != 1 {
+				t.Fatalf("got %d records, want 1", len(records))
+			}
+
+			// A decoded map cannot show a duplicate key, so the raw line is
+			// what the duplicate has to be ruled out against. Counting over
+			// the whole line is only sound because none of the shapes above
+			// produces a nested object: an owned key inside a *named* group is
+			// a different field and is required to survive, which
+			// TestANamedGroupIsNotTraversed covers.
+			for _, key := range ownedKeys {
+				if count := bytes.Count(raw, []byte(`"`+key+`":`)); count != 1 {
+					t.Errorf("key %q appears %d times in the record, want 1\nline: %s", key, count, raw)
+				}
+			}
+
+			want := map[string]string{
+				"ts":          "",
+				"level":       "info",
+				"event":       string(logging.EventMessageReceived),
+				"source":      string(logging.SourceCLI),
+				"message_id":  "real-id",
+				"app_version": "0.1.0",
+				"git_commit":  "abc1234",
+			}
+
+			for key, wantValue := range want {
+				got := requireString(t, records[0], key)
+				if wantValue != "" && got != wantValue {
+					t.Errorf("%s = %q, want %q", key, got, wantValue)
+				}
+			}
+		})
+	}
+}
+
+// TestAForgedAttributeIsDroppedRatherThanRenamed is the other half of the
+// filter: nothing forged survives anywhere in the record, and the legitimate
+// attribute travelling with it does.
+//
+// Separate from the test above because "appears once" and "holds the right
+// value" would both pass if the filter dropped the record's own key and kept
+// the caller's, and because a filter that simply discarded every attribute
+// would pass a duplicate-count assertion perfectly.
+func TestAForgedAttributeIsDroppedRatherThanRenamed(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		attrs []slog.Attr
+	}{
+		{name: "flat attributes", attrs: forgedAttrs()},
+		{name: "an empty-key group", attrs: []slog.Attr{slog.Group("", forgedArgs()...)}},
+		{
+			name:  "nested empty-key groups",
+			attrs: []slog.Attr{slog.Group("", slog.Group("", forgedArgs()...))},
+		},
+		{
+			name:  "a LogValuer resolving to an empty-key group",
+			attrs: []slog.Attr{slog.Any("", forgedValuer{})},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			logger, buffer := newBufferLogger(t, logging.Options{Source: logging.SourceCLI})
+			logger.Post("real-id").Info(logging.EventMessageReceived, test.attrs...)
+
+			raw := buffer.Bytes()
+
+			if bytes.Contains(raw, []byte("FORGED")) {
+				t.Errorf("a forged value reached the record: %s", raw)
+			}
+
+			records := decodeRecords(t, raw)
+			if len(records) != 1 {
+				t.Fatalf("got %d records, want 1", len(records))
+			}
+
+			if got := requireString(t, records[0], "sink"); got != "obsidian" {
+				t.Errorf("the legitimate attribute travelling with the forged ones was lost: %v", records[0])
+			}
+		})
+	}
+}
+
+// TestANamedGroupIsNotTraversed is the boundary of the filter above.
+//
+// An empty-key group is unwrapped because slog inlines its members where the
+// record's own keys live. A *named* group must not be, and neither must an
+// empty-key group nested inside one: those members inline into the named group,
+// so upstream.event is upstream's own field and dropping it would silently
+// destroy a caller's data to fix a collision that does not exist.
+//
+// This is what stops the fix for the empty-key case from being applied one
+// level too far.
+//
+// The named group deliberately travels alongside a reserved-key attribute, and
+// that detail is the test rather than incidental to it. The filter returns its
+// input untouched unless some attribute has a reserved or empty key, so a call
+// carrying only slog.Group("upstream", …) never enters the filtering loop at
+// all — the boundary would be enforced by that early return instead of by the
+// condition this test is named for, and a change that filtered *named* groups
+// too would leave the test passing while silently deleting the whole upstream
+// object. The reserved sibling is what makes the loop run.
+func TestANamedGroupIsNotTraversed(t *testing.T) {
+	t.Parallel()
+
+	logger, buffer := newBufferLogger(t, logging.Options{Source: logging.SourceCLI})
+
+	logger.Post("real-id").Error(logging.EventTelegramSendFailed,
+		// Dropped, and present so that the filtering loop is entered.
+		slog.String("event", "forged"),
+		slog.Group("upstream",
+			slog.Group("",
+				slog.String("event", "upstreams-own-event"),
+				slog.String("level", "upstreams-own-level"),
+				slog.String("message_id", "upstreams-own-id"),
+			),
+		),
+	)
+
+	records := decodeRecords(t, buffer.Bytes())
+	if len(records) != 1 {
+		t.Fatalf("got %d records, want 1", len(records))
+	}
+
+	// The record's own preamble is untouched.
+	if got := requireString(t, records[0], "event"); got != string(logging.EventTelegramSendFailed) {
+		t.Errorf("record event = %q, want %q", got, logging.EventTelegramSendFailed)
+	}
+
+	if got := requireString(t, records[0], "message_id"); got != "real-id" {
+		t.Errorf("record message_id = %q, want %q", got, "real-id")
+	}
+
+	group, ok := records[0]["upstream"].(map[string]any)
+	if !ok {
+		t.Fatalf("upstream is %T, want a nested object: %v", records[0]["upstream"], records[0])
+	}
+
+	for key, want := range map[string]string{
+		"event":      "upstreams-own-event",
+		"level":      "upstreams-own-level",
+		"message_id": "upstreams-own-id",
+	} {
+		if got := requireString(t, group, key); got != want {
+			t.Errorf("upstream.%s = %q, want %q; the filter reached into a named group", key, got, want)
+		}
+	}
+}
+
 // TestGroupedAttributesKeepTheirOwnKeys covers replaceAttr's group guard.
 //
 // ReplaceAttr is called for attributes nested inside groups as well as for the
@@ -539,8 +834,8 @@ func TestOpenCreatesTheLogDirectory(t *testing.T) {
 
 	path := filepath.Join(t.TempDir(), "state", "miko-post", "app.jsonl")
 
-	logger, degraded := logging.Open(logging.Options{Path: path, Source: logging.SourceCLI})
-	if degraded != nil {
+	logger := logging.Open(logging.Options{Path: path, Source: logging.SourceCLI})
+	if degraded := logger.Degraded(); degraded != nil {
 		t.Fatalf("Open reported degradation: %v", degraded.Err)
 	}
 
@@ -597,8 +892,8 @@ func TestOpenAppendsAndNeverTruncates(t *testing.T) {
 		t.Fatalf("seed the log: %v", err)
 	}
 
-	logger, degraded := logging.Open(logging.Options{Path: path, Source: logging.SourceCLI})
-	if degraded != nil {
+	logger := logging.Open(logging.Options{Path: path, Source: logging.SourceCLI})
+	if degraded := logger.Degraded(); degraded != nil {
 		t.Fatalf("Open reported degradation: %v", degraded.Err)
 	}
 
@@ -680,9 +975,11 @@ func TestOpenDegradesWhenTheLogCannotBeOpened(t *testing.T) {
 
 			path := test.build(t, t.TempDir())
 
-			logger, degraded := logging.Open(logging.Options{Path: path, Source: logging.SourceCLI})
+			logger := logging.Open(logging.Options{Path: path, Source: logging.SourceCLI})
+
+			degraded := logger.Degraded()
 			if degraded == nil {
-				t.Fatal("Open reported no degradation for a log it cannot write")
+				t.Fatal("Degraded reported nothing for a log that cannot be written")
 			}
 
 			if degraded.Err == nil {
@@ -694,7 +991,22 @@ func TestOpenDegradesWhenTheLogCannotBeOpened(t *testing.T) {
 			}
 
 			warning := degraded.Warning()
-			if path != "" && !strings.Contains(warning, path) {
+
+			// The no-path case gets its own expected wording rather than
+			// dropping the assertion. Guarding this check with `path != ""`
+			// made it disappear in exactly the case worth checking, and what
+			// it was hiding was "could not be written to : no log path was
+			// resolved" — a message with a hole where the path would be.
+			if path == "" {
+				const wantNoPath = "warning: diagnostics could not be written: "
+				if !strings.HasPrefix(warning, wantNoPath) {
+					t.Errorf("the no-path warning is %q, want it to start %q", warning, wantNoPath)
+				}
+
+				if strings.Contains(warning, "written to") {
+					t.Errorf("the warning still names a path it does not have: %q", warning)
+				}
+			} else if !strings.Contains(warning, path) {
 				t.Errorf("the warning does not name the log path: %q", warning)
 			}
 
@@ -754,12 +1066,12 @@ func TestAFailedWriteDegradesWithoutBlockingThePost(t *testing.T) {
 	first := errors.New("no space left on device")
 	writer := &failingWriter{allow: 1, err: first}
 
-	logger, degraded := logging.Open(logging.Options{
+	logger := logging.Open(logging.Options{
 		Source: logging.SourceCLI,
 		Writer: writer,
 	})
-	if degraded != nil {
-		t.Fatalf("Open reported degradation before any write failed: %v", degraded.Err)
+	if degraded := logger.Degraded(); degraded != nil {
+		t.Fatalf("Degraded is non-nil before any write failed: %v", degraded.Err)
 	}
 
 	post := logger.Post("id")
@@ -784,6 +1096,231 @@ func TestAFailedWriteDegradesWithoutBlockingThePost(t *testing.T) {
 	// to add and must not displace the original reason.
 	if !errors.Is(got.Err, first) {
 		t.Errorf("degradation reason = %v, want the first write failure %v", got.Err, first)
+	}
+}
+
+// shortWriter writes half of its first record and then behaves normally.
+//
+// The existing failingWriter returns (0, err), which loses a record cleanly.
+// This is the other half of io.Writer's failure space and the destructive one:
+// a partial write leaves a fragment on the line, and whatever is appended next
+// joins it.
+type shortWriter struct {
+	mu       sync.Mutex
+	written  bytes.Buffer
+	truncate bool
+	err      error
+}
+
+func (w *shortWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if w.truncate {
+		w.truncate = false
+
+		half := len(p) / 2
+		n, _ := w.written.Write(p[:half])
+
+		return n, w.err
+	}
+
+	return w.written.Write(p)
+}
+
+func (w *shortWriter) contents() string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	return w.written.String()
+}
+
+// TestAPartialWriteCostsOneRecordAndNotTwo covers the short-write case
+// (FR-064, FR-076).
+//
+// slog hands the writer one whole record, trailing newline included, in a
+// single Write, so a short count always truncates mid-object: that record is
+// lost whatever happens. What must not also be lost is the *next* one — with
+// the fragment left unterminated, the following record is appended onto it and
+// one failed write costs two unparseable records instead of one.
+// Both shapes of short write are covered. A writer returning (n, err) is the
+// filesystem case FR-076 names. A writer returning (n, nil) violates
+// io.Writer's contract, which is exactly why it has to be tested: nothing
+// downstream reports it, so if safeWriter did not treat a short count as a
+// failure in its own right, a wrapper with that bug would corrupt the line
+// stream in complete silence. The declared Options.Writer seam (T068-T070) is
+// where such a wrapper would come from.
+func TestAPartialWriteCostsOneRecordAndNotTwo(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		name string
+		err  error
+	}{
+		{name: "reported as an error", err: errors.New("no space left on device")},
+		{name: "reported as a success", err: nil},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			partialWriteCostsOneRecord(t, test.err)
+		})
+	}
+}
+
+func partialWriteCostsOneRecord(t *testing.T, writeErr error) {
+	t.Helper()
+
+	writer := &shortWriter{truncate: true, err: writeErr}
+
+	logger := logging.Open(logging.Options{Source: logging.SourceCLI, Writer: writer})
+
+	post := logger.Post("id")
+	post.Info(logging.EventMessageReceived)
+	post.Info(logging.EventObsidianAppendStarted)
+	post.Error(logging.EventRequestCompletedWithError)
+
+	if err := logger.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	// A short count is a failure in its own right, whether or not the writer
+	// admitted one, so the one warning FR-076 allows still gets emitted.
+	degraded := logger.Degraded()
+	if degraded == nil {
+		t.Fatal("Degraded is nil after a write that stored only half a record")
+	}
+
+	lines := strings.Split(strings.TrimSuffix(writer.contents(), "\n"), "\n")
+
+	// The truncated record is line one and is expected to be unreadable. Every
+	// later line must decode on its own.
+	if len(lines) != 3 {
+		t.Fatalf("got %d lines, want 3 (the truncated record, then two whole ones):\n%s",
+			len(lines), writer.contents())
+	}
+
+	var fragment map[string]any
+	if json.Unmarshal([]byte(lines[0]), &fragment) == nil {
+		t.Errorf("line 1 decoded; the test no longer exercises a truncated record: %s", lines[0])
+	}
+
+	wantEvents := []logging.Event{
+		logging.EventObsidianAppendStarted,
+		logging.EventRequestCompletedWithError,
+	}
+
+	for i, line := range lines[1:] {
+		var record map[string]any
+		if err := json.Unmarshal([]byte(line), &record); err != nil {
+			t.Errorf("line %d did not survive the truncated record before it: %v\nline: %s",
+				i+2, err, line)
+
+			continue
+		}
+
+		for _, key := range alwaysPresent {
+			requireString(t, record, key)
+		}
+
+		if got := requireString(t, record, "event"); got != string(wantEvents[i]) {
+			t.Errorf("line %d event = %q, want %q", i+2, got, wantEvents[i])
+		}
+	}
+}
+
+// TestDegradedIsSafeToReadWhileRecordsAreBeingWritten is what makes
+// safeWriter's mutex load-bearing (the -race gate in the constitution).
+//
+// Degraded's own comment promises it is safe to call while sinks are still
+// logging, and the mutex's comment says that is the reason it exists. Reading
+// Degraded after a WaitGroup has drained — as the test below does — orders the
+// read strictly after every write, so it would stay green with the lock
+// removed. The overlap has to be real, and the writes have to actually *fail*:
+// the first error is the only field Write ever stores, so a run in which every
+// write succeeds has nothing for the read to race.
+func TestDegradedIsSafeToReadWhileRecordsAreBeingWritten(t *testing.T) {
+	t.Parallel()
+
+	const (
+		posts          = 16
+		recordsPerPost = 8
+		succeedFirst   = 4
+	)
+
+	failure := errors.New("no space left on device")
+	logger := logging.Open(logging.Options{
+		Source: logging.SourceCLI,
+		Writer: &failingWriter{allow: succeedFirst, err: failure},
+	})
+
+	var (
+		emitting sync.WaitGroup
+		reading  sync.WaitGroup
+	)
+
+	for p := range posts {
+		emitting.Add(1)
+
+		go func(p int) {
+			defer emitting.Done()
+
+			post := logger.Post(fmt.Sprintf("post-%02d", p))
+
+			for r := range recordsPerPost {
+				post.Info(logging.EventTelegramSendStarted, slog.Int("seq", r))
+			}
+		}(p)
+	}
+
+	stop := make(chan struct{})
+
+	reading.Add(1)
+
+	go func() {
+		defer reading.Done()
+
+		// Once degraded, always degraded: the first error is kept and never
+		// cleared, so a nil after a non-nil would mean a torn read.
+		seen := false
+
+		for {
+			degraded := logger.Degraded()
+
+			switch {
+			case degraded != nil:
+				seen = true
+
+				if degraded.Err == nil {
+					t.Error("a degradation was reported with no reason")
+
+					return
+				}
+			case seen:
+				t.Error("Degraded went back to nil after reporting a failure")
+
+				return
+			}
+
+			select {
+			case <-stop:
+				return
+			default:
+			}
+		}
+	}()
+
+	emitting.Wait()
+	close(stop)
+	reading.Wait()
+
+	got := logger.Degraded()
+	if got == nil {
+		t.Fatal("Degraded is nil after every write past the first few failed")
+	}
+
+	if !errors.Is(got.Err, failure) {
+		t.Errorf("degradation reason = %v, want the first write failure %v", got.Err, failure)
 	}
 }
 
@@ -864,8 +1401,8 @@ func TestCloseLeavesASuppliedWriterAlone(t *testing.T) {
 
 	writer := &closeCountingWriter{}
 
-	logger, degraded := logging.Open(logging.Options{Source: logging.SourceCLI, Writer: writer})
-	if degraded != nil {
+	logger := logging.Open(logging.Options{Source: logging.SourceCLI, Writer: writer})
+	if degraded := logger.Degraded(); degraded != nil {
 		t.Fatalf("Open reported degradation: %v", degraded.Err)
 	}
 
@@ -879,10 +1416,68 @@ func TestCloseLeavesASuppliedWriterAlone(t *testing.T) {
 		t.Errorf("Close closed a writer it did not open (%d times)", writer.closes)
 	}
 
-	// Closing twice is what a deferred Close plus an explicit one produces, and
-	// must not turn into an error a front door has to special-case.
+	// A second Close must not reach the writer either. This half of the double
+	// Close is about ownership only; that Close is idempotent is asserted
+	// against a file-backed logger below, which is the path that can actually
+	// fail it.
 	if err := logger.Close(); err != nil {
 		t.Errorf("second Close: %v", err)
+	}
+
+	if writer.closes != 0 {
+		t.Errorf("a second Close closed a writer it did not open (%d times)", writer.closes)
+	}
+}
+
+// TestCloseIsIdempotentOnAFileBackedLogger covers the claim both Close doc
+// comments make, on the only path that can break it.
+//
+// A deferred Close plus an explicit one is the ordinary shape, and the second
+// call must not become an error a front door has to special-case. Asserting
+// this through Options.Writer — as the test above used to — cannot fail: with
+// no file to close, Close returns nil unconditionally for any implementation,
+// which is how a real "file already closed" on the second call survived full
+// statement coverage.
+func TestCloseIsIdempotentOnAFileBackedLogger(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "app.jsonl")
+
+	logger := logging.Open(logging.Options{Path: path, Source: logging.SourceCLI})
+	if degraded := logger.Degraded(); degraded != nil {
+		t.Fatalf("Open reported degradation: %v", degraded.Err)
+	}
+
+	logger.Post("id").Info(logging.EventMessageReceived)
+
+	if err := logger.Close(); err != nil {
+		t.Fatalf("first Close: %v", err)
+	}
+
+	for attempt := 2; attempt <= 3; attempt++ {
+		if err := logger.Close(); err != nil {
+			t.Errorf("Close attempt %d: %v", attempt, err)
+		}
+	}
+
+	// Idempotence must not have been bought by never closing at all: the
+	// record written before the first Close is on disk and complete.
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read the log: %v", err)
+	}
+
+	if records := decodeRecords(t, raw); len(records) != 1 {
+		t.Fatalf("got %d records in the file, want 1", len(records))
+	}
+
+	// A record emitted after Close is discarded, not reported. The handle is
+	// gone either way, and turning the shutdown into a degradation would spend
+	// FR-076's single warning on it instead of on a real problem.
+	logger.Post("late").Info(logging.EventRequestCompleted)
+
+	if got := logger.Degraded(); got != nil {
+		t.Errorf("a write after Close produced a degradation: %v", got.Err)
 	}
 }
 
@@ -922,12 +1517,100 @@ func TestResolvePath(t *testing.T) {
 		t.Fatalf("ResolvePath(\"\"): %v", err)
 	}
 
-	want, err := config.DefaultLogPath()
-	if err != nil {
-		t.Fatalf("config.DefaultLogPath: %v", err)
-	}
+	// A literal built from the environment this test sets, not a second call
+	// to config.DefaultLogPath. ResolvePath("") *is* a call to that function,
+	// so comparing the two asserted nothing: it passed for every possible
+	// value the resolver could return, including one that ignored
+	// XDG_STATE_HOME entirely, which is the seam the t.Setenv above exists to
+	// pin. config.DefaultLogPath owns whether this layout is right
+	// (paths_test.go); this owns that ResolvePath("") reaches it.
+	want := filepath.Join("/xdg", "state", "miko-post", "app.jsonl")
 
 	if got != want {
 		t.Errorf("ResolvePath(\"\") = %q, want the resolved default %q", got, want)
+	}
+}
+
+// TestFileKindNamesEveryRejectedType covers the phrases the one FR-076 warning
+// uses when something that is not a regular file sits at the log path.
+//
+// The point of naming the type is that "the log path is a named pipe" is
+// immediately actionable where a bare errno is not, so each branch has to
+// actually produce its phrase. Driven by mode rather than by real files: see
+// export_test.go.
+func TestFileKindNamesEveryRejectedType(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		mode os.FileMode
+		want string
+	}{
+		{name: "directory", mode: os.ModeDir | 0o755, want: "a directory"},
+		{name: "named pipe", mode: os.ModeNamedPipe | 0o600, want: "a named pipe"},
+		{name: "socket", mode: os.ModeSocket | 0o600, want: "a socket"},
+		// A character device carries ModeDevice too, so the ordering of the
+		// two cases in fileKind is what makes this come out as "character"
+		// rather than "block". Both are asserted so a reordering is visible.
+		{name: "character device", mode: os.ModeDevice | os.ModeCharDevice | 0o666, want: "a character device"},
+		{name: "block device", mode: os.ModeDevice | 0o660, want: "a block device"},
+		// Not a symlink: os.Stat follows links, so a symlink mode never
+		// reaches fileKind. This is the fallback arm, driven by the one
+		// mode that names no specific kind.
+		{name: "an irregular file", mode: os.ModeIrregular | 0o600, want: "unsupported type"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := logging.FileKind(test.mode)
+			if !strings.Contains(got, test.want) {
+				t.Errorf("FileKind(%s) = %q, want it to mention %q", test.mode, got, test.want)
+			}
+		})
+	}
+}
+
+// TestOpenDegradesOnAnUnwritableRegularFile keeps the OpenFile failure path
+// exercised.
+//
+// It used to be reached by the "log path is a directory" case, but the
+// non-regular-file check now rejects a directory before OpenFile is called, so
+// that test no longer proves anything about OpenFile's error handling. A
+// read-only log file is the realistic remaining route — and a plausible one,
+// since a user who wants to stop diagnostics being written may well chmod the
+// file rather than change the setting.
+func TestOpenDegradesOnAnUnwritableRegularFile(t *testing.T) {
+	t.Parallel()
+
+	if os.Geteuid() == 0 {
+		t.Skip("root bypasses the permission bits this test relies on")
+	}
+
+	path := filepath.Join(t.TempDir(), "app.jsonl")
+	if err := os.WriteFile(path, nil, 0o400); err != nil {
+		t.Fatalf("create the read-only log: %v", err)
+	}
+
+	logger := logging.Open(logging.Options{Path: path, Source: logging.SourceCLI})
+
+	degraded := logger.Degraded()
+	if degraded == nil {
+		t.Fatal("Open reported no degradation for a log file it cannot write")
+	}
+
+	// It must read as a failure to open the file, not as a failure to identify
+	// it: the non-regular-file check must have passed this through rather than
+	// claimed a read-only regular file is the wrong type.
+	if warning := degraded.Warning(); !strings.Contains(warning, "open the log file") {
+		t.Errorf("the warning does not attribute the failure to opening the file: %q", warning)
+	}
+
+	// FR-076 in full.
+	logger.Post("id").Error(logging.EventRequestCompletedWithError)
+
+	if err := logger.Close(); err != nil {
+		t.Errorf("Close on a degraded logger: %v", err)
 	}
 }
