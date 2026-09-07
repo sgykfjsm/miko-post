@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
+	"slices"
 	"sync"
 	"time"
 
@@ -114,7 +116,12 @@ func New(sinks []Sink, timeout time.Duration) *Service {
 	}
 
 	return &Service{
-		sinks:   sinks,
+		// Copied, so the caller keeping and reusing its slice cannot race a
+		// post in flight or swap in a sink this Service was never given. One
+		// clone at construction against a data race and an FR-016 hole —
+		// "disabled sinks are not invoked" is only true if the set cannot
+		// change underneath us.
+		sinks:   slices.Clone(sinks),
 		timeout: timeout,
 		newID:   generateID,
 	}
@@ -228,22 +235,38 @@ func (s *Service) Post(message Message) Outcome {
 // rather than hidden:
 //
 //   - The abandoned goroutine outlives the post. It is one goroutine per hung
-//     submission, it holds no lock the caller needs, and its send cannot block
-//     because the channel is buffered — so nothing the caller does depends on
-//     it ever finishing.
+//     submission, it holds no lock the caller needs, and its sends cannot block
+//     because both channels are buffered — so nothing the caller does depends
+//     on it ever finishing. Two honest caveats: it is not necessarily *parked*
+//     (a sink returning an error whose Unwrap cycles leaves it spinning inside
+//     errors.Is until the process exits), and nothing caps the count, so a
+//     long-lived GUI session posting repeatedly at a dead mount accumulates one
+//     per attempt along with one retained copy of each message. Measured at
+//     ~0.7 KiB per abandoned sink, all of it reclaimed once the sink unblocks.
 //   - A write that the sink completes after we stopped waiting still lands. The
 //     user is told the sink timed out and a note may appear in the vault
 //     afterwards. Reporting a timeout for work that was abandoned is the honest
 //     description of what this process knows; the alternative was a front door
 //     that hangs with no report at all.
 func (s *Service) run(sink Sink, message Message) SinkResult {
-	name := s.nameOf(sink)
+	// Before anything the sink can influence, so a slow Name() is counted in
+	// Duration rather than excluded from it.
 	started := time.Now()
 
-	// Buffered, so the abandoned goroutine's send always completes and the
-	// goroutine can exit. An unbuffered channel would park it forever on a
+	// Both buffered, so the abandoned goroutine's sends always complete and
+	// the goroutine can exit. An unbuffered channel would park it forever on a
 	// receive nobody is going to make.
-	done := make(chan SinkResult, 1)
+	//
+	// named exists so that abandoning a sink does not also mean losing its
+	// name. Name() is resolved inside the goroutine — it is sink code and has
+	// to be bounded like the rest — but the abandonment branch still wants it,
+	// and the case the whole backstop was built for is a sink whose Name()
+	// works fine and whose Send() hangs. Publishing it as soon as it is known
+	// keeps that report attributable.
+	var (
+		named = make(chan string, 1)
+		done  = make(chan SinkResult, 1)
+	)
 
 	go func() {
 		// The send is deferred, and the value it sends is seeded with the
@@ -254,9 +277,12 @@ func (s *Service) run(sink Sink, message Message) SinkResult {
 		// `done <- s.deliver(...)` never sends at all: run would then wait out
 		// the whole timer and report a timeout for a sink that had already
 		// stopped. A deferred send always happens, and on that path it carries
-		// this seed rather than a value deliver never returned.
+		// this seed rather than a value deliver never returned. The seed starts
+		// under the sentinel because at this point the sink has not been asked
+		// its name yet — a Goexit inside Name() must still produce a result
+		// that names something.
 		outcome := SinkResult{
-			Name:    name,
+			Name:    unknownSinkName,
 			Success: false,
 			Reason:  reasonFailed,
 			Err:     errAbnormalExit,
@@ -266,16 +292,23 @@ func (s *Service) run(sink Sink, message Message) SinkResult {
 			done <- outcome
 		}()
 
+		name := s.nameOf(sink)
+
+		named <- name
+		outcome.Name = name
+
 		outcome = s.deliver(name, sink, message, started)
 	}()
 
-	timer := time.NewTimer(s.timeout + enforcementGrace)
+	timer := time.NewTimer(enforcementBound(s.timeout))
 	defer timer.Stop()
 
 	select {
 	case result := <-done:
 		return result
 	case <-timer.C:
+		name := resolvedName(named)
+
 		return SinkResult{
 			Name:    name,
 			Success: false,
@@ -284,19 +317,60 @@ func (s *Service) run(sink Sink, message Message) SinkResult {
 			// both routes to a timeout: whether the sink noticed its deadline
 			// or had to be abandoned, errors.Is says the same thing.
 			Err: fmt.Errorf("sink %s did not return within %s and was abandoned: %w",
-				name, s.timeout+enforcementGrace, context.DeadlineExceeded),
+				name, enforcementBound(s.timeout), context.DeadlineExceeded),
 			Duration: time.Since(started),
 		}
 	}
 }
 
+// enforcementBound is how long run waits before abandoning a sink.
+//
+// The addition is saturating, and that is not defensive tidiness: adding the
+// grace to a timeout near MaxInt64 wraps to a large negative duration,
+// time.NewTimer fires a negative duration immediately, and every post then
+// reported "did not return within -2562047h..." while its deliveries carried
+// on and landed. New's floor catches the negative half of that overflow class
+// and this catches the positive half — a huge timeout means "effectively
+// unbounded", which is what MaxInt64 gives.
+//
+// The upper bound on posting.sink_timeout_seconds still belongs in config's
+// validation, which today checks only that it is above zero.
+func enforcementBound(timeout time.Duration) time.Duration {
+	if timeout > math.MaxInt64-enforcementGrace {
+		return math.MaxInt64
+	}
+
+	return timeout + enforcementGrace
+}
+
+// resolvedName returns the sink's name if the delivery goroutine got as far as
+// resolving it, and the sentinel otherwise.
+//
+// Non-blocking on purpose: this runs on the abandonment path, and the one shape
+// that leaves the name unresolved is a Name() that is itself stuck — waiting
+// for it here would reintroduce exactly the unbounded wait being escaped.
+func resolvedName(named <-chan string) string {
+	select {
+	case name := <-named:
+		return name
+	default:
+		return unknownSinkName
+	}
+}
+
 // nameOf reads a sink's name without letting it take down the post.
 //
-// Name() is sink code. It was called outside any recover until a review
-// pointed out that a panicking Name — or a nil element in the slice T036
-// builds — killed the process along with the sibling's result, falsifying the
-// containment the guard below promises. Two interface methods, one of which
-// was protected.
+// Name() is sink code, and this is called from inside the delivery goroutine so
+// that it is bounded by the same backstop as Send.
+//
+// Both properties were learned the hard way, one review each. First, Name was
+// called outside any recover, so a panicking Name — or a nil element in the
+// slice T036 builds — killed the process along with the sibling's result. That
+// added the recover here. Then Name was still being called synchronously in
+// run, before the goroutine and before the timer existed, so a *blocking*
+// Name reproduced the unbounded hang the backstop had just been built to fix,
+// and a Goexit inside it produced a result naming nothing at all. Two
+// interface methods; both are sink code; both need the same treatment.
 func (s *Service) nameOf(sink Sink) (name string) {
 	defer func() {
 		if recover() != nil {
@@ -454,6 +528,11 @@ func describePanic(value any) (description string) {
 	// reserves for the log, after deliver had already preserved every result.
 	//
 	// %T on the value is safe: it reads the type, never the value.
+	//
+	// One class is beyond reach and is not claimed: a rendering that recurses
+	// without a base case exhausts the goroutine stack, and stack exhaustion is
+	// a fatal runtime error that no recover can stop. This guard covers panics,
+	// not the runtime running out of room to raise one.
 	defer func() {
 		if recover() != nil {
 			description = fmt.Sprintf("a value of type %T whose own rendering panicked", value)

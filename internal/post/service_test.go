@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"runtime"
 	"strings"
 	"sync"
@@ -1268,5 +1269,213 @@ func TestNewReplacesATimeoutThatCannotBoundAnything(t *testing.T) {
 				t.Errorf("the sink ran %d times, want 1", sink.ran())
 			}
 		})
+	}
+}
+
+// obstinateNameSink is a sink whose Name() misbehaves. Send is never reached
+// in the blocking and Goexit cases.
+type obstinateNameSink struct {
+	label   string
+	block   chan struct{}
+	goexit  bool
+	slowFor time.Duration
+}
+
+func (s *obstinateNameSink) Name() string {
+	switch {
+	case s.block != nil:
+		<-s.block
+	case s.goexit:
+		runtime.Goexit()
+	case s.slowFor > 0:
+		time.Sleep(s.slowFor)
+	}
+
+	return s.label
+}
+
+func (s *obstinateNameSink) Send(context.Context, Message) error { return nil }
+
+// TestNameIsBoundedLikeSend covers the half of the interface the first fix
+// pass left outside the bound it built (FR-015, constitution principle I).
+//
+// `Sink` has two methods and both are sink code. Hardening Send and leaving
+// Name synchronous in run reproduced every failure the backstop had just been
+// added to fix, one method over: a Name that blocks held the post open with no
+// upper bound and its sibling's finished result unreachable; a Name that
+// Goexits produced a result naming nothing, with no Reason for a front door and
+// no Err for the log; and a slow Name was excluded from Duration even though
+// the code claimed the opposite.
+func TestNameIsBoundedLikeSend(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a blocking Name does not hang the post", func(t *testing.T) {
+		t.Parallel()
+
+		const timeout = 100 * time.Millisecond
+
+		blocked := &obstinateNameSink{label: "obsidian", block: make(chan struct{})}
+		t.Cleanup(func() { close(blocked.block) })
+
+		service := New([]Sink{blocked, succeeds("telegram")}, timeout)
+
+		finished := make(chan Outcome, 1)
+		go func() { finished <- service.Post(mustMessage(t, "Name is stuck")) }()
+
+		var outcome Outcome
+
+		select {
+		case outcome = <-finished:
+		case <-time.After(10 * time.Second):
+			t.Fatal("Post did not return; a blocking Name is still outside the bound")
+		}
+
+		// Abandoned before it could say what it was called, so it is reported
+		// under the sentinel rather than as a blank line.
+		abandoned := outcome.Results[0]
+		if abandoned.Name != unknownSinkName {
+			t.Errorf("Name = %q, want the sentinel %q", abandoned.Name, unknownSinkName)
+		}
+
+		if abandoned.Reason != reasonTimedOut {
+			t.Errorf("Reason = %q, want %q", abandoned.Reason, reasonTimedOut)
+		}
+
+		if sibling := resultFor(t, outcome, "telegram"); !sibling.Success {
+			t.Errorf("the sibling was held hostage: reason=%q err=%v", sibling.Reason, sibling.Err)
+		}
+	})
+
+	t.Run("a Goexit in Name still yields a well-formed failure", func(t *testing.T) {
+		t.Parallel()
+
+		outcome := New([]Sink{&obstinateNameSink{label: "obsidian", goexit: true}, succeeds("telegram")},
+			generousTimeout).Post(mustMessage(t, "Name Goexits"))
+
+		abnormal := outcome.Results[0]
+
+		if abnormal.Name != unknownSinkName {
+			t.Errorf("Name = %q, want the sentinel %q", abnormal.Name, unknownSinkName)
+		}
+
+		if abnormal.Reason != reasonFailed {
+			t.Errorf("Reason = %q, want %q", abnormal.Reason, reasonFailed)
+		}
+
+		if !errors.Is(abnormal.Err, errAbnormalExit) {
+			t.Errorf("Err = %v, want it to wrap errAbnormalExit", abnormal.Err)
+		}
+
+		if sibling := resultFor(t, outcome, "telegram"); !sibling.Success {
+			t.Errorf("the sibling failed: %v", sibling.Err)
+		}
+	})
+
+	t.Run("a slow Name is counted in Duration", func(t *testing.T) {
+		t.Parallel()
+
+		const slow = 120 * time.Millisecond
+
+		outcome := New([]Sink{&obstinateNameSink{label: "obsidian", slowFor: slow}}, generousTimeout).
+			Post(mustMessage(t, "Name is slow"))
+
+		result := resultFor(t, outcome, "obsidian")
+		if result.Duration < slow {
+			t.Errorf("Duration = %s, want at least the %s spent in Name", result.Duration, slow)
+		}
+	})
+}
+
+// TestAnAbandonedSinkKeepsItsNameWhenItHasOne is the other half of the
+// attribution rule, and the case the backstop actually exists for.
+//
+// The motivating shape is a sink whose Name() answers immediately and whose
+// Send() hangs on a stalled mount. Reporting that under the sentinel would tell
+// the user something timed out without saying what, which is most of what they
+// need to know.
+func TestAnAbandonedSinkKeepsItsNameWhenItHasOne(t *testing.T) {
+	t.Parallel()
+
+	hung := &uncooperativeSink{name: "obsidian", release: make(chan struct{})}
+	t.Cleanup(func() { close(hung.release) })
+
+	service := New([]Sink{hung, succeeds("telegram")}, 100*time.Millisecond)
+
+	finished := make(chan Outcome, 1)
+	go func() { finished <- service.Post(mustMessage(t, "Send hangs, Name is fine")) }()
+
+	select {
+	case outcome := <-finished:
+		abandoned := resultFor(t, outcome, "obsidian")
+		if abandoned.Reason != reasonTimedOut {
+			t.Errorf("Reason = %q, want %q", abandoned.Reason, reasonTimedOut)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("Post did not return")
+	}
+}
+
+// TestAHugeTimeoutIsNotAnInstantTimeout covers the positive half of the
+// overflow class (FR-015).
+//
+// The enforcement bound adds a grace period to the configured timeout, and near
+// MaxInt64 that addition wraps to a large negative duration. time.NewTimer
+// fires a negative duration immediately, so every post reported a timeout — for
+// deliveries that in fact ran and landed. New's floor catches only the negative
+// half of the same overflow class.
+func TestAHugeTimeoutIsNotAnInstantTimeout(t *testing.T) {
+	t.Parallel()
+
+	for _, timeout := range []time.Duration{math.MaxInt64, math.MaxInt64 - 1, math.MaxInt64 - enforcementGrace/2} {
+		t.Run(fmt.Sprintf("%d", int64(timeout)), func(t *testing.T) {
+			t.Parallel()
+
+			sink := succeeds("telegram")
+
+			outcome := New([]Sink{sink}, timeout).Post(mustMessage(t, "effectively unbounded"))
+
+			result := resultFor(t, outcome, "telegram")
+			if !result.Success {
+				t.Errorf("reported %q for a huge positive timeout; the bound overflowed", result.Reason)
+			}
+
+			if sink.ran() != 1 {
+				t.Errorf("the sink ran %d times, want 1", sink.ran())
+			}
+		})
+	}
+}
+
+// TestNewCopiesTheSinks covers the ownership of the caller's slice.
+//
+// Without a copy, a caller that keeps and reuses its slice races every post in
+// flight — and worse, a mutation landing mid-post could swap in a sink this
+// Service was never handed, which is FR-016's "disabled sinks are not invoked"
+// quietly becoming conditional on the caller's discipline.
+func TestNewCopiesTheSinks(t *testing.T) {
+	t.Parallel()
+
+	intended := succeeds("telegram")
+	intruder := succeeds("intruder")
+
+	sinks := []Sink{intended}
+
+	service := New(sinks, generousTimeout)
+
+	// The caller reuses its slice after handing it over.
+	sinks[0] = intruder
+
+	outcome := service.Post(mustMessage(t, "the caller mutated its slice"))
+
+	if len(outcome.Results) != 1 {
+		t.Fatalf("got %d results, want 1", len(outcome.Results))
+	}
+
+	if outcome.Results[0].Name != "telegram" {
+		t.Errorf("posted to %q; the Service used the caller's mutated slice", outcome.Results[0].Name)
+	}
+
+	if intruder.ran() != 0 {
+		t.Errorf("the intruder sink ran %d times; it was never given to New", intruder.ran())
 	}
 }
