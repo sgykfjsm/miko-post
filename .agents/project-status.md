@@ -45,6 +45,12 @@ state only: #101 (`elide` bound gaps), #102 (safe-alphabet enumeration), #103 (`
 test-skip), #104 (decision: invalid UTF-8), #105 (`data-model.md` staleness, for spec-reconciler),
 plus acceptance notes on #57 (T056) and a progress comment on #4 (T003).
 
+Filed 2026-09-07 from the Batch 4 review: #107 (`logging.Open` does not apply `ResolvePath`, so a
+default install silently writes no diagnostics), plus acceptance notes on #69 (T068 must repeat the
+non-regular-file guard and `O_APPEND`, which the `Options.Writer` seam bypasses), #41 (T040 must
+construct the logger with `Options.Redact`, and the `slog.Duration` nanosecond trap) and #105 (the
+`"unknown"` sentinel is outside the domains `log-events.md` declares).
+
 ## Blockers
 
 None blocking. Two items are time-sensitive rather than blocking:

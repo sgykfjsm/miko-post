@@ -218,3 +218,9 @@ because nothing imports the package yet.
 One note for Batch 10: the non-regular-file guard lives in `openLogFile`, which the `Options.Writer`
 seam bypasses entirely, so T068's rotating writer must repeat it or the hang returns. Recorded in
 `Options.Writer`'s doc comment where that work will see it.
+
+**Follow-ups filed.** #107 for the `ResolvePath` gap, plus acceptance notes on #69, #41 and #105.
+Three findings were deliberately not filed and the reasons are recorded in `state.yaml` under
+`batch_4_review_notes.followups_filed.not_filed` — the short-write repair claim was narrowed in
+code rather than tracked, the TOCTOU window's reviewer-stated required outcome was explicitly none,
+and the work-log's dangling key reference is history rather than current state.

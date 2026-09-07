@@ -129,11 +129,18 @@ batch_4_review_notes:
         text. Does not replace T084's end-to-end sentinel gate.
       recorded_in: "internal/logging/logger.go Options.Redact, scrub, redactAll"
       obligation: "T040/T063 must construct the logger with Options.Redact carrying the resolved bot token"
-  open_notes:
-    - {id: "CON-003/COR-007", subject: "the 'unknown' sentinel for source and message_id is outside the domains log-events.md declares", disposition: spec-reconciler}
-    - {id: ADV-010, subject: "the Stat/OpenFile TOCTOU window is won immediately under contention; acceptance rests on same-user write access to a 0700 dir", disposition: accepted-documented}
-    - {id: CON-006, subject: "the non-regular-file guard is bypassed by the Options.Writer seam, so T068's rotating writer must repeat it", disposition: recorded-in-code}
-    - {id: CON-002, subject: "work-log.md points at review_followups_planned_not_filed, a key 3452c36 removed", disposition: accepted-as-history}
+  followups_filed:
+    filed_at: 2026-09-07
+    issues:
+      - {number: 107, subject: "logging.Open does not apply ResolvePath, so a default install silently writes no diagnostics", sources: [CON-004], severity: latent-defect}
+    comments:
+      - {issue: 69, subject: "T068 must repeat the non-regular-file guard and O_APPEND, which the Options.Writer seam bypasses; plus the bufio caveat for os.Exit durability", sources: [CON-006]}
+      - {issue: 41, subject: "T040 must construct the logger with Options.Redact; the slog.Duration nanosecond trap; the seven reserved keys; the #98 Targeter path", sources: [ADV-004, ADV-D-001], also_relevant_to: 64}
+      - {issue: 105, subject: "contracts/log-events.md and design.md §11.2 must admit the 'unknown' sentinel for source and message_id", sources: [CON-003, COR-007]}
+    not_filed:
+      - {id: ADV-009, reason: "resolved in-batch by narrowing the comment's claim; looping the repair write could spin on an always-zero writer, and FR-076's first duty is not to block the post"}
+      - {id: ADV-010, reason: "documented acceptance, and the reviewer's required outcome was explicitly none. The precondition — write access to a 0700 dir this package created — is an adversary who can already do worse directly."}
+      - {id: CON-002, reason: "accepted as history and disclosed in the PR body; the work-log records what was true when written"}
 
 remaining_batches:
   - {id: 5, name: Orchestrator, tasks: "T025-T026", pins: "ulid/v2", requires: [2, 3, 4]}
