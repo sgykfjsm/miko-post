@@ -101,23 +101,6 @@ touched_files:
   - specs/001-dual-sink-quick-post/tasks.md
   - internal/post/result.go
 
-unfiled_followups:
-  - batch: 2
-    location: ~/.agents/review-runs/sgykfjsm__miko-post/20260902T040356Z-79b5bd57/
-    count: 6
-    note: >-
-      Accepted as non-blocking during the Batch 2 review but never filed as GitHub issues. Highest
-      value: xml.Marshal still reaches SinkResult.Err; the method-enumeration test skips
-      argument-taking methods and logs the skip invisibly under make check; the %p residual relies
-      on an unenforced "every error stored in Err is a pointer" invariant that belongs in T056's
-      acceptance notes.
-  - batch: 3
-    location: ~/.agents/review-runs/sgykfjsm__miko-post/20260903T103000Z-1047541d/
-    count: 6
-    note: >-
-      Planned by record-review-followups but not published; see review_followups_planned_not_filed
-      above for the proposed dispositions.
-
 assumptions:
   - >-
     The batch decomposition above is re-derived by run-batch-cycle's triage step each run; it is
