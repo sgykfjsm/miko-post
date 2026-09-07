@@ -224,3 +224,99 @@ Three findings were deliberately not filed and the reasons are recorded in `stat
 `batch_4_review_notes.followups_filed.not_filed` — the short-write repair claim was narrowed in
 code rather than tracked, the TOCTOU window's reviewer-stated required outcome was explicitly none,
 and the work-log's dangling key reference is history rather than current state.
+
+## 2026-09-07 — Batch 4 merged
+
+PR #106 squash-merged as `8b7bed6`; issues #22–#25 auto-closed. Verified the squashed tree is
+byte-identical to the reviewed branch tip `acd7d7e` — both resolve to tree `f7c45ff` — so what
+landed is what was reviewed. `make check` clean on merged `main`. No CI is configured in this
+repository, so that local gate is the whole gate.
+
+The PR carried seven commits: the implementation, the review fix pass, the three escalated
+decisions, the follow-up record, and the three `.agents` bookkeeping commits that had no PR of their
+own. Squashing collapses them, which is the established convention here — the individual commits
+stay visible on the PR page.
+
+**Ready for Batch 5.** Branch `sgykfjsm/batch-5-orchestrator` is cut from the merged `main` and
+carries this merge record, so it will ship with Batch 5's PR exactly as Batch 3's record shipped
+with Batch 4's. That is the pattern worth keeping: the merge record for batch N lands in batch N+1's
+PR rather than accumulating as unpushed commits on a stale branch, which is how twelve review
+follow-ups went unfiled and needed a catch-up commit.
+
+Three things Batch 5 inherits, all recorded in `state.yaml` under `time_sensitive`:
+
+- **#107** — `logging.Open` does not apply `ResolvePath`, so a `Logger` built from settings with
+  `logging.path` unset (the default) silently writes nothing. T025 is the first task to construct a
+  `Logger`, so it owns this unless the front-door tasks take it.
+- **#98** — the settled `Targeter` decision. `Target()` must return what `Send` actually resolved
+  and wrote, not re-resolve on call; re-resolving reintroduces the local-midnight mismatch the
+  decision exists to avoid.
+- **#4 / T003** — `oklog/ulid/v2@v2.1.2` is pinned by the batch that first imports it, which is
+  this one. Fyne remains outstanding until the GUI batch.
+
+## 2026-09-08 — Batch 5: the posting orchestrator (PR #108, open)
+
+**What was built.** `post.Service` and `post.Outcome`: one ULID per post, every sink started in its
+own goroutine under its own deadline derived from `context.Background()`, all results awaited and
+aggregated (T025, T026). Pins `oklog/ulid/v2@v2.1.2` as the first importer, which is what T003
+defers to each batch. **Phase 2 Foundational is complete** — user story work can begin.
+
+**The decision that shaped it.** FR-015's per-sink bound was only *cooperative*: the orchestrator
+handed each sink a deadline and then waited on a `WaitGroup`. The maintainer's call was to enforce
+it, because T031's obsidian sink cannot honour a context — `os.OpenFile` and `os.File.Write` take
+none — so a vault on a synced or network mount would hold a post open for as long as the mount did,
+with its sibling's finished result unreachable. Measured before the fix: 3.0 s on a 100 ms budget,
+and forever for a sink that never returned. Delivery now runs on a buffered channel and `run` stops
+waiting at timeout plus a 250 ms grace. The grace is not decoration: without it the context deadline
+and the backstop fire at the same instant, so which error a cooperative sink's result carried was a
+race.
+
+**Three review cycles, three fix passes, and the pattern is the lesson.** Verdict
+`passed-with-notes`. The primary defects were all the same shape — a guard I built and then left a
+route around:
+
+- `deliver`'s recover was installed one line *after* `sink.Name()`, so a panicking `Name` or a nil
+  slice element killed the process along with the sibling's result.
+- Having fixed that, `Name` was still resolved *synchronously in `run`*, before the goroutine and
+  before the timer existed — so a blocking `Name` reproduced the unbounded hang the backstop had
+  just been built to fix, and a `Goexit` in it produced a result naming nothing. Two interface
+  methods; I hardened one, twice.
+- The backstop timer started before `Name` while the sink's context started after it, so a slow
+  `Name` pushed the sink's deadline past the backstop and a cooperative sink was abandoned anyway.
+
+**And the tests were worse than the code.** The cycle-2 correctness review built 36 mutants and
+killed 28. Every one of the eight survivors was a test of mine that could not fail for the property
+it was written for: the secret-containment assertion checked `Reason` (always one of two constants,
+so unfalsifiable) instead of `Err`, where `describePanic`'s output actually lands; `enforcementGrace`
+— the single mechanism the whole restructure introduced — had no test at all; an empty
+`unknownSinkName` passed; the two user-visible reason phrases could be swapped; the ULID timestamp
+could be frozen, defeating R-007's entire rationale; an unbuffered `done` channel parked every
+abandoned goroutine permanently; `Duration` could be dropped on two paths; and `deliver`'s
+`panicnil` pre-seed could be deleted, because nothing in the suite ever called `panic(nil)`. That
+last one now runs as a subprocess, since `GODEBUG` is read at startup.
+
+**Running total worth keeping in view:** nine unfailable assertions across Batches 4 and 5, all
+mine, every single one found by mutation and none by coverage — which read 100% throughout. Two of
+my own mutants this batch were no-ops I briefly recorded as survivors, and two more failed to
+compile. Asserting that the mutation actually applied is not optional.
+
+**Two of my own fixes were also wrong.** The first slow-`Name` test set the name cost above
+timeout+grace, where abandonment is the *correct* outcome — the test was wrong, not the code. And
+the first reclamation test flaked, comparing against a process-global goroutine baseline that
+sibling parallel tests drift by ~28; it now asserts a relative drop.
+
+**Numbers corrected rather than defended.** I documented the abandoned-goroutine cost as ~0.7 KiB.
+Measured: ~4.9 KiB — I had counted only the heap and omitted the 4.1 KiB goroutine stack, which is
+both the larger term and the resource this design deliberately leaks.
+
+**Follow-ups filed.** #109 (`config.Validate` has no upper bound on `sink_timeout_seconds`;
+`18446744074` wraps to a 290 ms deadline, defeating both guards this batch added) and #110 (a
+`Name()` panic is discarded, so FR-071 can never record it — and the information is gone before
+T073 could).
+
+**Scope held.** `post.Targeter` (#98) waits for T030/T040, because nothing here can type-assert an
+interface no sink implements. `Reason`'s fixed set is T056's; this batch adds the two constants
+FR-015 forces and pins the invariant that `Reason` is never derived from `Err`. No logging, no
+validation, no logger field — an unused field is a claim a batch cannot test. Sub-notes now record
+that this batch's suite already carries T052, T054 and T053's reporting half, so US3 is a
+verification pass.

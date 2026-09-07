@@ -36,7 +36,7 @@ exercise (`foo_test.go` next to `foo.go`) rather than in a separate `tests/` tre
 - [x] T002 [P] Create the package skeleton directories `cmd/mp/`, `internal/{cli,gui,post,config,logging,version}/`, `internal/sink/{telegram,obsidian}/`, and `testdata/` per the plan's Source Code layout
 - [ ] T003 [P] Add and pin dependencies `fyne.io/fyne/v2@v2.8.1`, `github.com/pelletier/go-toml/v2@v2.4.3`, `github.com/oklog/ulid/v2@v2.1.2` in `go.mod` and commit `go.sum`
   - **Deferred in Batch 1, partially done in Batch 3.** Go records a dependency only when a package imports it: `go get` marks all three `// indirect` and `go mod tidy` removes them, leaving `go.sum` empty. Pin each one in the batch that first imports it — go-toml in the settings batch, ULID in the orchestrator batch, Fyne in the GUI batch. The intended versions are recorded in research.md (R-003, R-004, R-007).
-  - `github.com/pelletier/go-toml/v2@v2.4.3` is pinned as a **direct** requirement as of the settings batch (T016), with `go.sum` populated. `github.com/oklog/ulid/v2@v2.1.2` and `fyne.io/fyne/v2@v2.8.1` remain outstanding.
+  - `github.com/pelletier/go-toml/v2@v2.4.3` is pinned as a **direct** requirement as of the settings batch (T016), with `go.sum` populated. `github.com/oklog/ulid/v2@v2.1.2` is pinned as of the orchestrator batch (T025). `fyne.io/fyne/v2@v2.8.1` remains outstanding until the GUI batch.
 - [x] T004 [P] Implement build-time version and commit variables with a `runtime/debug.ReadBuildInfo()` fallback in `internal/version/version.go` (research R-009, resolves A-008)
 - [x] T005 [P] Add a `Makefile` at the repository root with `build` (including `-ldflags -X` version stamping), `test`, `race`, `vet`, and `install` targets
 
@@ -80,8 +80,8 @@ neither can be retrofitted later without rewriting every story.
 
 ### Posting core
 
-- [ ] T025 Implement `post.Service` — generate the ULID, start every enabled sink in its own goroutine with its **own** `context.WithTimeout` derived from `context.Background()` (never a shared cancellable parent), await all via `sync.WaitGroup`, and aggregate — in `internal/post/service.go` (FR-012 – FR-016, constitution principle I)
-- [ ] T026 Write orchestrator tests using fake sinks that assert **both** sinks ran and **both** results were reported when one fails, when both fail, and when one blocks; run them under `-race`, in `internal/post/service_test.go` (FR-013, FR-014, FR-070, constitution Quality Gates)
+- [x] T025 Implement `post.Service` — generate the ULID, start every enabled sink in its own goroutine with its **own** `context.WithTimeout` derived from `context.Background()` (never a shared cancellable parent), await all via `sync.WaitGroup`, and aggregate — in `internal/post/service.go` (FR-012 – FR-016, constitution principle I)
+- [x] T026 Write orchestrator tests using fake sinks that assert **both** sinks ran and **both** results were reported when one fails, when both fail, and when one blocks; run them under `-race`, in `internal/post/service_test.go` (FR-013, FR-014, FR-070, constitution Quality Gates)
 
 **Checkpoint**: The posting core, settings, and diagnostics exist and are tested. User story work can begin.
 
@@ -153,12 +153,16 @@ neither can be retrofitted later without rewriting every story.
 ### Tests for User Story 3
 
 - [ ] T052 [P] [US3] Write a timeout test asserting a hanging sink yields a timeout failure at its configured limit while the other sink completes and reports its **real** outcome, in `internal/post/service_test.go` (FR-015, SC-011)
+  - **Already delivered by the orchestrator batch (T026).** `TestABlockingSinkYieldsATimeoutAndDoesNotStallItsSibling` asserts exactly this, including that the blocked sink's `Err` wraps `context.DeadlineExceeded` and that the post does not spend two timeouts. US3 is a verification pass: confirm it still holds once real sinks exist, and add SC-011's end-to-end measurement if that needs a running binary.
 - [ ] T053 [P] [US3] Write a both-sinks-fail test asserting both failures are reported and both are logged, neither hidden behind the other, in `internal/post/service_test.go` (FR-014, FR-070)
+  - **Half delivered by the orchestrator batch (T026).** The `both fail` subtest of `TestBothSinksRunAndBothResultsAreReported` covers the *reported* half, and FR-014 is satisfied. The *logged* half — FR-070's "logging must not stop after the first error" — has no assertion anywhere yet and cannot until T040 emits events. That half is what US3 still owes.
 - [ ] T054 [P] [US3] Write a `-race` test asserting a slow-failing sink cannot cancel or alter a concurrently running sibling, in `internal/post/service_test.go` (constitution principle I)
+  - **Already delivered by the orchestrator batch (T026).** `TestOneSinkFailingDoesNotCancelItsSibling` has the sibling observe its own context after its peer has failed, and the suite runs under `-race` via `make check`. It is the only test that dies to a shared-cancellable-parent mutant, so it is the load-bearing one for principle I. US3 is a verification pass.
 
 ### Implementation for User Story 3
 
 - [ ] T055 [US3] Apply each sink's overall timeout as its own independent context, converting expiry into a failure result rather than an abort of the post, in `internal/post/service.go` (FR-015)
+  - **Already implemented by the orchestrator batch (T025).** Both halves had to land together: FR-015 states them in one sentence, and a Service that let an expiry abort the post would have breached FR-014 on the day it shipped rather than in this phase. `Service.deliver` derives each context from `context.Background()` and converts expiry into a failure result. US3 is a verification pass.
 - [ ] T056 [US3] Implement error classification producing short, safe display reasons from a fixed set (`request timed out`, `permission denied`, `chat not found`, …) while retaining the detailed error for the log, in `internal/post/reason.go` (FR-017, FR-029)
 - [ ] T057 [US3] Include the resolved diagnostic log path in user-facing failure output from **both** front doors, in `internal/cli/render.go` and `internal/gui/result.go` (FR-063, SC-003)
 - [ ] T058 [US3] Ensure partial success is visible from both front doors — a succeeded sink is reported alongside a failed one — in `internal/cli/render.go` and `internal/gui/result.go` (FR-062, SC-002)

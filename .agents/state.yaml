@@ -44,39 +44,101 @@ completed:
     coverage: "99.0%"
     review_run_state: "~/.agents/review-runs/sgykfjsm__miko-post/20260903T103000Z-1047541d/"
 
-in_progress:
   - id: batch-4
     summary: >-
-      Logging foundation - the stable event vocabulary as typed Event constants with a source-scanning
-      registration test, and the slog JSON-handler logger writing one self-contained JSON object per
-      line, creating the log directory, and failing soft without ever blocking a post
+      Logging foundation - the stable event vocabulary as typed Event constants with a
+      source-scanning registration test, and the slog JSON-handler logger writing one
+      self-contained JSON object per line, creating the log directory, and failing soft without
+      ever blocking a post
     tasks: [T021, T022, T023, T024]
     issues: [22, 23, 24, 25]
+    pins: none
+    commits: [2837641, 2ae07df, 02101ce, acd7d7e]
+    squashed_as: 8b7bed6
     pr: 106
-    branch: sgykfjsm/batch-4-logging
-    state: open
+    state: merged
+    merged_at: 2026-09-07
     review_verdict: passed-with-notes
     review_cycles: 2
     fix_passes: 1
     coverage: "100.0%"
     review_run_state: "~/.agents/review-runs/sgykfjsm__miko-post/20260907T013654Z-c1df9c13/"
     note: >-
-      Also carries three .agents bookkeeping commits (13f1c3e, 972a3f4, 3452c36) that had no PR of
-      their own. No new dependency: slog is stdlib and the ULID pin stays with batch 5.
+      Also carried three .agents bookkeeping commits (13f1c3e, 972a3f4, 3452c36) that had no PR of
+      their own. Verified the squashed tree is byte-identical to the reviewed branch tip acd7d7e
+      (both tree f7c45ff). No new dependency: slog is stdlib and the ULID pin stays with batch 5.
 
+in_progress:
+  - id: batch-5
+    summary: >-
+      Orchestrator - post.Service and post.Outcome: one ULID per post, every sink in its own
+      goroutine under its own deadline from context.Background(), an orchestrator-enforced backstop
+      for sinks that cannot be cancelled, all results awaited and aggregated
+    tasks: [T025, T026]
+    issues: [26, 27]
+    pins: "github.com/oklog/ulid/v2@v2.1.2"
+    pr: 108
+    branch: sgykfjsm/batch-5-orchestrator
+    state: open
+    review_verdict: passed-with-notes
+    review_cycles: 3
+    fix_passes: 3
+    coverage: "100.0%"
+    review_run_state: "~/.agents/review-runs/sgykfjsm__miko-post/20260907T145801Z-e70132b9/"
+    note: >-
+      Completes Phase 2 Foundational. Also carries the Batch 4 merge record (7123424). Pre-satisfies
+      T052, T054 and T053's reporting half; sub-notes recorded under those tasks.
+    decisions_taken:
+      - id: DEC-A1
+        question: "does the orchestrator enforce the per-sink timeout, or is cooperation a Sink obligation?"
+        decision: >-
+          Enforce in the orchestrator. Delivery runs on a buffered channel and run stops waiting at
+          timeout + a 250ms grace, abandoning the goroutine. The context stays primary; the grace
+          exists so a cooperative sink's own error wins deterministically rather than racing the
+          backstop. Accepted costs, documented in code: the abandoned goroutine outlives the post
+          (~4.9 KiB each, reclaimed on unblock, uncapped across posts, and spinning rather than
+          parked when a sink's error has a cyclic Unwrap), and a write completed after abandonment
+          still lands, so a user can be told "timed out" and later find the note.
+        why: >-
+          T031's obsidian sink cannot honour a context - os.OpenFile and os.File.Write take none -
+          so a vault on a synced or network mount would otherwise hold the post open indefinitely
+          with its sibling's finished result unreachable.
+    followups_filed:
+      - {number: 109, subject: "config.Validate has no upper bound on sink_timeout_seconds; 18446744074 wraps to a 290ms deadline", sources: [ADV-014]}
+      - {number: 110, subject: "a panic from Sink.Name is discarded, so FR-071 can never record it", sources: [ADV-012]}
 blockers: []
 
 time_sensitive:
+  - issue: 107
+    note: >-
+      logging.Open does not apply ResolvePath, so a Logger built from settings with logging.path
+      unset - the default - silently writes nothing. Owned by T039, which wires settings, logging
+      and the posting service. An earlier note here assigned it to T025 on the belief that the
+      orchestrator constructs the Logger; it does not - T040 emits events from service.go and T039
+      does the construction, both in batch 6. Corrected during the batch-5 review (CON-001).
+    deadline: before batch-6 (T039)
+  - issue: 41
+    note: >-
+      T040 must construct the logger with Options.Redact carrying the resolved bot token, or the
+      chokepoint scrub is inert. Applies to whichever task first builds the Options.
+    deadline: before batch-6 (T040)
   - issue: 98
-    note: decision on note-event ownership must be honored when T025/T030/T040 are written
-    deadline: before batch-5 (orchestrator)
+    note: >-
+      Decision on note-event ownership. The part that bound batch 5 is met: Sink is still exactly
+      two methods, so the additive Targeter interface remains possible. Targeter itself, the path
+      field on the three obsidian events, and the midnight-rollover test are still owed by T030 and
+      T040. Target() must return what Send actually resolved and wrote, never re-resolve on call.
+    deadline: before batch-6 (T030, T040)
   - issue: 94
     note: git_commit reads "unknown" on tagged installs; open maintainer decision
     deadline: before tagging v0.1.0
 
 next_best_action: >-
-  Merge PR #106 (Batch 4), then run run-batch-cycle for Batch 5 - Orchestrator (T025-T026, issues
-  #26-#27), which pins oklog/ulid/v2 and must honour issue #98's settled Targeter decision.
+  Merge PR #108 (Batch 5), then run run-batch-cycle for Batch 6 - US1 MVP (CLI) (T027-T040, issues
+  #28-#41). Batch 6 is where the front door is wired, so it owns the three obligations batch 5
+  correctly did not: issue #107 (logging.Open does not apply ResolvePath, T039), the Options.Redact
+  argument that makes the token scrub live (#41, T040), and issue #98's Targeter interface plus the
+  path field on the obsidian events (T030, T040).
 
 review_followups_filed:
   filed_at: 2026-09-07
@@ -143,7 +205,6 @@ batch_4_review_notes:
       - {id: CON-002, reason: "accepted as history and disclosed in the PR body; the work-log records what was true when written"}
 
 remaining_batches:
-  - {id: 5, name: Orchestrator, tasks: "T025-T026", pins: "ulid/v2", requires: [2, 3, 4]}
   - {id: 6, name: "US1 MVP (CLI)", tasks: "T027-T040"}
   - {id: 7, name: "US2 GUI", tasks: "T041-T051", pins: "fyne/v2"}
   - {id: 8, name: "US3 sink independence", tasks: "T052-T058"}
