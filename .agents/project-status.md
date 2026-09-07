@@ -1,6 +1,6 @@
 # Project status — miko-post
 
-_Last updated: 2026-09-04_
+_Last updated: 2026-09-07_
 
 ## Objective
 
@@ -24,12 +24,12 @@ per PR, driven by the `run-batch-cycle` skill.
   issues #7-#11). PR #97, merged to `main` as `3214bbd` on 2026-09-03.
 - **Batch 3** — settings: XDG paths, strict TOML decoding onto defaults, the redacting `Secret`,
   credential precedence, and accumulating validation (T011-T020, issues #12-#21). Pins
-  go-toml/v2@v2.4.3. PR #100 (`72d9642` + `3bc2f32`), **open**, review verdict
+  go-toml/v2@v2.4.3. PR #100, merged to `main` as `6d84ae9` on 2026-09-07; review verdict
   passed-with-notes after three fix cycles.
 
 ## In progress
 
-PR #100 is open and reviewed (passed-with-notes). It is not merged.
+Nothing. PR #100 is merged; no work is mid-flight.
 
 ## Blockers
 
@@ -41,8 +41,7 @@ None blocking. Two items are time-sensitive rather than blocking:
 
 ## Next best action
 
-Merge PR #100, then run `run-batch-cycle` for **Batch 4 — Logging foundation** (T021-T024,
-issues #22-#25).
+Run `run-batch-cycle` for **Batch 4 — Logging foundation** (T021-T024, issues #22-#25).
 
 ## Important decisions
 

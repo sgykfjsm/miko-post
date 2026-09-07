@@ -109,3 +109,26 @@ Suite green under seven ambient `TZ` values and under a crafted transitioning TZ
 
 **Next best action.** Run `run-batch-cycle` for Batch 4 — Logging foundation (T021-T024,
 issues #22-#25).
+
+---
+
+## 2026-09-07 — Batch 3 merged
+
+**Objective.** Land PR #100 and sync the worktree.
+
+**Changes made.** None to the code. PR #100 squash-merged to `main` as `6d84ae9`; the branch
+`sgykfjsm/batch-3-settings` was deleted on the remote.
+
+**Evidence.** `git diff a6a734e origin/main` is empty — the squashed commit is byte-identical to the
+reviewed branch tip. Issues #12-#21 all auto-closed by the merge; #4 (T003) correctly remains open
+with the ULID and Fyne pins outstanding. On merged `main`: `go build`, `go vet`,
+`go test -race -count=1` all clean, `internal/config` coverage 99.0%.
+
+**Decisions.** None.
+
+**Blockers and open questions.** Unchanged: the six Batch 3 follow-ups remain planned but unfiled
+(see `review_followups_planned_not_filed` in state.yaml), as do the six from Batch 2. Issues #94,
+#95, #96 and #98 are still open and still correctly open.
+
+**Next best action.** Run `run-batch-cycle` for Batch 4 — Logging foundation (T021-T024,
+issues #22-#25).

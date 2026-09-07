@@ -33,18 +33,18 @@ completed:
     partial_tasks: [T003]
     issues: [12, 13, 14, 15, 16, 17, 18, 19, 20, 21]
     pins: "github.com/pelletier/go-toml/v2@v2.4.3"
-    commits: [72d9642, 3bc2f32]
+    commits: [72d9642, 3bc2f32, a6a734e]
+    squashed_as: 6d84ae9
     pr: 100
-    state: open-reviewed
+    state: merged
+    merged_at: 2026-09-07
     review_verdict: passed-with-notes
     review_cycles: 4
     fix_passes: 3
     coverage: "99.0%"
     review_run_state: "~/.agents/review-runs/sgykfjsm__miko-post/20260903T103000Z-1047541d/"
 
-in_progress:
-  - id: pr-100
-    note: "reviewed passed-with-notes; open, not merged"
+in_progress: []
 
 blockers: []
 
@@ -57,8 +57,7 @@ time_sensitive:
     deadline: before tagging v0.1.0
 
 next_best_action: >-
-  Merge PR #100, then run run-batch-cycle for Batch 4 - Logging foundation (T021-T024,
-  issues #22-#25).
+  Run run-batch-cycle for Batch 4 - Logging foundation (T021-T024, issues #22-#25).
 
 review_followups_planned_not_filed:
   - {ids: [COR-303, ADV-301, COR-302, ADV-302, CON-302], subject: "elide: bound declared generally, applied to two keys; head-only truncation hides the offender; multibyte branch untested", proposed: create-issue}
@@ -116,4 +115,4 @@ assumptions:
     The batch decomposition above is re-derived by run-batch-cycle's triage step each run; it is
     recorded here for orientation, not as a binding plan.
 
-last_updated: 2026-09-04
+last_updated: 2026-09-07
