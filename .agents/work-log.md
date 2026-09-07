@@ -53,3 +53,59 @@ single best next batch, review it, and stop.
   needed before `v0.1.0` is tagged.
 
 **Next best action.** Run `run-batch-cycle` for Batch 3 — Settings (T011-T020, issues #12-#21).
+
+---
+
+## 2026-09-04 — Batch 3: the settings foundation
+
+**Objective.** Complete the Settings concern of Phase 2 (T011-T020, issues #12-#21) and pin the
+go-toml third of the re-scoped T003.
+
+**Changes made.** `internal/config/` gained `secret.go`, `paths.go`, `settings.go`, `load.go`,
+`validate.go`, `credential.go` with their tests, plus five TOML fixtures under `testdata/config/`.
+`github.com/pelletier/go-toml/v2@v2.4.3` is pinned as a direct requirement with `go.sum` populated.
+PR #100, two commits: `72d9642` (the batch) and `3bc2f32` (three review fix passes).
+
+**Evidence.** `go build`, `go vet`, `gofmt -l`, `go test`, `go test -race -count=15` all clean;
+`internal/config` statement coverage 99.0%, the two uncovered statements identified by file:line.
+Suite green under seven ambient `TZ` values and under a crafted transitioning TZif. Review verdict
+**passed-with-notes** after three fix cycles; run state under
+`~/.agents/review-runs/sgykfjsm__miko-post/20260903T103000Z-1047541d/`.
+
+**Decisions.**
+
+1. `Secret` holds its value behind a `*string` and implements five render guards, not the four
+   `data-model.md` prescribes. Verified: `fmt` reaches unexported fields by reflection, so `%d` on a
+   string-held Secret printed the token, and `%p`/`%w` bypass `Formatter` entirely — the pointer is
+   what closes those two.
+2. `Load` never renders the settings document. go-toml's `DecodeError.String()` echoes context lines
+   from the enclosing table header, which reproduces `bot_token` for any defect in
+   `[sink.telegram]`; only position and key path are used.
+3. The two Obsidian format keys are validated by **what they render**, and Go's `MST` element is
+   rejected. Three attempts were needed and the first two were wrong in instructive ways: checking
+   only whether a string is a layout misses `"../x.md"`; checking a fixed UTC probe misses FR-051's
+   local rendering; checking the local rendering too misses that **a `Location` is not a zone** —
+   it selects among many by instant (`America/New_York` → EST/EDT), and a hostile TZif's POSIX
+   footer makes the transition schedule the attacker's, so any fixed number of samples is one short.
+   Refusing the element removes the variable instead of sampling it.
+4. Detection compares one instant formatted under two zone names rather than testing for the
+   substring: Go's scanner gives the `M` in `"03:04PMST.md"` to the `PM` element, so
+   `strings.Contains(v, "MST")` would reject a safe layout.
+5. FR-018's all-sinks-disabled check stays out of `config.Load`; `data-model.md` and `plan.md` were
+   amended to say so (T081 CLI, T082 GUI). Fixing `data-model.md` in cycle 1 created a contradiction
+   with `plan.md` that cycle 2 caught — spec amendments need a consistency sweep, not a local edit.
+
+**Blockers and open questions.**
+
+- Six non-blocking follow-ups from this review are **planned but not filed**: `elide`'s bound is
+  declared generally but applied to two keys only (measured 3x file-to-message amplification at four
+  sibling sites); `elide` truncates head-only, so a long-prefix traversal is reported with the
+  offending substring cut away; the safe-alphabet enumeration backing AC-9 omits `Z` and `AM`/`PM`;
+  `elide`'s multibyte branch is untested; `thread_id > 0` is enforced but absent from the schema
+  table; the `rendered == ".."` clause is unpinned though proven verdict-neutral.
+- Carried from Batch 2 and still open: issue #94 (`git_commit` is `unknown` on tagged installs) needs
+  a maintainer decision before `v0.1.0`; issue #98's `Target()` decision must be honored when
+  T025/T030/T040 are written; `data-model.md` remains stale on the `SinkResult` entity.
+
+**Next best action.** Run `run-batch-cycle` for Batch 4 — Logging foundation (T021-T024,
+issues #22-#25).

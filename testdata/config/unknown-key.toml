@@ -1,0 +1,11 @@
+# An unknown key inside an otherwise valid table (FR-054, strict decoding).
+#
+# It sits below bot_token on purpose: go-toml's own error rendering quotes the
+# lines around the offending one, which would put the credential in the message.
+# The loader must report the position without the source text.
+
+[sink.telegram]
+enabled = true
+bot_token = "fixture-token-not-a-real-credential"
+chat_id = "-1001234567890"
+retry_count = 3

@@ -1,0 +1,9 @@
+# The unnamespaced form FR-054 excludes from the schema.
+#
+# Under strict decoding this is a load error. Without it, the document would
+# decode successfully into nothing and the sink would be silently disabled.
+
+[telegram]
+enabled = true
+bot_token = "fixture-token-not-a-real-credential"
+chat_id = "-1001234567890"

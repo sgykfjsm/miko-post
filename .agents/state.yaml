@@ -25,7 +25,26 @@ completed:
     review_cycles: 3
     fix_passes: 2
 
-in_progress: []
+  - id: batch-3
+    summary: >-
+      Settings - XDG paths, strict TOML decoding onto defaults, redacting Secret, credential
+      precedence, accumulating validation, and rendered-value rules for the two Obsidian format keys
+    tasks: [T011, T012, T013, T014, T015, T016, T017, T018, T019, T020]
+    partial_tasks: [T003]
+    issues: [12, 13, 14, 15, 16, 17, 18, 19, 20, 21]
+    pins: "github.com/pelletier/go-toml/v2@v2.4.3"
+    commits: [72d9642, 3bc2f32]
+    pr: 100
+    state: open-reviewed
+    review_verdict: passed-with-notes
+    review_cycles: 4
+    fix_passes: 3
+    coverage: "99.0%"
+    review_run_state: "~/.agents/review-runs/sgykfjsm__miko-post/20260903T103000Z-1047541d/"
+
+in_progress:
+  - id: pr-100
+    note: "reviewed passed-with-notes; open, not merged"
 
 blockers: []
 
@@ -38,11 +57,16 @@ time_sensitive:
     deadline: before tagging v0.1.0
 
 next_best_action: >-
-  Run run-batch-cycle for Batch 3 - Settings (T011-T020, issues #12-#21), which pins
-  github.com/pelletier/go-toml/v2 and unblocks US6.
+  Merge PR #100, then run run-batch-cycle for Batch 4 - Logging foundation (T021-T024,
+  issues #22-#25).
+
+review_followups_planned_not_filed:
+  - {ids: [COR-303, ADV-301, COR-302, ADV-302, CON-302], subject: "elide: bound declared generally, applied to two keys; head-only truncation hides the offender; multibyte branch untested", proposed: create-issue}
+  - {id: CON-301, subject: "safe-alphabet enumeration backing AC-9 omits Z and AM/PM", proposed: create-issue}
+  - {id: CON-303, subject: "thread_id > 0 enforced but absent from the schema table", proposed: defer-to-spec-reconciler}
+  - {id: COR-301, subject: "rendered == '..' clause unpinned, proven verdict-neutral", proposed: record-in-pr}
 
 remaining_batches:
-  - {id: 3, name: Settings, tasks: "T011-T020", pins: "go-toml/v2"}
   - {id: 4, name: Logging foundation, tasks: "T021-T024"}
   - {id: 5, name: Orchestrator, tasks: "T025-T026", pins: "ulid/v2", requires: [2, 3, 4]}
   - {id: 6, name: "US1 MVP (CLI)", tasks: "T027-T040"}
@@ -54,27 +78,42 @@ remaining_batches:
   - {id: 12, name: "Polish and gates", tasks: "T084-T091"}
 
 touched_files:
-  - internal/post/message.go
-  - internal/post/message_test.go
-  - internal/post/result.go
-  - internal/post/result_test.go
-  - internal/post/sink.go
+  - internal/config/secret.go
+  - internal/config/paths.go
+  - internal/config/settings.go
+  - internal/config/load.go
+  - internal/config/validate.go
+  - internal/config/credential.go
+  - internal/config/export_test.go
+  - testdata/config/
+  - go.mod
+  - go.sum
+  - specs/001-dual-sink-quick-post/contracts/config-schema.md
+  - specs/001-dual-sink-quick-post/data-model.md
+  - specs/001-dual-sink-quick-post/plan.md
   - specs/001-dual-sink-quick-post/tasks.md
-  - .specify/integrations/claude.manifest.json
+  - internal/post/result.go
 
 unfiled_followups:
-  location: ~/.agents/review-runs/sgykfjsm__miko-post/20260902T040356Z-79b5bd57/
-  count: 6
-  note: >-
-    Accepted as non-blocking during the Batch 2 review but never filed as GitHub issues. Highest
-    value: xml.Marshal still reaches SinkResult.Err; the method-enumeration test skips
-    argument-taking methods and logs the skip invisibly under make check; the %p residual relies on
-    an unenforced "every error stored in Err is a pointer" invariant that belongs in T056's
-    acceptance notes.
+  - batch: 2
+    location: ~/.agents/review-runs/sgykfjsm__miko-post/20260902T040356Z-79b5bd57/
+    count: 6
+    note: >-
+      Accepted as non-blocking during the Batch 2 review but never filed as GitHub issues. Highest
+      value: xml.Marshal still reaches SinkResult.Err; the method-enumeration test skips
+      argument-taking methods and logs the skip invisibly under make check; the %p residual relies
+      on an unenforced "every error stored in Err is a pointer" invariant that belongs in T056's
+      acceptance notes.
+  - batch: 3
+    location: ~/.agents/review-runs/sgykfjsm__miko-post/20260903T103000Z-1047541d/
+    count: 6
+    note: >-
+      Planned by record-review-followups but not published; see review_followups_planned_not_filed
+      above for the proposed dispositions.
 
 assumptions:
   - >-
     The batch decomposition above is re-derived by run-batch-cycle's triage step each run; it is
     recorded here for orientation, not as a binding plan.
 
-last_updated: 2026-09-03
+last_updated: 2026-09-04

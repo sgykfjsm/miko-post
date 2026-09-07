@@ -35,7 +35,8 @@ exercise (`foo_test.go` next to `foo.go`) rather than in a separate `tests/` tre
 - [x] T001 Initialize the Go module as `github.com/sgykfjsm/miko-post` with `go 1.24` in `go.mod` (per research R-001, R-002)
 - [x] T002 [P] Create the package skeleton directories `cmd/mp/`, `internal/{cli,gui,post,config,logging,version}/`, `internal/sink/{telegram,obsidian}/`, and `testdata/` per the plan's Source Code layout
 - [ ] T003 [P] Add and pin dependencies `fyne.io/fyne/v2@v2.8.1`, `github.com/pelletier/go-toml/v2@v2.4.3`, `github.com/oklog/ulid/v2@v2.1.2` in `go.mod` and commit `go.sum`
-  - **Deferred in Batch 1.** Go records a dependency only when a package imports it: `go get` marks all three `// indirect` and `go mod tidy` removes them, leaving `go.sum` empty. Pin each one in the batch that first imports it — go-toml in the settings batch, ULID in the orchestrator batch, Fyne in the GUI batch. The intended versions are recorded in research.md (R-003, R-004, R-007).
+  - **Deferred in Batch 1, partially done in Batch 3.** Go records a dependency only when a package imports it: `go get` marks all three `// indirect` and `go mod tidy` removes them, leaving `go.sum` empty. Pin each one in the batch that first imports it — go-toml in the settings batch, ULID in the orchestrator batch, Fyne in the GUI batch. The intended versions are recorded in research.md (R-003, R-004, R-007).
+  - `github.com/pelletier/go-toml/v2@v2.4.3` is pinned as a **direct** requirement as of the settings batch (T016), with `go.sum` populated. `github.com/oklog/ulid/v2@v2.1.2` and `fyne.io/fyne/v2@v2.8.1` remain outstanding.
 - [x] T004 [P] Implement build-time version and commit variables with a `runtime/debug.ReadBuildInfo()` fallback in `internal/version/version.go` (research R-009, resolves A-008)
 - [x] T005 [P] Add a `Makefile` at the repository root with `build` (including `-ldflags -X` version stamping), `test`, `race`, `vet`, and `install` targets
 
@@ -59,16 +60,16 @@ neither can be retrofitted later without rewriting every story.
 
 ### Settings
 
-- [ ] T011 [P] Implement the `Secret` type whose `String`, `GoString`, `MarshalJSON`, and `LogValue` all redact, with a single `Reveal()` accessor, in `internal/config/secret.go` (FR-043, FR-069)
-- [ ] T012 [P] Write tests asserting `Secret` redacts under `fmt`, `%v`, `%#v`, `encoding/json`, and `slog`, in `internal/config/secret_test.go` (FR-043, FR-069)
-- [ ] T013 [P] Implement XDG config- and state-path resolution treating unset **and empty** variables as absent, in `internal/config/paths.go` (FR-053, FR-065)
-- [ ] T014 [P] Write path-resolution tests for `XDG_CONFIG_HOME`/`XDG_STATE_HOME` set, unset, and set-but-empty, in `internal/config/paths_test.go` (FR-053, FR-065)
-- [ ] T015 Define the settings structs and all defaults from `contracts/config-schema.md` in `internal/config/settings.go` (FR-055, FR-056)
-- [ ] T016 Implement loading with `go-toml/v2` strict decoding (`DisallowUnknownFields`) in `internal/config/load.go` (FR-052, FR-054, research R-004)
-- [ ] T017 Implement validation that accumulates **every** problem before returning one aggregated error, in `internal/config/validate.go` (FR-055, FR-058)
-- [ ] T018 Implement credential resolution with `MIKO_POST_TELEGRAM_BOT_TOKEN` taking precedence over `sink.telegram.bot_token`, as the only environment-variable override in v0.1, in `internal/config/credential.go` (FR-042)
-- [ ] T019 [P] Write credential-precedence tests covering env-only, file-only, both-set (env wins), and neither-set-while-enabled (validation error), in `internal/config/credential_test.go` (FR-042, FR-055)
-- [ ] T020 Add TOML fixtures (valid, unknown key, non-namespaced `[telegram]`, missing required key, all-disabled) in `testdata/config/` and the loader tests in `internal/config/load_test.go` (FR-054, FR-058)
+- [x] T011 [P] Implement the `Secret` type whose `String`, `GoString`, `MarshalJSON`, and `LogValue` all redact, with a single `Reveal()` accessor, in `internal/config/secret.go` (FR-043, FR-069)
+- [x] T012 [P] Write tests asserting `Secret` redacts under `fmt`, `%v`, `%#v`, `encoding/json`, and `slog`, in `internal/config/secret_test.go` (FR-043, FR-069)
+- [x] T013 [P] Implement XDG config- and state-path resolution treating unset **and empty** variables as absent, in `internal/config/paths.go` (FR-053, FR-065)
+- [x] T014 [P] Write path-resolution tests for `XDG_CONFIG_HOME`/`XDG_STATE_HOME` set, unset, and set-but-empty, in `internal/config/paths_test.go` (FR-053, FR-065)
+- [x] T015 Define the settings structs and all defaults from `contracts/config-schema.md` in `internal/config/settings.go` (FR-055, FR-056)
+- [x] T016 Implement loading with `go-toml/v2` strict decoding (`DisallowUnknownFields`) in `internal/config/load.go` (FR-052, FR-054, research R-004)
+- [x] T017 Implement validation that accumulates **every** problem before returning one aggregated error, in `internal/config/validate.go` (FR-055, FR-058)
+- [x] T018 Implement credential resolution with `MIKO_POST_TELEGRAM_BOT_TOKEN` taking precedence over `sink.telegram.bot_token`, as the only environment-variable override in v0.1, in `internal/config/credential.go` (FR-042)
+- [x] T019 [P] Write credential-precedence tests covering env-only, file-only, both-set (env wins), and neither-set-while-enabled (validation error), in `internal/config/credential_test.go` (FR-042, FR-055)
+- [x] T020 Add TOML fixtures (valid, unknown key, non-namespaced `[telegram]`, missing required key, all-disabled) in `testdata/config/` and the loader tests in `internal/config/load_test.go` (FR-054, FR-058)
 
 ### Diagnostics foundation
 
