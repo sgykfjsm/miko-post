@@ -384,7 +384,7 @@ func resolvedName(named <-chan string) string {
 // every panic, and deliver preserves Send's for that purpose, but a Name panic
 // is discarded here — so a sink that panics in Name while delivering
 // successfully leaves no evidence anywhere, and the information is gone by the
-// time T073 could record it. Recorded as issue #109 rather than fixed here:
+// time T073 could record it. Recorded as issue #110 rather than fixed here:
 // there is no field on SinkResult for it that would not put an error on a
 // successful result, and inventing one before T073 defines where traces go
 // would be guessing at its shape.

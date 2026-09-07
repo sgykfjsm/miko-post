@@ -68,7 +68,44 @@ completed:
       their own. Verified the squashed tree is byte-identical to the reviewed branch tip acd7d7e
       (both tree f7c45ff). No new dependency: slog is stdlib and the ULID pin stays with batch 5.
 
-in_progress: []
+in_progress:
+  - id: batch-5
+    summary: >-
+      Orchestrator - post.Service and post.Outcome: one ULID per post, every sink in its own
+      goroutine under its own deadline from context.Background(), an orchestrator-enforced backstop
+      for sinks that cannot be cancelled, all results awaited and aggregated
+    tasks: [T025, T026]
+    issues: [26, 27]
+    pins: "github.com/oklog/ulid/v2@v2.1.2"
+    pr: 108
+    branch: sgykfjsm/batch-5-orchestrator
+    state: open
+    review_verdict: passed-with-notes
+    review_cycles: 3
+    fix_passes: 3
+    coverage: "100.0%"
+    review_run_state: "~/.agents/review-runs/sgykfjsm__miko-post/20260907T145801Z-e70132b9/"
+    note: >-
+      Completes Phase 2 Foundational. Also carries the Batch 4 merge record (7123424). Pre-satisfies
+      T052, T054 and T053's reporting half; sub-notes recorded under those tasks.
+    decisions_taken:
+      - id: DEC-A1
+        question: "does the orchestrator enforce the per-sink timeout, or is cooperation a Sink obligation?"
+        decision: >-
+          Enforce in the orchestrator. Delivery runs on a buffered channel and run stops waiting at
+          timeout + a 250ms grace, abandoning the goroutine. The context stays primary; the grace
+          exists so a cooperative sink's own error wins deterministically rather than racing the
+          backstop. Accepted costs, documented in code: the abandoned goroutine outlives the post
+          (~4.9 KiB each, reclaimed on unblock, uncapped across posts, and spinning rather than
+          parked when a sink's error has a cyclic Unwrap), and a write completed after abandonment
+          still lands, so a user can be told "timed out" and later find the note.
+        why: >-
+          T031's obsidian sink cannot honour a context - os.OpenFile and os.File.Write take none -
+          so a vault on a synced or network mount would otherwise hold the post open indefinitely
+          with its sibling's finished result unreachable.
+    followups_filed:
+      - {number: 109, subject: "config.Validate has no upper bound on sink_timeout_seconds; 18446744074 wraps to a 290ms deadline", sources: [ADV-014]}
+      - {number: 110, subject: "a panic from Sink.Name is discarded, so FR-071 can never record it", sources: [ADV-012]}
 blockers: []
 
 time_sensitive:
@@ -168,7 +205,6 @@ batch_4_review_notes:
       - {id: CON-002, reason: "accepted as history and disclosed in the PR body; the work-log records what was true when written"}
 
 remaining_batches:
-  - {id: 5, name: Orchestrator, tasks: "T025-T026", pins: "ulid/v2", requires: [2, 3, 4]}
   - {id: 6, name: "US1 MVP (CLI)", tasks: "T027-T040"}
   - {id: 7, name: "US2 GUI", tasks: "T041-T051", pins: "fyne/v2"}
   - {id: 8, name: "US3 sink independence", tasks: "T052-T058"}

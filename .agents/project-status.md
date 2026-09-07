@@ -14,7 +14,7 @@ independently, from either a CLI or a GUI front door, through one shared posting
 per PR, driven by the `run-batch-cycle` skill.
 
 - Phase 1 Setup — complete (Batch 1, `0a00212`, PR #93)
-- Phase 2 Foundational — **3 of 4 concerns complete** (posting core contracts, settings, diagnostics); the orchestrator (T025–T026) remains
+- Phase 2 Foundational — **complete** (posting core contracts, settings, diagnostics, orchestrator), pending PR #108
 - Phases 3-9 (six user stories, polish) — not started
 
 ## Completed
@@ -34,8 +34,12 @@ per PR, driven by the `run-batch-cycle` skill.
 
 ## In progress
 
-Nothing mid-flight. PR #106 is merged; branch `sgykfjsm/batch-5-orchestrator` is cut from the
-merged `main` and carries the Batch 4 merge record, ready for Batch 5.
+**Batch 5 — Orchestrator.** PR #108, branch `sgykfjsm/batch-5-orchestrator`, open and reviewed
+`passed-with-notes` after three fix passes across three cycles. T025–T026 complete (issues
+#26–#27). Adds `post.Service` and `post.Outcome`, pins `oklog/ulid/v2@v2.1.2`, and **completes
+Phase 2 Foundational** — user story work can begin. 100.0% statement coverage.
+
+Also carries the Batch 4 merge record, which had no PR of its own.
 
 ## Review follow-ups
 
@@ -61,7 +65,9 @@ None blocking. Two items are time-sensitive rather than blocking:
 ## Next best action
 
 Merge PR #108, then run `run-batch-cycle` for **Batch 6 — US1 MVP (CLI)** (T027–T040, issues
-#28–#41).
+#28–#41). Batch 6 also owns #109 (no upper bound on `sink_timeout_seconds`, whichever task converts
+it to a `time.Duration`) and #110 (a `Name()` panic leaves no trace for FR-071) alongside the three
+obligations already listed.
 
 Batch 6 wires the front door, so it owns the three obligations Batch 5 correctly did not:
 #107 (`logging.Open` does not apply `ResolvePath`, so a default install writes nothing — T039),
@@ -87,9 +93,11 @@ Corrected during the Batch 5 review.
 | 9 | FR-018's all-sinks-disabled check stays out of `config.Load` — a front-door rule (T081 CLI, T082 GUI). `data-model.md` and `plan.md` amended. | `data-model.md`, `plan.md`, PR #100 |
 | 10 | The logging type with no logging methods: `Logger.Post(messageID)` returns the only type that can emit. `message_id` is contractually on every record, and an attribute callers are asked to remember is one they forget — requiring it to *construct* the emitter makes the omission inexpressible. The event name travels in slog's message slot for the same reason: slog always emits a message, so the field cannot go missing. | `internal/logging/logger.go`, PR #106 |
 | 11 | `Open` returns no error and no `*Degradation`. FR-076 requires a diagnostics failure to change nothing about the post, and an error return invites the caller that treats it as fatal or holds a nil `*Logger`; a second `*Degradation` return invited emitting FR-076's single warning twice. A discarding logger is still a logger, and `Degraded()` is the one source of truth — it also covers a write that fails after a successful open. | `internal/logging/logger.go`, PR #106 |
+| 12 | `Open` refuses a non-regular file at the log path before opening it. `os.OpenFile` on a FIFO blocks inside `open(2)` until a reader attaches, so a named pipe at the log path stopped the post dead — no degradation, no warning, nothing. `os.Stat` not `Lstat`, so a symlink to a regular file still works. Device nodes are allowed: `logging.path` has no disable toggle, so `/dev/null` is how a user opts out. | `internal/logging/logger.go`, PR #106 |
 | 13 | The bot-token scrub is a chokepoint in `internal/logging`, not call-site discipline. The contract requires an `error` field on failures and its only natural source is `SinkResult.Err` — a `*url.Error` whose URL carries the token, which no value type can defend because an error has no `LogValue` and slog hands it to `json.Marshal`. `Options.Redact` takes `config.Secret`s and `ReplaceAttr` removes them at every depth. Exact-substring, so it cannot mangle legitimate text. **T040/T063 must pass the resolved token.** | `internal/logging/logger.go`, PR #106 |
 | 14 | The emission path `recover()`s and latches a panic as a degradation. `Options.Writer` is where rotation's rename/reopen logic will live, and a panic there would unwind into the sink's goroutine — diagnostics changing the post's outcome, which is the one thing FR-076 forbids. | `internal/logging/logger.go`, PR #106 |
-| 12 | `Open` refuses a non-regular file at the log path before opening it. `os.OpenFile` on a FIFO blocks inside `open(2)` until a reader attaches, so a named pipe at the log path stopped the post dead — no degradation, no warning, nothing. `os.Stat` not `Lstat`, so a symlink to a regular file still works. Device nodes are allowed: `logging.path` has no disable toggle, so `/dev/null` is how a user opts out. | `internal/logging/logger.go`, PR #106 |
+| 15 | The orchestrator enforces the per-sink timeout rather than trusting each sink to honour its context. `os.OpenFile`/`os.File.Write` take no context, so T031's obsidian sink on a synced or network mount would otherwise hold a post open indefinitely with its sibling's finished result unreachable. Delivery runs on a buffered channel and `run` stops waiting at timeout + a 250 ms grace, abandoning the goroutine. The context stays primary; the grace makes a cooperative sink's own error win deterministically. Accepted: an abandoned goroutine (~4.9 KiB, uncapped, reclaimed on unblock) and a possible phantom write. | `internal/post/service.go`, PR #108 |
+| 16 | Both of a `Sink`'s methods are sink code and both run inside the bound. `Name()` was outside it twice — first outside the panic guard, then outside the timer — and each time reproduced the same class of failure the other method's guard existed to prevent. The name is published on a buffered channel so abandonment still attributes the result. | `internal/post/service.go`, PR #108 |
 
 ## Touched files
 
@@ -101,5 +109,7 @@ Corrected during the Batch 5 review.
   `contracts/config-schema.md`, `data-model.md`, `plan.md`
 - `internal/logging/` — `events.go`, `logger.go`, their tests, `logger_unix_test.go` (the FIFO
   case, build-tagged `unix`), and `export_test.go`
-- `internal/post/result.go` — one comment corrected
+- `internal/post/` — `service.go`, `service_test.go` (the orchestrator), and `result.go` with one
+  comment corrected
+- `go.mod`, `go.sum` — `oklog/ulid/v2@v2.1.2` as a direct requirement
 - `.specify/integrations/claude.manifest.json` — spec-kit installer timestamp, unrelated to the feature
