@@ -68,47 +68,59 @@ completed:
       their own. Verified the squashed tree is byte-identical to the reviewed branch tip acd7d7e
       (both tree f7c45ff). No new dependency: slog is stdlib and the ULID pin stays with batch 5.
 
-in_progress:
   - id: batch-5
     summary: >-
       Orchestrator - post.Service and post.Outcome: one ULID per post, every sink in its own
       goroutine under its own deadline from context.Background(), an orchestrator-enforced backstop
-      for sinks that cannot be cancelled, all results awaited and aggregated
+      for sinks that cannot be cancelled, all results awaited and aggregated. Completes Phase 2.
     tasks: [T025, T026]
+    partial_tasks: [T003]
+    pre_satisfies: [T052, T054, T055]
     issues: [26, 27]
     pins: "github.com/oklog/ulid/v2@v2.1.2"
+    commits: [336fd7a, 364d31a, 177a5ff, 9c71dd7, 523e79a]
+    squashed_as: 35d24e2
     pr: 108
-    branch: sgykfjsm/batch-5-orchestrator
-    state: open
+    state: merged
+    merged_at: 2026-09-08
     review_verdict: passed-with-notes
     review_cycles: 3
     fix_passes: 3
     coverage: "100.0%"
     review_run_state: "~/.agents/review-runs/sgykfjsm__miko-post/20260907T145801Z-e70132b9/"
     note: >-
-      Completes Phase 2 Foundational. Also carries the Batch 4 merge record (7123424). Pre-satisfies
-      T052, T054 and T053's reporting half; sub-notes recorded under those tasks.
-    decisions_taken:
-      - id: DEC-A1
-        question: "does the orchestrator enforce the per-sink timeout, or is cooperation a Sink obligation?"
-        decision: >-
-          Enforce in the orchestrator. Delivery runs on a buffered channel and run stops waiting at
-          timeout + a 250ms grace, abandoning the goroutine. The context stays primary; the grace
-          exists so a cooperative sink's own error wins deterministically rather than racing the
-          backstop. Accepted costs, documented in code: the abandoned goroutine outlives the post
-          (~4.9 KiB each, reclaimed on unblock, uncapped across posts, and spinning rather than
-          parked when a sink's error has a cyclic Unwrap), and a write completed after abandonment
-          still lands, so a user can be told "timed out" and later find the note.
-        why: >-
-          T031's obsidian sink cannot honour a context - os.OpenFile and os.File.Write take none -
-          so a vault on a synced or network mount would otherwise hold the post open indefinitely
-          with its sibling's finished result unreachable.
-    followups_filed:
-      - {number: 109, subject: "config.Validate has no upper bound on sink_timeout_seconds; 18446744074 wraps to a 290ms deadline", sources: [ADV-014]}
-      - {number: 110, subject: "a panic from Sink.Name is discarded, so FR-071 can never record it", sources: [ADV-012]}
+      Verified the squashed tree is byte-identical to the reviewed tip 523e79a (both tree 049683e).
+      Also carried the Batch 4 merge record (7123424). The cycle-2 correctness review built 36
+      mutants and killed 28; all eight survivors were unfailable assertions, now closed. Statement
+      coverage read 100% through all three cycles and flagged none of them.
+    decision:
+      id: DEC-A1
+      decision: >-
+        The orchestrator enforces the per-sink timeout rather than trusting each sink to honour its
+        context. Delivery runs on a buffered channel and run stops waiting at timeout + a 250ms
+        grace, abandoning the goroutine. Accepted costs: an abandoned goroutine (~4.9 KiB, uncapped,
+        reclaimed on unblock, spinning rather than parked when a sink's error has a cyclic Unwrap)
+        and a possible phantom write.
+      why: >-
+        T031's obsidian sink cannot honour a context - os.OpenFile and os.File.Write take none - so
+        a vault on a synced or network mount would otherwise hold a post open indefinitely with its
+        sibling's finished result unreachable.
+
+in_progress: []
 blockers: []
 
 time_sensitive:
+  - issue: 109
+    note: >-
+      config.Validate bounds sink_timeout_seconds only from below, and 18446744074 wraps to a
+      positive 290ms deadline that defeats both guards batch 5 added. Owned by whichever task
+      converts seconds to a time.Duration.
+    deadline: before the first front door converts the setting (T036)
+  - issue: 110
+    note: >-
+      A panic from Sink.Name is discarded, so FR-071 can never record it. The value is gone before
+      T073 could use it, so closing this needs a change in nameOf itself.
+    deadline: with or before T073
   - issue: 107
     note: >-
       logging.Open does not apply ResolvePath, so a Logger built from settings with logging.path
@@ -134,11 +146,15 @@ time_sensitive:
     deadline: before tagging v0.1.0
 
 next_best_action: >-
-  Merge PR #108 (Batch 5), then run run-batch-cycle for Batch 6 - US1 MVP (CLI) (T027-T040, issues
-  #28-#41). Batch 6 is where the front door is wired, so it owns the three obligations batch 5
-  correctly did not: issue #107 (logging.Open does not apply ResolvePath, T039), the Options.Redact
-  argument that makes the token scrub live (#41, T040), and issue #98's Targeter interface plus the
-  path field on the obsidian events (T030, T040).
+  Run run-batch-cycle for Batch 6 - US1 MVP (CLI) (T027-T040, issues #28-#41) on branch
+  sgykfjsm/batch-6-us1-cli, which already carries the Batch 5 merge record. Batch 6 is the first
+  end-to-end slice and the first batch to wire a front door, so it inherits five obligations that
+  earlier batches correctly declined: #107 (logging.Open does not apply ResolvePath, so a default
+  install writes nothing - T039), #41's Options.Redact argument without which the token scrub is
+  inert (T040), #98's Targeter interface and the path field on the obsidian events (T030, T040),
+  #109's upper bound on sink_timeout_seconds at whichever task converts seconds to a Duration
+  (T036), and #110 if the Name-panic trace is to be recorded at all. It is also the largest batch
+  so far at fourteen tasks - triage should consider whether it splits.
 
 review_followups_filed:
   filed_at: 2026-09-07
@@ -205,7 +221,6 @@ batch_4_review_notes:
       - {id: CON-002, reason: "accepted as history and disclosed in the PR body; the work-log records what was true when written"}
 
 remaining_batches:
-  - {id: 6, name: "US1 MVP (CLI)", tasks: "T027-T040"}
   - {id: 7, name: "US2 GUI", tasks: "T041-T051", pins: "fyne/v2"}
   - {id: 8, name: "US3 sink independence", tasks: "T052-T058"}
   - {id: 9, name: "US4 formatting rescue", tasks: "T059-T064"}
@@ -235,10 +250,12 @@ touched_files:
   - internal/logging/logger_test.go
   - internal/logging/logger_unix_test.go
   - internal/logging/export_test.go
+  - internal/post/service.go
+  - internal/post/service_test.go
 
 assumptions:
   - >-
     The batch decomposition above is re-derived by run-batch-cycle's triage step each run; it is
     recorded here for orientation, not as a binding plan.
 
-last_updated: 2026-09-07
+last_updated: 2026-09-08

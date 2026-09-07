@@ -14,8 +14,8 @@ independently, from either a CLI or a GUI front door, through one shared posting
 per PR, driven by the `run-batch-cycle` skill.
 
 - Phase 1 Setup — complete (Batch 1, `0a00212`, PR #93)
-- Phase 2 Foundational — **complete** (posting core contracts, settings, diagnostics, orchestrator), pending PR #108
-- Phases 3-9 (six user stories, polish) — not started
+- Phase 2 Foundational — **complete** (posting core contracts, settings, diagnostics, orchestrator)
+- Phases 3-9 (six user stories, polish) — not started; Batch 6 is the first end-to-end slice
 
 ## Completed
 
@@ -31,15 +31,15 @@ per PR, driven by the `run-batch-cycle` skill.
   `slog` JSON-handler logger (T021–T024, issues #22–#25). No new dependency. PR #106, merged to
   `main` as `8b7bed6` on 2026-09-07; review verdict passed-with-notes after one fix cycle, 100%
   statement coverage. Also carried three `.agents` bookkeeping commits that had no PR of their own.
+- **Batch 5** — orchestrator: `post.Service` and `post.Outcome`, with the per-sink timeout enforced
+  by the orchestrator rather than trusted to each sink (T025–T026, issues #26–#27). Pins
+  oklog/ulid/v2@v2.1.2. PR #108, merged to `main` as `35d24e2` on 2026-09-08; review verdict
+  passed-with-notes after three fix cycles, 100% statement coverage. **Completes Phase 2.**
 
 ## In progress
 
-**Batch 5 — Orchestrator.** PR #108, branch `sgykfjsm/batch-5-orchestrator`, open and reviewed
-`passed-with-notes` after three fix passes across three cycles. T025–T026 complete (issues
-#26–#27). Adds `post.Service` and `post.Outcome`, pins `oklog/ulid/v2@v2.1.2`, and **completes
-Phase 2 Foundational** — user story work can begin. 100.0% statement coverage.
-
-Also carries the Batch 4 merge record, which had no PR of its own.
+Nothing mid-flight. PR #108 is merged; branch `sgykfjsm/batch-6-us1-cli` is cut from the merged
+`main` and carries the Batch 5 merge record, ready for Batch 6.
 
 ## Review follow-ups
 
@@ -64,10 +64,22 @@ None blocking. Two items are time-sensitive rather than blocking:
 
 ## Next best action
 
-Merge PR #108, then run `run-batch-cycle` for **Batch 6 — US1 MVP (CLI)** (T027–T040, issues
-#28–#41). Batch 6 also owns #109 (no upper bound on `sink_timeout_seconds`, whichever task converts
-it to a `time.Duration`) and #110 (a `Name()` panic leaves no trace for FR-071) alongside the three
-obligations already listed.
+Run `run-batch-cycle` for **Batch 6 — US1 MVP (CLI)** (T027–T040, issues #28–#41) on
+`sgykfjsm/batch-6-us1-cli`.
+
+Batch 6 is the first end-to-end slice and the first batch to wire a front door, so it inherits five
+obligations earlier batches correctly declined:
+
+- **#107** — `logging.Open` does not apply `ResolvePath`, so a default install writes no
+  diagnostics at all (T039).
+- **#41** — T040 must pass `Options.Redact` or the bot-token scrub is inert.
+- **#98** — the settled `Targeter` interface and the `path` field on the obsidian events (T030,
+  T040). `Target()` must return what `Send` resolved, never re-resolve.
+- **#109** — an upper bound on `sink_timeout_seconds`, at whichever task converts seconds to a
+  `time.Duration` (T036).
+- **#110** — a `Name()` panic leaves no trace for FR-071, if that is to be recorded at all.
+
+At fourteen tasks it is also the largest batch so far; triage should decide whether it splits.
 
 Batch 6 wires the front door, so it owns the three obligations Batch 5 correctly did not:
 #107 (`logging.Open` does not apply `ResolvePath`, so a default install writes nothing — T039),
