@@ -29,6 +29,42 @@ const (
 	reasonFailed   = "delivery failed"
 )
 
+// unknownSinkName stands in when a sink's own Name() cannot be obtained.
+//
+// Name() is sink code and can panic like any other, so the result for a sink
+// that failed that way still has to be attributable to *something*. A sentinel
+// is greppable and honest; an empty Name would give the front door a blank line
+// and the log a record that names no destination.
+const unknownSinkName = "unknown"
+
+// enforcementGrace is how long past its own deadline a sink is given to notice
+// cancellation before the orchestrator stops waiting for it.
+//
+// The per-sink context is still the primary mechanism, and a sink that honours
+// it returns its own error with its own context — which is more informative
+// than anything synthesised out here. Without a grace period the context
+// deadline and the orchestrator's timer fire at the same instant, so which
+// error a cooperative sink's result carried would be a race.
+//
+// The backstop only decides the outcome for a sink that cannot be cancelled at
+// all, and for those the extra quarter second is irrelevant next to a stalled
+// mount.
+const enforcementGrace = 250 * time.Millisecond
+
+// defaultSinkTimeout is FR-015's documented default, used when New is handed a
+// duration that cannot bound anything.
+const defaultSinkTimeout = 60 * time.Second
+
+// errAbnormalExit is the diagnostic for a delivery goroutine that ended without
+// returning and without panicking.
+//
+// runtime.Goexit does that, and so does panic(nil) when a program is built or
+// run with panicnil=1. Both run deferred functions, so the recover below sees
+// nothing to recover and the named result would otherwise be returned as its
+// zero value: no name, no reason for the front door, no error for the log. This
+// keeps such an exit a well-formed failure.
+var errAbnormalExit = errors.New("the delivery goroutine ended without returning")
+
 // Service runs one post across the sinks it was given.
 //
 // It holds the sinks rather than the settings, because deciding which sinks
@@ -47,8 +83,10 @@ type Service struct {
 	timeout time.Duration
 
 	// newID generates the per-post correlation identifier. A field rather than
-	// a direct call so that the failure branch below is reachable from a test;
-	// see export_test.go. Nothing outside this package can replace it.
+	// a direct call so that identifier's failure branch is reachable from a
+	// test, which sets it directly — this package's tests are in-package, so
+	// no export_test.go seam is needed. Unexported, so nothing outside this
+	// package can replace it.
 	newID func() (ulid.ULID, error)
 }
 
@@ -59,6 +97,22 @@ type Service struct {
 // each get the full duration, measured independently from the moment that sink
 // starts.
 func New(sinks []Sink, timeout time.Duration) *Service {
+	// A duration that cannot bound anything is replaced by FR-015's default.
+	//
+	// config.Validate already requires posting.sink_timeout_seconds > 0, so a
+	// wired application cannot get here — but the conversion from seconds is
+	// the caller's, and `time.Duration(seconds) * time.Second` overflows
+	// int64 silently: a settings file with 10000000000 passes validation and
+	// converts to roughly -2346317h. Passed through, that would expire every
+	// context before its sink was entered and report "request timed out" for a
+	// post nothing ever attempted, which is a far worse diagnosis than using
+	// the documented default. The upper bound belongs in config's validation;
+	// this is the floor that keeps a misconfiguration from looking like a
+	// network problem.
+	if timeout <= 0 {
+		timeout = defaultSinkTimeout
+	}
+
 	return &Service{
 		sinks:   sinks,
 		timeout: timeout,
@@ -143,7 +197,7 @@ func (s *Service) Post(message Message) Outcome {
 		go func(index int, sink Sink) {
 			defer running.Done()
 
-			results[index] = s.deliver(sink, message)
+			results[index] = s.run(sink, message)
 		}(i, sink)
 	}
 
@@ -152,6 +206,105 @@ func (s *Service) Post(message Message) Outcome {
 	outcome.Results = results
 
 	return outcome
+}
+
+// run bounds one sink's delivery, whatever the sink does, and is the only
+// thing Post's goroutines call.
+//
+// The per-sink context is handed to the sink and is the primary mechanism, but
+// it is only an *offer*: Send has to consult it. A sink doing a blocking
+// syscall cannot, and that is not a hypothetical — the obsidian sink (T031)
+// writes with os.OpenFile and os.File.Write, neither of which takes a context,
+// so a vault on a synced or network-backed path (iCloud Drive, Dropbox, SMB,
+// sshfs) blocks for as long as the mount does, and a hard-mounted dead export
+// blocks forever. Before this backstop existed, such a sink held the whole post
+// open past its deadline with no upper bound, and its sibling's already-finished
+// result stayed unreachable the entire time. That is one sink deciding another's
+// reported outcome, which principle I forbids, arriving by the one route the
+// panic guard does not cover.
+//
+// So delivery runs in its own goroutine and this one stops waiting after the
+// deadline plus a grace period. Two consequences are accepted deliberately
+// rather than hidden:
+//
+//   - The abandoned goroutine outlives the post. It is one goroutine per hung
+//     submission, it holds no lock the caller needs, and its send cannot block
+//     because the channel is buffered — so nothing the caller does depends on
+//     it ever finishing.
+//   - A write that the sink completes after we stopped waiting still lands. The
+//     user is told the sink timed out and a note may appear in the vault
+//     afterwards. Reporting a timeout for work that was abandoned is the honest
+//     description of what this process knows; the alternative was a front door
+//     that hangs with no report at all.
+func (s *Service) run(sink Sink, message Message) SinkResult {
+	name := s.nameOf(sink)
+	started := time.Now()
+
+	// Buffered, so the abandoned goroutine's send always completes and the
+	// goroutine can exit. An unbuffered channel would park it forever on a
+	// receive nobody is going to make.
+	done := make(chan SinkResult, 1)
+
+	go func() {
+		// The send is deferred, and the value it sends is seeded with the
+		// abnormal-exit failure before delivery starts.
+		//
+		// runtime.Goexit terminates this goroutine after running its deferred
+		// functions but without completing the statement it was in, so a plain
+		// `done <- s.deliver(...)` never sends at all: run would then wait out
+		// the whole timer and report a timeout for a sink that had already
+		// stopped. A deferred send always happens, and on that path it carries
+		// this seed rather than a value deliver never returned.
+		outcome := SinkResult{
+			Name:    name,
+			Success: false,
+			Reason:  reasonFailed,
+			Err:     errAbnormalExit,
+		}
+
+		defer func() {
+			done <- outcome
+		}()
+
+		outcome = s.deliver(name, sink, message, started)
+	}()
+
+	timer := time.NewTimer(s.timeout + enforcementGrace)
+	defer timer.Stop()
+
+	select {
+	case result := <-done:
+		return result
+	case <-timer.C:
+		return SinkResult{
+			Name:    name,
+			Success: false,
+			Reason:  reasonTimedOut,
+			// Wrapping context.DeadlineExceeded keeps one classification for
+			// both routes to a timeout: whether the sink noticed its deadline
+			// or had to be abandoned, errors.Is says the same thing.
+			Err: fmt.Errorf("sink %s did not return within %s and was abandoned: %w",
+				name, s.timeout+enforcementGrace, context.DeadlineExceeded),
+			Duration: time.Since(started),
+		}
+	}
+}
+
+// nameOf reads a sink's name without letting it take down the post.
+//
+// Name() is sink code. It was called outside any recover until a review
+// pointed out that a panicking Name — or a nil element in the slice T036
+// builds — killed the process along with the sibling's result, falsifying the
+// containment the guard below promises. Two interface methods, one of which
+// was protected.
+func (s *Service) nameOf(sink Sink) (name string) {
+	defer func() {
+		if recover() != nil {
+			name = unknownSinkName
+		}
+	}()
+
+	return sink.Name()
 }
 
 // deliver runs one sink under its own deadline and converts whatever happens
@@ -170,39 +323,46 @@ func (s *Service) Post(message Message) Outcome {
 // anticipated, and a panic crossing this boundary would kill the goroutine, the
 // sibling's report and the exit status together — exactly the coupling
 // principle I forbids, arriving by a route no context discipline can prevent.
-func (s *Service) deliver(sink Sink, message Message) (result SinkResult) {
-	name := sink.Name()
-	started := time.Now()
+//
+// name and started are passed in rather than computed here because run already
+// needed both: it has to be able to attribute a timeout to a sink it abandoned,
+// and the clock has to start before Name() is called so that a slow Name() is
+// counted in Duration rather than excluded from it.
+func (s *Service) deliver(name string, sink Sink, message Message, started time.Time) (result SinkResult) {
+	// Failure-shaped before anything runs, for the exit that stops a panic
+	// without giving recover anything to work with.
+	//
+	// panic(nil) under panicnil=1 is that case: recover() returns nil, so the
+	// handler below does not fire, but the panic is arrested and this function
+	// returns its named result — which would otherwise be a failure with no
+	// name, no reason for the front door and no error for the log. The
+	// runtime.Goexit case is handled a level up, in run, because Goexit
+	// discards this return value entirely.
+	result = SinkResult{Name: name, Success: false, Reason: reasonFailed, Err: errAbnormalExit}
 
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			result = SinkResult{
-				Name:     name,
-				Success:  false,
-				Reason:   reasonFailed,
-				Err:      &panicError{sink: name, value: recovered},
-				Duration: time.Since(started),
+				Name:    name,
+				Success: false,
+				Reason:  reasonFailed,
+				Err:     &panicError{sink: name, value: recovered},
 			}
 		}
+
+		// One place, so every path — success, error, panic, abnormal exit —
+		// reports the time actually spent.
+		result.Duration = time.Since(started)
 	}()
 
 	ctx, cancel := context.WithTimeout(context.Background(), s.timeout)
 	defer cancel()
 
-	err := sink.Send(ctx, message)
-	elapsed := time.Since(started)
-
-	if err != nil {
-		return SinkResult{
-			Name:     name,
-			Success:  false,
-			Reason:   reasonFor(err),
-			Err:      err,
-			Duration: elapsed,
-		}
+	if err := sink.Send(ctx, message); err != nil {
+		return SinkResult{Name: name, Success: false, Reason: reasonFor(err), Err: err}
 	}
 
-	return SinkResult{Name: name, Success: true, Duration: elapsed}
+	return SinkResult{Name: name, Success: true}
 }
 
 // reasonFor picks the display reason for a sink's error.
@@ -284,7 +444,22 @@ func (e *panicError) Error() string {
 // exported fields. The three shapes worth reading are handled explicitly and
 // everything else is reported by type alone, which says what happened without
 // printing state nobody vetted.
-func describePanic(value any) string {
+func describePanic(value any) (description string) {
+	// Rendering a panic value calls a method on it, and that method is the
+	// code that was already panicking. A typed-nil pointer to a sink-defined
+	// error type is the ordinary shape: Error() dereferences the receiver and
+	// faults. Unguarded, that turned this package's recovery into a second,
+	// unrecovered panic — raised not here but wherever the diagnostic record
+	// is assembled (T040, T073), on the deliberate Err.Error() access FR-017
+	// reserves for the log, after deliver had already preserved every result.
+	//
+	// %T on the value is safe: it reads the type, never the value.
+	defer func() {
+		if recover() != nil {
+			description = fmt.Sprintf("a value of type %T whose own rendering panicked", value)
+		}
+	}()
+
 	switch v := value.(type) {
 	case error:
 		return v.Error()

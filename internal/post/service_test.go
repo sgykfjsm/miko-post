@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -244,7 +245,13 @@ func TestOneSinkFailingDoesNotCancelItsSibling(t *testing.T) {
 	watching := &fakeSink{
 		name: "obsidian",
 		send: func(ctx context.Context, _ Message) error {
-			<-firstFailed
+			// Bounded for the same reason as the ordering test: an open
+			// receive turns a regression into a hung binary.
+			select {
+			case <-firstFailed:
+			case <-ctx.Done():
+				return fmt.Errorf("the peer never failed: %w", ctx.Err())
+			}
 
 			// The sibling has failed and its deliver has run its deferred
 			// cancel. If that cancel reached this context, it is already
@@ -533,12 +540,19 @@ func TestResultsFollowTheSinkOrderNotTheCompletionOrder(t *testing.T) {
 
 	firstMayFinish := make(chan struct{})
 
+	// Bounded on the sink's own context, not an open receive. Unguarded, a
+	// sequential regression left this sink waiting for a sibling that had not
+	// been started and the whole binary died on the test timeout, burying which
+	// property actually broke under a goroutine dump.
 	slow := &fakeSink{
 		name: "telegram",
-		send: func(context.Context, Message) error {
-			<-firstMayFinish
-
-			return nil
+		send: func(ctx context.Context, _ Message) error {
+			select {
+			case <-firstMayFinish:
+				return nil
+			case <-ctx.Done():
+				return ctx.Err()
+			}
 		},
 	}
 
@@ -626,10 +640,23 @@ func TestEveryPostGetsItsOwnIdentifier(t *testing.T) {
 		t.Error("the identifier is the zero ULID, which is the generation-failure fallback")
 	}
 
-	// Monotonic within a process, so a reader can order two posts that landed
-	// in the same millisecond.
-	if second.ID.Compare(first.ID) <= 0 {
-		t.Errorf("the second identifier %s does not sort after the first %s", second.ID, first.ID)
+	// Timestamps are non-decreasing, which is what a reader can actually rely
+	// on to order two posts.
+	//
+	// Strict total ordering is deliberately *not* asserted, and the reason is
+	// worth recording: an earlier version of this test required
+	// second.Compare(first) > 0 and flaked. ulid's monotonic reader is
+	// process-wide and re-randomises its entropy whenever the millisecond it
+	// is handed differs from the one it last saw. A draw from another test at
+	// T+1 that takes the shared lock first therefore resets that stored
+	// millisecond, and a draw of ours at T then re-randomises instead of
+	// incrementing — same timestamp as the first identifier, fresh random
+	// entropy, and a coin flip on the comparison. Nothing in FR-066 or R-007
+	// asks for total ordering; correlation needs distinctness, which is
+	// asserted above.
+	if second.ID.Time() < first.ID.Time() {
+		t.Errorf("the second identifier's timestamp %d precedes the first's %d",
+			second.ID.Time(), first.ID.Time())
 	}
 
 	// It must survive as the 26-character string a log record carries.
@@ -653,8 +680,16 @@ func TestAFailureToGenerateAnIdentifierStillPosts(t *testing.T) {
 	sink := succeeds("telegram")
 
 	service := New([]Sink{sink}, generousTimeout)
+	// A *populated* identifier alongside the error, which is what the real
+	// generator does: ulid.New applies SetTime before it reads entropy, so an
+	// entropy failure returns a half-built, non-zero ULID together with the
+	// error. Discarding that partial value is the behaviour under test, and a
+	// fake returning the zero ULID could not test it — the assertion below
+	// would hold whether identifier honoured the error or ignored it.
+	partial := ulid.Make()
+
 	service.newID = func() (ulid.ULID, error) {
-		return ulid.ULID{}, ulid.ErrMonotonicOverflow
+		return partial, ulid.ErrMonotonicOverflow
 	}
 
 	outcome := service.Post(mustMessage(t, "unnamed but delivered"))
@@ -701,13 +736,22 @@ func TestConcurrentPostsOnOneServiceDoNotInterfere(t *testing.T) {
 		ids     = make(map[ulid.ULID]int, posts)
 	)
 
+	// Built on the test goroutine: mustMessage can call t.Fatalf, and FailNow
+	// must not be reached from a goroutine other than the one running the
+	// test — it would fire runtime.Goexit on the worker, leave running.Wait
+	// blocked, and report the failure as a timeout rather than as itself.
+	messages := make([]Message, posts)
+	for i := range messages {
+		messages[i] = mustMessage(t, fmt.Sprintf("post %02d", i))
+	}
+
 	for i := range posts {
 		running.Add(1)
 
 		go func(i int) {
 			defer running.Done()
 
-			outcome := service.Post(mustMessage(t, fmt.Sprintf("post %02d", i)))
+			outcome := service.Post(messages[i])
 
 			if len(outcome.Results) != 2 || !outcome.Succeeded() {
 				t.Errorf("post %02d: %d results, succeeded=%t", i, len(outcome.Results), outcome.Succeeded())
@@ -843,5 +887,386 @@ func TestEachSinkGetsItsOwnDeadline(t *testing.T) {
 	// tell a shared deadline from two independent ones.
 	if gap := seen[0].Sub(seen[1]); gap > timeout/2 || gap < -timeout/2 {
 		t.Errorf("the two deadlines are %s apart, which is more than half the budget", gap)
+	}
+}
+
+// nameOnlySink panics from Name() and never gets as far as Send.
+type nameOnlySink struct {
+	value   any
+	sendErr error
+}
+
+func (s *nameOnlySink) Name() string { panic(s.value) }
+
+func (s *nameOnlySink) Send(context.Context, Message) error { return s.sendErr }
+
+// TestAPanicFromNameIsContainedLikeAnyOther covers the half of the interface
+// the guard used to miss (constitution principle I, FR-014).
+//
+// `Sink` has two methods and both are sink code. deliver's recover was
+// installed after `sink.Name()` had already been called, so a panicking Name
+// escaped it, escaped the delivering goroutine, and killed the process —
+// taking the sibling's finished result with it. That is the exact coupling the
+// recover exists to prevent, reached through the other method.
+//
+// A nil element in the sinks slice is the same defect wearing different
+// clothes, and it is the shape T036 can produce: `make([]post.Sink, 2)` plus
+// index assignment, or appending the result of a constructor that failed.
+func TestAPanicFromNameIsContainedLikeAnyOther(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		// wantDelivered is what Send does, which is what the result must
+		// report regardless of how badly Name behaved.
+		wantDelivered bool
+		sinks         func() []Sink
+	}{
+		{
+			name:          "Name panics but Send delivers",
+			wantDelivered: true,
+			sinks: func() []Sink {
+				return []Sink{&nameOnlySink{value: "name exploded"}, succeeds("obsidian")}
+			},
+		},
+		{
+			name:          "Name panics and Send fails",
+			wantDelivered: false,
+			sinks: func() []Sink {
+				return []Sink{
+					&nameOnlySink{value: "name exploded", sendErr: errors.New("chat not found")},
+					succeeds("obsidian"),
+				}
+			},
+		},
+		{
+			// A nil interface element: Name and Send both fault on it. This is
+			// the shape T036 can produce with make([]post.Sink, 2) plus index
+			// assignment, or by appending a failed constructor's result.
+			name:          "a nil element in the slice",
+			wantDelivered: false,
+			sinks: func() []Sink {
+				return []Sink{nil, succeeds("obsidian")}
+			},
+		},
+		{
+			// A typed nil whose methods dereference the receiver.
+			name:          "a typed nil sink",
+			wantDelivered: false,
+			sinks: func() []Sink {
+				return []Sink{(*nilReceiverSink)(nil), succeeds("obsidian")}
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			sinks := test.sinks()
+
+			outcome := New(sinks, generousTimeout).Post(mustMessage(t, "one sink is broken"))
+
+			// Reaching this line at all is most of the assertion: before the
+			// fix the process died here.
+			if len(outcome.Results) != 2 {
+				t.Fatalf("got %d results, want 2", len(outcome.Results))
+			}
+
+			broken := outcome.Results[0]
+
+			// Whatever else is true, the result is attributable. A sink whose
+			// own name could not be read is reported under the sentinel, never
+			// as an empty string that would give the front door a blank line
+			// and the log a record naming no destination.
+			if broken.Name != unknownSinkName {
+				t.Errorf("Name = %q, want the sentinel %q", broken.Name, unknownSinkName)
+			}
+
+			// Success follows what Send actually did, not what Name did.
+			//
+			// That is deliberate and it is the interesting half of this test.
+			// A sink whose Name panics but whose Send delivers has delivered:
+			// reporting failure would invite the user to send again, and
+			// FR-019 rules out any automatic resend precisely because a
+			// duplicate chat message is worse than a confusing label. So the
+			// unnameable sink keeps its real outcome.
+			if broken.Success != test.wantDelivered {
+				t.Errorf("Success = %t, want %t (it should follow Send, not Name)",
+					broken.Success, test.wantDelivered)
+			}
+
+			if !broken.Success {
+				if broken.Reason != reasonFailed {
+					t.Errorf("Reason = %q, want the fixed-set constant %q", broken.Reason, reasonFailed)
+				}
+
+				if broken.Err == nil {
+					t.Error("the failing result carries no diagnostic error")
+				}
+			}
+
+			// And the sibling is untouched, which is the whole point.
+			if sibling := outcome.Results[1]; !sibling.Success {
+				t.Errorf("the sibling of a broken sink failed: reason=%q err=%v", sibling.Reason, sibling.Err)
+			}
+		})
+	}
+}
+
+// nilReceiverSink has methods that dereference a nil receiver.
+type nilReceiverSink struct {
+	label string
+}
+
+func (s *nilReceiverSink) Name() string { return s.label }
+
+func (s *nilReceiverSink) Send(context.Context, Message) error { return errors.New(s.label) }
+
+// uncooperativeSink ignores its context entirely, the way a blocking syscall
+// does.
+type uncooperativeSink struct {
+	name     string
+	blockFor time.Duration
+	release  chan struct{}
+}
+
+func (s *uncooperativeSink) Name() string { return s.name }
+
+func (s *uncooperativeSink) Send(context.Context, Message) error {
+	if s.release != nil {
+		<-s.release
+
+		return nil
+	}
+
+	time.Sleep(s.blockFor)
+
+	return nil
+}
+
+// TestASinkThatIgnoresItsContextIsAbandoned covers the orchestrator-side bound
+// (FR-015, constitution principle I).
+//
+// The per-sink context is only an offer: `Send` has to consult it. The obsidian
+// sink (T031) cannot — os.OpenFile and os.File.Write take no context — so a
+// vault on a synced or network-backed path blocks for as long as the mount
+// does. Without a backstop such a sink held the post open with no upper bound
+// and its sibling's finished result stayed unreachable the whole time.
+//
+// Both shapes are covered: one that eventually returns long after its deadline,
+// and one that never returns at all. The second is why the assertion is a
+// deadline on a channel rather than a plain call — a regression here hangs.
+func TestASinkThatIgnoresItsContextIsAbandoned(t *testing.T) {
+	t.Parallel()
+
+	const timeout = 100 * time.Millisecond
+
+	tests := []struct {
+		name  string
+		sink  *uncooperativeSink
+		clean func(*uncooperativeSink)
+	}{
+		{
+			name: "returns long after its deadline",
+			sink: &uncooperativeSink{name: "obsidian", blockFor: 5 * time.Second},
+		},
+		{
+			name:  "never returns",
+			sink:  &uncooperativeSink{name: "obsidian", release: make(chan struct{})},
+			clean: func(s *uncooperativeSink) { close(s.release) },
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			if test.clean != nil {
+				// Let the abandoned goroutine exit when the test ends, so the
+				// leak this design accepts does not outlive the run.
+				t.Cleanup(func() { test.clean(test.sink) })
+			}
+
+			service := New([]Sink{test.sink, succeeds("telegram")}, timeout)
+
+			finished := make(chan Outcome, 1)
+
+			go func() {
+				finished <- service.Post(mustMessage(t, "the vault is on a dead mount"))
+			}()
+
+			var outcome Outcome
+
+			// Generous but finite: the point is that Post returns at all, on a
+			// bound the orchestrator owns rather than one the sink grants.
+			select {
+			case outcome = <-finished:
+			case <-time.After(10 * time.Second):
+				t.Fatal("Post did not return; the uncooperative sink is still holding the post open")
+			}
+
+			blocked := resultFor(t, outcome, "obsidian")
+			if blocked.Success {
+				t.Error("the abandoned sink was reported as a success")
+			}
+
+			if blocked.Reason != reasonTimedOut {
+				t.Errorf("Reason = %q, want %q", blocked.Reason, reasonTimedOut)
+			}
+
+			// One classification for both routes to a timeout, whether the
+			// sink noticed its deadline or had to be abandoned.
+			if !errors.Is(blocked.Err, context.DeadlineExceeded) {
+				t.Errorf("Err = %v, want it to wrap context.DeadlineExceeded", blocked.Err)
+			}
+
+			// The sibling's result is reported rather than held hostage.
+			if sibling := resultFor(t, outcome, "telegram"); !sibling.Success {
+				t.Errorf("the sibling was not reported: reason=%q err=%v", sibling.Reason, sibling.Err)
+			}
+		})
+	}
+}
+
+// goexitSink ends its goroutine without returning and without panicking.
+type goexitSink struct{}
+
+func (goexitSink) Name() string { return "telegram" }
+
+func (goexitSink) Send(context.Context, Message) error {
+	runtime.Goexit()
+
+	return nil
+}
+
+// TestAnAbnormalExitStillYieldsAWellFormedFailure covers the exits that run
+// deferred functions with nothing to recover.
+//
+// runtime.Goexit does that, and so does panic(nil) under panicnil=1. The named
+// result would otherwise come back as its zero value: a failure naming no sink,
+// with no Reason for the front door (FR-017) and no Err for the log (FR-070).
+// Fail-closed either way, but a result nobody can act on.
+func TestAnAbnormalExitStillYieldsAWellFormedFailure(t *testing.T) {
+	t.Parallel()
+
+	outcome := New([]Sink{goexitSink{}, succeeds("obsidian")}, generousTimeout).
+		Post(mustMessage(t, "one sink Goexits"))
+
+	if len(outcome.Results) != 2 {
+		t.Fatalf("got %d results, want 2", len(outcome.Results))
+	}
+
+	abnormal := resultFor(t, outcome, "telegram")
+
+	if abnormal.Success {
+		t.Error("an abnormally exiting sink was reported as a success")
+	}
+
+	if abnormal.Reason != reasonFailed {
+		t.Errorf("Reason = %q, want %q", abnormal.Reason, reasonFailed)
+	}
+
+	if !errors.Is(abnormal.Err, errAbnormalExit) {
+		t.Errorf("Err = %v, want it to wrap errAbnormalExit", abnormal.Err)
+	}
+
+	if sibling := resultFor(t, outcome, "obsidian"); !sibling.Success {
+		t.Errorf("the sibling failed: %v", sibling.Err)
+	}
+}
+
+// unrenderablePanic is a typed nil whose Error dereferences its receiver.
+type unrenderablePanic struct {
+	message string
+}
+
+func (e *unrenderablePanic) Error() string { return "sink: " + e.message }
+
+// TestAPanicValueThatCannotRenderDoesNotPanicAgain covers the diagnostic path
+// (FR-071).
+//
+// The recovered value is rendered by calling a method on it — and that method
+// belongs to the code that was already panicking. A typed nil pointer to a
+// sink-defined error type is the ordinary shape. Unguarded, the render faulted
+// at the deliberate Err.Error() access FR-017 reserves for the log, which is
+// where T040 and T073 will make it — after deliver had already preserved every
+// result.
+func TestAPanicValueThatCannotRenderDoesNotPanicAgain(t *testing.T) {
+	t.Parallel()
+
+	hostile := &fakeSink{
+		name: "telegram",
+		send: func(context.Context, Message) error {
+			var unrenderable *unrenderablePanic
+
+			panic(unrenderable)
+		},
+	}
+
+	outcome := New([]Sink{hostile, succeeds("obsidian")}, generousTimeout).
+		Post(mustMessage(t, "the panic value cannot render itself"))
+
+	failed := resultFor(t, outcome, "telegram")
+	if failed.Err == nil {
+		t.Fatal("no diagnostic error was recorded")
+	}
+
+	// This is the call that used to fault, and it is the one the diagnostic
+	// logger makes.
+	description := failed.Err.Error()
+
+	if !strings.Contains(description, "whose own rendering panicked") {
+		t.Errorf("Err.Error() = %q, want it to report the failed rendering", description)
+	}
+
+	if failed.Reason != reasonFailed {
+		t.Errorf("Reason = %q, want %q", failed.Reason, reasonFailed)
+	}
+
+	if sibling := resultFor(t, outcome, "obsidian"); !sibling.Success {
+		t.Errorf("the sibling failed: %v", sibling.Err)
+	}
+}
+
+// TestNewReplacesATimeoutThatCannotBoundAnything covers the floor on the
+// duration (FR-015).
+//
+// config.Validate requires posting.sink_timeout_seconds > 0, so a wired
+// application cannot reach this — but the seconds-to-Duration conversion is the
+// caller's, and it overflows int64 silently: 10000000000 passes validation and
+// converts to roughly -2346317h. Passed through, that expired every context
+// before its sink was entered and reported "request timed out" for a post
+// nothing had attempted.
+func TestNewReplacesATimeoutThatCannotBoundAnything(t *testing.T) {
+	t.Parallel()
+
+	for _, timeout := range []time.Duration{0, -time.Second, -2346317 * time.Hour} {
+		t.Run(timeout.String(), func(t *testing.T) {
+			t.Parallel()
+
+			// The sink must consult its context, or this subtest cannot
+			// fail for timeout == 0: an already-expired context is invisible
+			// to a sink that never looks at it, and 0 plus the enforcement
+			// grace keeps run's backstop from firing either. With the floor
+			// removed and a context-honouring sink, a zero timeout hands
+			// Send a context that is already Done.
+			sink := &fakeSink{
+				name: "telegram",
+				send: func(ctx context.Context, _ Message) error { return ctx.Err() },
+			}
+
+			outcome := New([]Sink{sink}, timeout).Post(mustMessage(t, "misconfigured"))
+
+			result := resultFor(t, outcome, "telegram")
+			if !result.Success {
+				t.Errorf("the sink reported %q for a timeout of %s; it was never given a chance",
+					result.Reason, timeout)
+			}
+
+			if sink.ran() != 1 {
+				t.Errorf("the sink ran %d times, want 1", sink.ran())
+			}
+		})
 	}
 }

@@ -60,14 +60,17 @@ None blocking. Two items are time-sensitive rather than blocking:
 
 ## Next best action
 
-Run `run-batch-cycle` for **Batch 5 — Orchestrator** (T025–T026, issues #26–#27) on
-`sgykfjsm/batch-5-orchestrator`.
+Merge PR #108, then run `run-batch-cycle` for **Batch 6 — US1 MVP (CLI)** (T027–T040, issues
+#28–#41).
 
-Batch 5 pins `oklog/ulid/v2@v2.1.2` as the first importer (T003, #4), must honour issue #98's
-settled `Targeter` decision while the code is being written rather than discovering it afterwards,
-and is the **first construction site for a `logging.Logger`** — so it inherits #107 (`Open` does not
-apply `ResolvePath`, so a default install writes nothing) and, if it builds the `Options`, the
-`Options.Redact` obligation on #41.
+Batch 6 wires the front door, so it owns the three obligations Batch 5 correctly did not:
+#107 (`logging.Open` does not apply `ResolvePath`, so a default install writes nothing — T039),
+the `Options.Redact` argument that makes the token scrub live (#41, T040), and #98's `Targeter`
+interface plus the `path` field on the obsidian events (T030, T040).
+
+An earlier version of this section assigned #107 to Batch 5 on the belief that the orchestrator
+constructs the `Logger`. It does not: T040 emits from `service.go` and T039 does the construction.
+Corrected during the Batch 5 review.
 
 ## Important decisions
 

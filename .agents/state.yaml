@@ -75,28 +75,33 @@ time_sensitive:
   - issue: 107
     note: >-
       logging.Open does not apply ResolvePath, so a Logger built from settings with logging.path
-      unset - the default - silently writes nothing. Must be handled by the first task that
-      constructs a Logger.
-    deadline: before or during batch-5 (T025)
+      unset - the default - silently writes nothing. Owned by T039, which wires settings, logging
+      and the posting service. An earlier note here assigned it to T025 on the belief that the
+      orchestrator constructs the Logger; it does not - T040 emits events from service.go and T039
+      does the construction, both in batch 6. Corrected during the batch-5 review (CON-001).
+    deadline: before batch-6 (T039)
   - issue: 41
     note: >-
       T040 must construct the logger with Options.Redact carrying the resolved bot token, or the
       chokepoint scrub is inert. Applies to whichever task first builds the Options.
     deadline: before batch-6 (T040)
   - issue: 98
-    note: decision on note-event ownership must be honored when T025/T030/T040 are written
-    deadline: before batch-5 (orchestrator)
+    note: >-
+      Decision on note-event ownership. The part that bound batch 5 is met: Sink is still exactly
+      two methods, so the additive Targeter interface remains possible. Targeter itself, the path
+      field on the three obsidian events, and the midnight-rollover test are still owed by T030 and
+      T040. Target() must return what Send actually resolved and wrote, never re-resolve on call.
+    deadline: before batch-6 (T030, T040)
   - issue: 94
     note: git_commit reads "unknown" on tagged installs; open maintainer decision
     deadline: before tagging v0.1.0
 
 next_best_action: >-
-  Run run-batch-cycle for Batch 5 - Orchestrator (T025-T026, issues #26-#27) on branch
-  sgykfjsm/batch-5-orchestrator, which already carries the Batch 4 merge record. Batch 5 pins
-  oklog/ulid/v2@v2.1.2 as the first importer (T003), must honour issue #98's settled Targeter
-  decision while the code is written, and is the first construction site for a logging.Logger -
-  so it owns issue #107 (Open does not apply ResolvePath) and the Options.Redact obligation on #41
-  unless the front-door tasks take them instead.
+  Merge PR #108 (Batch 5), then run run-batch-cycle for Batch 6 - US1 MVP (CLI) (T027-T040, issues
+  #28-#41). Batch 6 is where the front door is wired, so it owns the three obligations batch 5
+  correctly did not: issue #107 (logging.Open does not apply ResolvePath, T039), the Options.Redact
+  argument that makes the token scrub live (#41, T040), and issue #98's Targeter interface plus the
+  path field on the obsidian events (T030, T040).
 
 review_followups_filed:
   filed_at: 2026-09-07
