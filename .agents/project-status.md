@@ -14,7 +14,7 @@ independently, from either a CLI or a GUI front door, through one shared posting
 per PR, driven by the `run-batch-cycle` skill.
 
 - Phase 1 Setup — complete (Batch 1, `0a00212`, PR #93)
-- Phase 2 Foundational — **3 of 4 concerns complete** (posting core contracts, settings, diagnostics); the orchestrator remains
+- Phase 2 Foundational — **3 of 4 concerns complete** (posting core contracts, settings, diagnostics); the orchestrator (T025–T026) remains
 - Phases 3-9 (six user stories, polish) — not started
 
 ## Completed
@@ -26,17 +26,16 @@ per PR, driven by the `run-batch-cycle` skill.
   credential precedence, and accumulating validation (T011-T020, issues #12-#21). Pins
   go-toml/v2@v2.4.3. PR #100, merged to `main` as `6d84ae9` on 2026-09-07; review verdict
   passed-with-notes after three fix cycles.
+- **Batch 4** — logging foundation: the twelve stable event names as typed `Event` constants with a
+  test that scans the package's own source so an unregistered addition cannot pass silently, and the
+  `slog` JSON-handler logger (T021–T024, issues #22–#25). No new dependency. PR #106, merged to
+  `main` as `8b7bed6` on 2026-09-07; review verdict passed-with-notes after one fix cycle, 100%
+  statement coverage. Also carried three `.agents` bookkeeping commits that had no PR of their own.
 
 ## In progress
 
-**Batch 4 — Logging foundation.** PR #106, branch `sgykfjsm/batch-4-logging`, open and reviewed
-`passed-with-notes` after one fix cycle. T021–T024 complete (issues #22–#25). Adds
-`internal/logging`: the twelve stable event names as typed `Event` constants with a test that scans
-the package's own source so an unregistered addition cannot pass silently, and the `slog`
-JSON-handler logger. 100.0% statement coverage. No new dependency — `slog` is stdlib.
-
-The PR also carries three `.agents` bookkeeping commits that had no PR of their own (the Batch 3
-merge record, the review-follow-up filing record, and a stale-state correction).
+Nothing mid-flight. PR #106 is merged; branch `sgykfjsm/batch-5-orchestrator` is cut from the
+merged `main` and carries the Batch 4 merge record, ready for Batch 5.
 
 ## Review follow-ups
 
@@ -61,9 +60,14 @@ None blocking. Two items are time-sensitive rather than blocking:
 
 ## Next best action
 
-Merge PR #106, then run `run-batch-cycle` for **Batch 5 — Orchestrator** (T025–T026, issues
-#26–#27). Batch 5 pins `oklog/ulid/v2` and must honour issue #98's settled `Targeter` decision
-while the code is being written, not afterwards.
+Run `run-batch-cycle` for **Batch 5 — Orchestrator** (T025–T026, issues #26–#27) on
+`sgykfjsm/batch-5-orchestrator`.
+
+Batch 5 pins `oklog/ulid/v2@v2.1.2` as the first importer (T003, #4), must honour issue #98's
+settled `Targeter` decision while the code is being written rather than discovering it afterwards,
+and is the **first construction site for a `logging.Logger`** — so it inherits #107 (`Open` does not
+apply `ResolvePath`, so a default install writes nothing) and, if it builds the `Options`, the
+`Options.Redact` obligation on #41.
 
 ## Important decisions
 

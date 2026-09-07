@@ -224,3 +224,32 @@ Three findings were deliberately not filed and the reasons are recorded in `stat
 `batch_4_review_notes.followups_filed.not_filed` — the short-write repair claim was narrowed in
 code rather than tracked, the TOCTOU window's reviewer-stated required outcome was explicitly none,
 and the work-log's dangling key reference is history rather than current state.
+
+## 2026-09-07 — Batch 4 merged
+
+PR #106 squash-merged as `8b7bed6`; issues #22–#25 auto-closed. Verified the squashed tree is
+byte-identical to the reviewed branch tip `acd7d7e` — both resolve to tree `f7c45ff` — so what
+landed is what was reviewed. `make check` clean on merged `main`. No CI is configured in this
+repository, so that local gate is the whole gate.
+
+The PR carried seven commits: the implementation, the review fix pass, the three escalated
+decisions, the follow-up record, and the three `.agents` bookkeeping commits that had no PR of their
+own. Squashing collapses them, which is the established convention here — the individual commits
+stay visible on the PR page.
+
+**Ready for Batch 5.** Branch `sgykfjsm/batch-5-orchestrator` is cut from the merged `main` and
+carries this merge record, so it will ship with Batch 5's PR exactly as Batch 3's record shipped
+with Batch 4's. That is the pattern worth keeping: the merge record for batch N lands in batch N+1's
+PR rather than accumulating as unpushed commits on a stale branch, which is how twelve review
+follow-ups went unfiled and needed a catch-up commit.
+
+Three things Batch 5 inherits, all recorded in `state.yaml` under `time_sensitive`:
+
+- **#107** — `logging.Open` does not apply `ResolvePath`, so a `Logger` built from settings with
+  `logging.path` unset (the default) silently writes nothing. T025 is the first task to construct a
+  `Logger`, so it owns this unless the front-door tasks take it.
+- **#98** — the settled `Targeter` decision. `Target()` must return what `Send` actually resolved
+  and wrote, not re-resolve on call; re-resolving reintroduces the local-midnight mismatch the
+  decision exists to avoid.
+- **#4 / T003** — `oklog/ulid/v2@v2.1.2` is pinned by the batch that first imports it, which is
+  this one. Fyne remains outstanding until the GUI batch.
