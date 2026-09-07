@@ -13,4 +13,7 @@ package logging
 //
 // Following internal/config/export_test.go, which uses the same pattern for
 // the same reason.
-var FileKind = fileKind
+var (
+	FileKind    = fileKind
+	UsableAsLog = usableAsLog
+)

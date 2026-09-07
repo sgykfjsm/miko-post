@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1549,11 +1550,6 @@ func TestFileKindNamesEveryRejectedType(t *testing.T) {
 		{name: "directory", mode: os.ModeDir | 0o755, want: "a directory"},
 		{name: "named pipe", mode: os.ModeNamedPipe | 0o600, want: "a named pipe"},
 		{name: "socket", mode: os.ModeSocket | 0o600, want: "a socket"},
-		// A character device carries ModeDevice too, so the ordering of the
-		// two cases in fileKind is what makes this come out as "character"
-		// rather than "block". Both are asserted so a reordering is visible.
-		{name: "character device", mode: os.ModeDevice | os.ModeCharDevice | 0o666, want: "a character device"},
-		{name: "block device", mode: os.ModeDevice | 0o660, want: "a block device"},
 		// Not a symlink: os.Stat follows links, so a symlink mode never
 		// reaches fileKind. This is the fallback arm, driven by the one
 		// mode that names no specific kind.
@@ -1569,6 +1565,76 @@ func TestFileKindNamesEveryRejectedType(t *testing.T) {
 				t.Errorf("FileKind(%s) = %q, want it to mention %q", test.mode, got, test.want)
 			}
 		})
+	}
+}
+
+// TestUsableAsLogAllowsWhatCanBeAppendedTo covers which shapes at the log path
+// are refused and which are not.
+//
+// The device rows are the point. A device node is allowed even though it is not
+// a regular file, because logging.path has no companion "disabled" setting, so
+// /dev/null is how a user turns diagnostics off — and refusing it produced an
+// unsilenceable warning on every post for a path that opens instantly and
+// discards exactly as asked. What stays refused is what cannot be appended to:
+// a FIFO blocks in open(2) until a reader attaches and would stop the post, a
+// socket cannot be opened this way, and a directory fails.
+func TestUsableAsLogAllowsWhatCanBeAppendedTo(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		mode os.FileMode
+		want bool
+	}{
+		{name: "regular file", mode: 0o600, want: true},
+		{name: "character device, as /dev/null is", mode: os.ModeDevice | os.ModeCharDevice | 0o666, want: true},
+		{name: "block device", mode: os.ModeDevice | 0o660, want: true},
+		{name: "directory", mode: os.ModeDir | 0o755, want: false},
+		{name: "named pipe", mode: os.ModeNamedPipe | 0o600, want: false},
+		{name: "socket", mode: os.ModeSocket | 0o600, want: false},
+		{name: "irregular", mode: os.ModeIrregular | 0o600, want: false},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := logging.UsableAsLog(test.mode); got != test.want {
+				t.Errorf("UsableAsLog(%s) = %t, want %t", test.mode, got, test.want)
+			}
+		})
+	}
+}
+
+// TestOpenAcceptsADeviceAtTheLogPath is the end-to-end half of the row above:
+// /dev/null must open, discard, and report no degradation, because that is how
+// a user opts out of diagnostics.
+func TestOpenAcceptsADeviceAtTheLogPath(t *testing.T) {
+	t.Parallel()
+
+	info, err := os.Stat(os.DevNull)
+	if err != nil {
+		t.Skipf("cannot stat %s: %v", os.DevNull, err)
+	}
+
+	if info.Mode().IsRegular() {
+		t.Skipf("%s is a regular file on this platform; the device case is not reachable", os.DevNull)
+	}
+
+	logger := logging.Open(logging.Options{Path: os.DevNull, Source: logging.SourceCLI})
+
+	if degraded := logger.Degraded(); degraded != nil {
+		t.Fatalf("%s was refused: %s", os.DevNull, degraded.Warning())
+	}
+
+	logger.Post("id").Info(logging.EventMessageReceived)
+
+	if degraded := logger.Degraded(); degraded != nil {
+		t.Errorf("writing to %s degraded: %s", os.DevNull, degraded.Warning())
+	}
+
+	if err := logger.Close(); err != nil {
+		t.Errorf("Close: %v", err)
 	}
 }
 
@@ -1612,5 +1678,225 @@ func TestOpenDegradesOnAnUnwritableRegularFile(t *testing.T) {
 
 	if err := logger.Close(); err != nil {
 		t.Errorf("Close on a degraded logger: %v", err)
+	}
+}
+
+// TestTheConfiguredCredentialNeverReachesTheLog covers the chokepoint scrub
+// (FR-069, FR-043).
+//
+// The shapes here are not hypothetical. contracts/log-events.md makes `error`
+// required on a failure, and its only natural source is post.SinkResult.Err,
+// which for a Telegram transport failure is a *url.Error whose exported URL
+// field is the bot endpoint with the token in the path. The value types cannot
+// defend that: an error has no LogValue, and slog hands an unrecognised value
+// to json.Marshal, which prints the URL verbatim. So every one of these is a
+// route a real emitting task (T040, T063) would take.
+func TestTheConfiguredCredentialNeverReachesTheLog(t *testing.T) {
+	t.Parallel()
+
+	const token = "1234567890:SENTINEL-BOT-TOKEN-MUST-NOT-APPEAR"
+
+	endpoint := "https://api.telegram.org/bot" + token + "/sendMessage"
+	transport := &url.Error{Op: "Post", URL: endpoint, Err: errors.New("dial tcp: i/o timeout")}
+
+	tests := []struct {
+		name string
+		attr slog.Attr
+	}{
+		{name: "the error value itself", attr: slog.Any("error", transport)},
+		{name: "the error's message as a string", attr: slog.String("error", transport.Error())},
+		{name: "a wrapped error", attr: slog.Any("error", fmt.Errorf("sending failed: %w", transport))},
+		{name: "the raw endpoint in a string field", attr: slog.String("url", endpoint)},
+		{name: "a Stringer carrying it", attr: slog.Any("target", stringerCarrying{endpoint})},
+		{name: "nested inside a named group", attr: slog.Group("upstream", slog.Any("error", transport))},
+		{name: "nested inside an empty-key group", attr: slog.Group("", slog.Any("error", transport))},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			logger, buffer := newBufferLogger(t, logging.Options{
+				Source: logging.SourceCLI,
+				Redact: []config.Secret{config.NewSecret(token)},
+			})
+
+			logger.Post("id").Error(logging.EventTelegramSendFailed, test.attr)
+
+			if bytes.Contains(buffer.Bytes(), []byte(token)) {
+				t.Fatalf("the credential reached the log:\n%s", buffer.Bytes())
+			}
+
+			// The record must still be usable: redaction that destroyed the
+			// diagnostic would trade one FR for another.
+			records := decodeRecords(t, buffer.Bytes())
+			if len(records) != 1 {
+				t.Fatalf("got %d records, want 1", len(records))
+			}
+
+			if !bytes.Contains(buffer.Bytes(), []byte("[redacted]")) {
+				t.Errorf("nothing was marked as redacted; the value may have been dropped instead:\n%s",
+					buffer.Bytes())
+			}
+		})
+	}
+}
+
+// stringerCarrying is a value whose only rendering is through fmt.Stringer.
+type stringerCarrying struct {
+	text string
+}
+
+func (s stringerCarrying) String() string { return s.text }
+
+// TestRedactionLeavesOrdinaryDiagnosticsIntact is the control for the test
+// above.
+//
+// A scrub that quietly rewrote or dropped legitimate text would pass every
+// assertion there while making the log useless. Exact-substring replacement of
+// one known credential is what makes that impossible, and this pins it.
+func TestRedactionLeavesOrdinaryDiagnosticsIntact(t *testing.T) {
+	t.Parallel()
+
+	logger, buffer := newBufferLogger(t, logging.Options{
+		Source: logging.SourceCLI,
+		Redact: []config.Secret{config.NewSecret("the-secret")},
+	})
+
+	logger.Post("id").Error(logging.EventTelegramSendFailed,
+		slog.String("error_type", "timeout"),
+		slog.String("message", "今日も美琴が可愛い♡"),
+		slog.Int64("duration_ms", 10012),
+		slog.Int("http_status", 502),
+		slog.Bool("retried", false),
+	)
+
+	records := decodeRecords(t, buffer.Bytes())
+	if len(records) != 1 {
+		t.Fatalf("got %d records, want 1", len(records))
+	}
+
+	if got := requireString(t, records[0], "error_type"); got != "timeout" {
+		t.Errorf("error_type = %q, want %q", got, "timeout")
+	}
+
+	if got := requireString(t, records[0], "message"); got != "今日も美琴が可愛い♡" {
+		t.Errorf("message = %q, want it unchanged", got)
+	}
+
+	// The numeric and boolean fields must keep their JSON types: a scrub that
+	// stringified every value would break every consumer that reads
+	// duration_ms as a number.
+	for key, want := range map[string]float64{"duration_ms": 10012, "http_status": 502} {
+		value, ok := records[0][key].(float64)
+		if !ok {
+			t.Errorf("%s is %T, want a JSON number", key, records[0][key])
+
+			continue
+		}
+
+		if value != want {
+			t.Errorf("%s = %v, want %v", key, value, want)
+		}
+	}
+
+	if _, ok := records[0]["retried"].(bool); !ok {
+		t.Errorf("retried is %T, want a JSON bool", records[0]["retried"])
+	}
+}
+
+// TestNoRedactionConfiguredIsTheUnscrubbedPath covers the cost-free default,
+// and documents that the scrub is opt-in: a caller that supplies no credential
+// gets exactly what it logged.
+func TestNoRedactionConfiguredIsTheUnscrubbedPath(t *testing.T) {
+	t.Parallel()
+
+	logger, buffer := newBufferLogger(t, logging.Options{Source: logging.SourceCLI})
+
+	logger.Post("id").Error(logging.EventTelegramSendFailed,
+		slog.Any("error", errors.New("dial tcp: i/o timeout")),
+	)
+
+	records := decodeRecords(t, buffer.Bytes())
+	if len(records) != 1 {
+		t.Fatalf("got %d records, want 1", len(records))
+	}
+
+	// Still flattened to a message, because that is the shape
+	// contracts/log-events.md specifies for the field — but not because it was
+	// scrubbed.
+	if got := requireString(t, records[0], "error"); got != "dial tcp: i/o timeout" {
+		t.Errorf("error = %q, want the message unchanged", got)
+	}
+}
+
+// TestAnEmptySecretIsIgnored guards the realistic wiring mistake: a front door
+// that passes the credential whether or not Telegram is enabled.
+//
+// An empty Secret must not become an empty search string, which would match
+// everywhere and replace nothing usefully.
+func TestAnEmptySecretIsIgnored(t *testing.T) {
+	t.Parallel()
+
+	logger, buffer := newBufferLogger(t, logging.Options{
+		Source: logging.SourceCLI,
+		Redact: []config.Secret{config.NewSecret(""), {}},
+	})
+
+	logger.Post("id").Info(logging.EventMessageReceived, slog.String("message", "unchanged"))
+
+	records := decodeRecords(t, buffer.Bytes())
+	if len(records) != 1 {
+		t.Fatalf("got %d records, want 1", len(records))
+	}
+
+	if got := requireString(t, records[0], "message"); got != "unchanged" {
+		t.Errorf("message = %q, want %q", got, "unchanged")
+	}
+}
+
+// panickingWriter panics on its first write.
+type panickingWriter struct{}
+
+func (panickingWriter) Write([]byte) (int, error) { panic("writer exploded") }
+
+// TestAPanickingWriterCannotTakeDownThePost covers the emission path's
+// recover (FR-076, T023's "never panicking, never blocking a post").
+//
+// Options.Writer is the seam the rotating writer plugs into (T068-T070), and
+// rename/stat/reopen logic is where a nil dereference lives. Without the
+// recover, that panic unwinds through the handler into the sink's goroutine:
+// the sink never reports, and the exit status describes a post that did not
+// finish — diagnostics changing the outcome, which is the one thing FR-076
+// forbids.
+func TestAPanickingWriterCannotTakeDownThePost(t *testing.T) {
+	t.Parallel()
+
+	logger := logging.Open(logging.Options{
+		Source: logging.SourceCLI,
+		Writer: panickingWriter{},
+	})
+
+	post := logger.Post("id")
+
+	// Both levels, and more than one record: the recover must not be a
+	// one-shot that leaves the second call unprotected.
+	post.Info(logging.EventMessageReceived)
+	post.Error(logging.EventTelegramSendFailed, slog.String("error_type", "timeout"))
+	post.Error(logging.EventRequestCompletedWithError)
+
+	// Reaching here at all is the assertion. The panic is not swallowed
+	// silently, though: it comes back as the one warning FR-076 allows.
+	degraded := logger.Degraded()
+	if degraded == nil {
+		t.Fatal("a panicking writer produced no degradation; the panic was swallowed silently")
+	}
+
+	if warning := degraded.Warning(); !strings.Contains(warning, "panicked") {
+		t.Errorf("the warning does not say the writer panicked: %q", warning)
+	}
+
+	if err := logger.Close(); err != nil {
+		t.Errorf("Close after a panicking writer: %v", err)
 	}
 }

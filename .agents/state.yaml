@@ -102,10 +102,34 @@ batch_4_review_notes:
     msg was renamed into ts/event (ADV-002); os.OpenFile blocking forever on a FIFO at the log path
     (ADV-001); Close not being idempotent while its test could not fail (COR-002); and the go/ast
     registration scan missing 5 of 6 declaration shapes (COR-003).
+  decisions_taken:
+    - id: "COR-012/CON-007"
+      question: "logging.path=/dev/null warned on every run once a non-regular path was refused"
+      decision: >-
+        Narrowed the refusal to a directory, a FIFO and a socket; device nodes are allowed.
+        LoggingSettings has no disable toggle, so /dev/null is how a user opts out, and a char
+        device opens instantly and discards exactly as asked. Only a FIFO can block.
+      recorded_in: "internal/logging/logger.go usableAsLog"
+    - id: ADV-D-002
+      question: "should the emission path recover() so a panicking Options.Writer cannot take down a post"
+      decision: >-
+        Yes. PostLogger.log recovers and latches the panic through safeWriter, so it surfaces as
+        FR-076's one warning instead of unwinding into the sink's goroutine. Not deferred to
+        T068-T070: this batch's own objective is "never panicking, never blocking a post", and
+        Options.Writer is where rotation's rename/stat/reopen logic will live.
+      recorded_in: "internal/logging/logger.go PostLogger.log"
+    - id: ADV-D-001
+      question: "where the bot-token scrub lives"
+      decision: >-
+        A chokepoint in internal/logging. Options.Redact takes config.Secret values and the
+        handler's ReplaceAttr removes them from every string, error and Stringer at every depth,
+        flattening an error to its message because slog hands an unrecognised value to json.Marshal
+        which prints *url.Error's URL verbatim. Unbypassable by a call site, and exact-substring
+        replacement of a known credential rather than a pattern, so it cannot mangle legitimate
+        text. Does not replace T084's end-to-end sentinel gate.
+      recorded_in: "internal/logging/logger.go Options.Redact, scrub, redactAll"
+      obligation: "T040/T063 must construct the logger with Options.Redact carrying the resolved bot token"
   open_notes:
-    - {id: "COR-012/CON-007", subject: "logging.path=/dev/null now warns every run; LoggingSettings has no disable toggle", disposition: needs-decision}
-    - {id: ADV-D-002, subject: "should the emission path recover() so a panicking Options.Writer cannot take down a post", disposition: needs-decision, spans: [T068, T069, T070]}
-    - {id: ADV-D-001, subject: "where the bot-token scrub lives: a chokepoint in internal/logging, or every call site plus T084's gate", disposition: needs-decision, spans: [T040, T063, T084]}
     - {id: "CON-003/COR-007", subject: "the 'unknown' sentinel for source and message_id is outside the domains log-events.md declares", disposition: spec-reconciler}
     - {id: ADV-010, subject: "the Stat/OpenFile TOCTOU window is won immediately under contention; acceptance rests on same-user write access to a 0700 dir", disposition: accepted-documented}
     - {id: CON-006, subject: "the non-regular-file guard is bypassed by the Options.Writer seam, so T068's rotating writer must repeat it", disposition: recorded-in-code}

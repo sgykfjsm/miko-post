@@ -45,6 +45,11 @@ const (
 	// correlation. Two concurrent posts would both correlate to "", silently
 	// interleaving into one apparent post.
 	missingMessageID = "unknown"
+
+	// secretMarker replaces a credential found in a record. It matches what
+	// config.Secret renders, so a redacted value reads the same however it
+	// reached the log.
+	secretMarker = "[redacted]"
 )
 
 // Record keys this package owns.
@@ -118,6 +123,36 @@ type Options struct {
 	//
 	// A supplied Writer is not closed by Close; whoever supplied it owns it.
 	Writer io.Writer
+
+	// Redact are the credentials that must never reach the log, whatever
+	// shape a record carries them in (FR-069, FR-043).
+	//
+	// This exists because the contract requires an `error` field on every
+	// failure and its only natural source carries the token. A Telegram
+	// transport failure is a *url.Error whose URL field is
+	// https://api.telegram.org/bot<TOKEN>/sendMessage, and post.SinkResult
+	// deliberately keeps Err exported so the diagnostic logger can reach it —
+	// so the value that FR-066 obliges a call site to log is the value that
+	// leaks. The redacting types cannot help: an error has no LogValue, and
+	// json.Marshal on a *url.Error prints the URL verbatim.
+	//
+	// Leaving that to call-site discipline was the alternative, and it is the
+	// pattern config.Secret's and post.SinkResult's own comments argue against
+	// for exactly this class of rule — a rule nobody can be trusted to
+	// remember at every site belongs at the one place every record passes
+	// through. That place is this package's ReplaceAttr.
+	//
+	// A config.Secret rather than a string, so the caller does not have to
+	// call Reveal to configure redaction; this package calls it once, at
+	// construction. An empty or unset Secret is ignored, and no Redact at all
+	// means no scanning and no cost.
+	//
+	// The scrub is exact-substring replacement of a known credential, not a
+	// pattern that guesses at what looks secret, so it cannot mangle
+	// legitimate diagnostic text. It is defence for the shapes the value types
+	// do not cover, not a substitute for them, and not a substitute for
+	// T084's end-to-end sentinel gate.
+	Redact []config.Secret
 
 	// AppVersion and GitCommit are stamped onto every record when non-empty
 	// (FR-066). Empty means the corresponding key is omitted, which is how the
@@ -258,7 +293,7 @@ func Open(opts Options) *Logger {
 		// Info is the floor because the API exposes only Info and Error; see
 		// PostLogger.
 		Level:       slog.LevelInfo,
-		ReplaceAttr: replaceAttr,
+		ReplaceAttr: replaceAttrRedacting(revealed(opts.Redact)),
 	})
 
 	return logger
@@ -283,7 +318,7 @@ func openLogFile(path string) (*os.File, error) {
 		return nil, fmt.Errorf("create the log directory: %w", err)
 	}
 
-	// Anything that is not a regular file is refused before it is opened.
+	// Anything that cannot be appended to is refused before it is opened.
 	//
 	// This is not defensive tidiness: os.OpenFile on a FIFO blocks inside
 	// open(2) until a reader attaches, so a named pipe at the log path made
@@ -312,8 +347,8 @@ func openLogFile(path string) (*os.File, error) {
 	// problem on the directory, an I/O failure — the OpenFile below is about to
 	// produce the real one, which is better than a second-hand version of it
 	// invented here.
-	if info, statErr := os.Stat(path); statErr == nil && !info.Mode().IsRegular() {
-		return nil, fmt.Errorf("the log path is %s, not a regular file", fileKind(info.Mode()))
+	if info, statErr := os.Stat(path); statErr == nil && !usableAsLog(info.Mode()) {
+		return nil, fmt.Errorf("the log path is %s, which cannot be appended to", fileKind(info.Mode()))
 	}
 
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, logFilePerm)
@@ -338,13 +373,52 @@ func fileKind(mode os.FileMode) string {
 		return "a named pipe"
 	case mode&os.ModeSocket != 0:
 		return "a socket"
-	case mode&os.ModeCharDevice != 0:
-		return "a character device"
-	case mode&os.ModeDevice != 0:
-		return "a block device"
 	default:
 		return fmt.Sprintf("of an unsupported type (mode %s)", mode)
 	}
+}
+
+// usableAsLog reports whether something already at the log path can be appended
+// to without stopping the post.
+//
+// A regular file is the intended case. A device node is allowed as well, which
+// is the whole reason this is a predicate rather than !mode.IsRegular():
+// logging.path has no companion "disabled" setting, so pointing it at /dev/null
+// is how a user turns diagnostics off, and refusing it produced an
+// unsilenceable warning on every post — for a path that opens instantly and
+// discards exactly as the user asked. That is a worse answer than the problem.
+//
+// What stays refused is what cannot work. A FIFO blocks in open(2) until a
+// reader attaches and would stop the post dead. A socket cannot be opened this
+// way at all. A directory fails, and saying so by name beats relaying EISDIR.
+// Rotation (T068-T070) renames the active file, which none of the three could
+// ever satisfy either.
+func usableAsLog(mode os.FileMode) bool {
+	return mode.IsRegular() || mode&os.ModeDevice != 0
+}
+
+// revealed extracts the credential strings to scrub, dropping the empty ones.
+//
+// This is the single Reveal call this package makes, and it happens once at
+// construction rather than per record: the values are needed as plain strings
+// to be searched for, and doing it here keeps that conversion in one place
+// instead of on the emission path.
+func revealed(secrets []config.Secret) []string {
+	if len(secrets) == 0 {
+		return nil
+	}
+
+	values := make([]string, 0, len(secrets))
+
+	for _, secret := range secrets {
+		if secret.IsEmpty() {
+			continue
+		}
+
+		values = append(values, secret.Reveal())
+	}
+
+	return values
 }
 
 // buildAttrs returns the build-identity attributes for every record, omitting
@@ -394,7 +468,7 @@ func (l *Logger) Post(messageID string) *PostLogger {
 	)
 	attrs = append(attrs, l.build...)
 
-	return &PostLogger{logger: slog.New(l.handler.WithAttrs(attrs))}
+	return &PostLogger{logger: slog.New(l.handler.WithAttrs(attrs)), writer: l.writer}
 }
 
 // Degraded reports that diagnostics are not reaching disk, or nil when they
@@ -445,6 +519,11 @@ func (l *Logger) Close() error {
 // nobody reads is a record nobody sees.
 type PostLogger struct {
 	logger *slog.Logger
+
+	// writer is the same safeWriter the handler writes through, held so that a
+	// recovered panic can be latched where a write error would be. Both reach
+	// the caller through Degraded(), so a front door has one thing to consult.
+	writer *safeWriter
 }
 
 // Info records a successful or informational event.
@@ -476,6 +555,26 @@ func (p *PostLogger) Error(event Event, attrs ...slog.Attr) {
 // timeouts. slog's JSON handler ignores the context; this passes the one that
 // stays valid regardless.
 func (p *PostLogger) log(level slog.Level, event Event, attrs []slog.Attr) {
+	// A panic anywhere below is caught and turned into a degradation.
+	//
+	// FR-076's first duty is that diagnostics never change what the post does,
+	// and a panic is the loudest way to break it: the goroutine unwinds, the
+	// sink never reports, and the exit status describes a post that did not
+	// finish. Nothing on this path panics today — *os.File.Write does not, and
+	// slog contains a panicking LogValuer itself — but Options.Writer is the
+	// seam the rotating writer plugs into (T068-T070), and rename/stat/reopen
+	// logic is exactly where a nil dereference lives.
+	//
+	// It is not silent: the panic is latched like a write error, so it comes
+	// back through Degraded() and spends FR-076's one warning. That is the
+	// difference between this and swallowing the bug — the post survives and
+	// the operator is still told the log is not to be trusted.
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			p.writer.latch(fmt.Errorf("the log writer panicked: %v", recovered))
+		}
+	}()
+
 	p.logger.LogAttrs(context.Background(), level, string(event), reserved(attrs)...)
 }
 
@@ -633,10 +732,73 @@ func isReservedKey(key string) bool {
 // as well, and SinkResult.LogValue emits a group carrying its own "reason" and
 // "err". Without the guard, a group member named "level" or "msg" would be
 // rewritten into the record's own identity keys.
-func replaceAttr(groups []string, a slog.Attr) slog.Attr {
-	if len(groups) > 0 {
+func replaceAttrRedacting(secrets []string) func([]string, slog.Attr) slog.Attr {
+	return func(groups []string, a slog.Attr) slog.Attr {
+		a = scrub(a, secrets)
+
+		if len(groups) > 0 {
+			return a
+		}
+
+		return renameBuiltin(a)
+	}
+}
+
+// scrub removes every configured credential from an attribute's value, and
+// flattens an error to its message on the way (FR-069, FR-043).
+//
+// Applied at every depth, groups included, because a credential nested inside
+// a group is no less written down than one at the top level. This is the reason
+// scrub runs before the groups guard rather than after it.
+//
+// Errors are converted to a string rather than searched in place, and that is
+// the substantive half of this function. slog renders an unrecognised value by
+// handing it to json.Marshal, which for a *url.Error prints its exported URL
+// field — the token, verbatim, as structured JSON. There is no way to redact
+// inside that shape after the fact, and contracts/log-events.md wants `error`
+// to be a "detailed message" anyway, so the message is both the safer and the
+// specified form. fmt.Stringer is covered for the same reason.
+//
+// Nothing happens when no credential is configured, so the ordinary path pays
+// one length check.
+func scrub(a slog.Attr, secrets []string) slog.Attr {
+	if len(secrets) == 0 {
 		return a
 	}
+
+	switch a.Value.Kind() {
+	case slog.KindString:
+		a.Value = slog.StringValue(redactAll(a.Value.String(), secrets))
+	case slog.KindAny:
+		switch value := a.Value.Any().(type) {
+		case error:
+			a.Value = slog.StringValue(redactAll(value.Error(), secrets))
+		case fmt.Stringer:
+			a.Value = slog.StringValue(redactAll(value.String(), secrets))
+		}
+	default:
+		// A number, a bool, a duration or a time cannot carry a credential,
+		// and a group's members arrive here individually.
+	}
+
+	return a
+}
+
+// redactAll replaces every occurrence of every credential with the marker.
+//
+// The marker matches what config.Secret renders, so a redacted value reads the
+// same wherever it came from.
+func redactAll(text string, secrets []string) string {
+	for _, secret := range secrets {
+		text = strings.ReplaceAll(text, secret, secretMarker)
+	}
+
+	return text
+}
+
+// renameBuiltin maps slog's three built-in keys to the contract's names and
+// lowercases the level (FR-066, contracts/log-events.md).
+func renameBuiltin(a slog.Attr) slog.Attr {
 
 	switch a.Key {
 	case slog.TimeKey:
@@ -735,6 +897,21 @@ func (s *safeWriter) Write(p []byte) (int, error) {
 	}
 
 	return len(p), nil
+}
+
+// latch records err as the reason diagnostics are degraded, if nothing has been
+// recorded yet.
+//
+// Separate from Write because a panic recovered on the emission path never
+// reached a write, and because the first reason is the one kept: FR-076 allows
+// one warning, so a later cause has nothing to add.
+func (s *safeWriter) latch(err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.err == nil {
+		s.err = err
+	}
 }
 
 // firstErr returns the first write failure, or nil.
