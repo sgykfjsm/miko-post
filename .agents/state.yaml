@@ -33,9 +33,11 @@ completed:
     partial_tasks: [T003]
     issues: [12, 13, 14, 15, 16, 17, 18, 19, 20, 21]
     pins: "github.com/pelletier/go-toml/v2@v2.4.3"
-    commits: [72d9642, 3bc2f32]
+    commits: [72d9642, 3bc2f32, a6a734e]
+    squashed_as: 6d84ae9
     pr: 100
-    state: open-reviewed
+    state: merged
+    merged_at: 2026-09-07
     review_verdict: passed-with-notes
     review_cycles: 4
     fix_passes: 3
@@ -43,8 +45,24 @@ completed:
     review_run_state: "~/.agents/review-runs/sgykfjsm__miko-post/20260903T103000Z-1047541d/"
 
 in_progress:
-  - id: pr-100
-    note: "reviewed passed-with-notes; open, not merged"
+  - id: batch-4
+    summary: >-
+      Logging foundation - the stable event vocabulary as typed Event constants with a source-scanning
+      registration test, and the slog JSON-handler logger writing one self-contained JSON object per
+      line, creating the log directory, and failing soft without ever blocking a post
+    tasks: [T021, T022, T023, T024]
+    issues: [22, 23, 24, 25]
+    pr: 106
+    branch: sgykfjsm/batch-4-logging
+    state: open
+    review_verdict: passed-with-notes
+    review_cycles: 2
+    fix_passes: 1
+    coverage: "100.0%"
+    review_run_state: "~/.agents/review-runs/sgykfjsm__miko-post/20260907T013654Z-c1df9c13/"
+    note: >-
+      Also carries three .agents bookkeeping commits (13f1c3e, 972a3f4, 3452c36) that had no PR of
+      their own. No new dependency: slog is stdlib and the ULID pin stays with batch 5.
 
 blockers: []
 
@@ -57,17 +75,74 @@ time_sensitive:
     deadline: before tagging v0.1.0
 
 next_best_action: >-
-  Merge PR #100, then run run-batch-cycle for Batch 4 - Logging foundation (T021-T024,
-  issues #22-#25).
+  Merge PR #106 (Batch 4), then run run-batch-cycle for Batch 5 - Orchestrator (T025-T026, issues
+  #26-#27), which pins oklog/ulid/v2 and must honour issue #98's settled Targeter decision.
 
-review_followups_planned_not_filed:
-  - {ids: [COR-303, ADV-301, COR-302, ADV-302, CON-302], subject: "elide: bound declared generally, applied to two keys; head-only truncation hides the offender; multibyte branch untested", proposed: create-issue}
-  - {id: CON-301, subject: "safe-alphabet enumeration backing AC-9 omits Z and AM/PM", proposed: create-issue}
-  - {id: CON-303, subject: "thread_id > 0 enforced but absent from the schema table", proposed: defer-to-spec-reconciler}
-  - {id: COR-301, subject: "rendered == '..' clause unpinned, proven verdict-neutral", proposed: record-in-pr}
+review_followups_filed:
+  filed_at: 2026-09-07
+  issues:
+    - {number: 101, subject: "elide bounds two settings keys but its rationale applies to six", sources: [COR-303, ADV-301, COR-302, ADV-302, CON-302], batch: 3}
+    - {number: 102, subject: "safe-alphabet enumeration behind the one-rendering argument omits Z and AM/PM", sources: [CON-301], batch: 3}
+    - {number: 103, subject: "SinkResult: xml.Marshal reaches Err; the completeness test skips silently", batch: 2}
+    - {number: 104, subject: "Decision: should Message.Validate reject invalid UTF-8", batch: 2}
+    - {number: 105, subject: "data-model.md stale on SinkResult, AllSucceeded, Secret, thread_id", sources: [CON-303], batches: [2, 3]}
+  comments:
+    - {issue: 57, subject: "T056 acceptance notes: the %p pointer invariant, and Err when Success is true", batch: 2}
+    - {issue: 4, subject: "one of three pins landed; closure condition restated", batches: [2, 3]}
+  not_filed:
+    - {id: COR-301, subject: "rendered == '..' clause unpinned", reason: "proven verdict-neutral over 27,479 accepted layouts; an issue would imply latent risk that does not exist"}
+
+batch_4_review_notes:
+  reviewed_at: 2026-09-07
+  verdict: passed-with-notes
+  resolved_in_cycle_1: >-
+    Five should-fix findings, all reproduced by execution before fixing and mutation-verified after:
+    an empty-key group inlined past the reserved-key filter (COR-001/ADV-003); the filter enumerating
+    slog's output key names while the renamer worked from its input names, so an attr keyed time or
+    msg was renamed into ts/event (ADV-002); os.OpenFile blocking forever on a FIFO at the log path
+    (ADV-001); Close not being idempotent while its test could not fail (COR-002); and the go/ast
+    registration scan missing 5 of 6 declaration shapes (COR-003).
+  decisions_taken:
+    - id: "COR-012/CON-007"
+      question: "logging.path=/dev/null warned on every run once a non-regular path was refused"
+      decision: >-
+        Narrowed the refusal to a directory, a FIFO and a socket; device nodes are allowed.
+        LoggingSettings has no disable toggle, so /dev/null is how a user opts out, and a char
+        device opens instantly and discards exactly as asked. Only a FIFO can block.
+      recorded_in: "internal/logging/logger.go usableAsLog"
+    - id: ADV-D-002
+      question: "should the emission path recover() so a panicking Options.Writer cannot take down a post"
+      decision: >-
+        Yes. PostLogger.log recovers and latches the panic through safeWriter, so it surfaces as
+        FR-076's one warning instead of unwinding into the sink's goroutine. Not deferred to
+        T068-T070: this batch's own objective is "never panicking, never blocking a post", and
+        Options.Writer is where rotation's rename/stat/reopen logic will live.
+      recorded_in: "internal/logging/logger.go PostLogger.log"
+    - id: ADV-D-001
+      question: "where the bot-token scrub lives"
+      decision: >-
+        A chokepoint in internal/logging. Options.Redact takes config.Secret values and the
+        handler's ReplaceAttr removes them from every string, error and Stringer at every depth,
+        flattening an error to its message because slog hands an unrecognised value to json.Marshal
+        which prints *url.Error's URL verbatim. Unbypassable by a call site, and exact-substring
+        replacement of a known credential rather than a pattern, so it cannot mangle legitimate
+        text. Does not replace T084's end-to-end sentinel gate.
+      recorded_in: "internal/logging/logger.go Options.Redact, scrub, redactAll"
+      obligation: "T040/T063 must construct the logger with Options.Redact carrying the resolved bot token"
+  followups_filed:
+    filed_at: 2026-09-07
+    issues:
+      - {number: 107, subject: "logging.Open does not apply ResolvePath, so a default install silently writes no diagnostics", sources: [CON-004], severity: latent-defect}
+    comments:
+      - {issue: 69, subject: "T068 must repeat the non-regular-file guard and O_APPEND, which the Options.Writer seam bypasses; plus the bufio caveat for os.Exit durability", sources: [CON-006]}
+      - {issue: 41, subject: "T040 must construct the logger with Options.Redact; the slog.Duration nanosecond trap; the seven reserved keys; the #98 Targeter path", sources: [ADV-004, ADV-D-001], also_relevant_to: 64}
+      - {issue: 105, subject: "contracts/log-events.md and design.md §11.2 must admit the 'unknown' sentinel for source and message_id", sources: [CON-003, COR-007]}
+    not_filed:
+      - {id: ADV-009, reason: "resolved in-batch by narrowing the comment's claim; looping the repair write could spin on an always-zero writer, and FR-076's first duty is not to block the post"}
+      - {id: ADV-010, reason: "documented acceptance, and the reviewer's required outcome was explicitly none. The precondition — write access to a 0700 dir this package created — is an adversary who can already do worse directly."}
+      - {id: CON-002, reason: "accepted as history and disclosed in the PR body; the work-log records what was true when written"}
 
 remaining_batches:
-  - {id: 4, name: Logging foundation, tasks: "T021-T024"}
   - {id: 5, name: Orchestrator, tasks: "T025-T026", pins: "ulid/v2", requires: [2, 3, 4]}
   - {id: 6, name: "US1 MVP (CLI)", tasks: "T027-T040"}
   - {id: 7, name: "US2 GUI", tasks: "T041-T051", pins: "fyne/v2"}
@@ -93,27 +168,16 @@ touched_files:
   - specs/001-dual-sink-quick-post/plan.md
   - specs/001-dual-sink-quick-post/tasks.md
   - internal/post/result.go
-
-unfiled_followups:
-  - batch: 2
-    location: ~/.agents/review-runs/sgykfjsm__miko-post/20260902T040356Z-79b5bd57/
-    count: 6
-    note: >-
-      Accepted as non-blocking during the Batch 2 review but never filed as GitHub issues. Highest
-      value: xml.Marshal still reaches SinkResult.Err; the method-enumeration test skips
-      argument-taking methods and logs the skip invisibly under make check; the %p residual relies
-      on an unenforced "every error stored in Err is a pointer" invariant that belongs in T056's
-      acceptance notes.
-  - batch: 3
-    location: ~/.agents/review-runs/sgykfjsm__miko-post/20260903T103000Z-1047541d/
-    count: 6
-    note: >-
-      Planned by record-review-followups but not published; see review_followups_planned_not_filed
-      above for the proposed dispositions.
+  - internal/logging/events.go
+  - internal/logging/logger.go
+  - internal/logging/events_test.go
+  - internal/logging/logger_test.go
+  - internal/logging/logger_unix_test.go
+  - internal/logging/export_test.go
 
 assumptions:
   - >-
     The batch decomposition above is re-derived by run-batch-cycle's triage step each run; it is
     recorded here for orientation, not as a binding plan.
 
-last_updated: 2026-09-04
+last_updated: 2026-09-07

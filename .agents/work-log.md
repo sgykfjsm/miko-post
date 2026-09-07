@@ -109,3 +109,118 @@ Suite green under seven ambient `TZ` values and under a crafted transitioning TZ
 
 **Next best action.** Run `run-batch-cycle` for Batch 4 — Logging foundation (T021-T024,
 issues #22-#25).
+
+---
+
+## 2026-09-07 — Batch 3 merged
+
+**Objective.** Land PR #100 and sync the worktree.
+
+**Changes made.** None to the code. PR #100 squash-merged to `main` as `6d84ae9`; the branch
+`sgykfjsm/batch-3-settings` was deleted on the remote.
+
+**Evidence.** `git diff a6a734e origin/main` is empty — the squashed commit is byte-identical to the
+reviewed branch tip. Issues #12-#21 all auto-closed by the merge; #4 (T003) correctly remains open
+with the ULID and Fyne pins outstanding. On merged `main`: `go build`, `go vet`,
+`go test -race -count=1` all clean, `internal/config` coverage 99.0%.
+
+**Decisions.** None.
+
+**Blockers and open questions.** Unchanged: the six Batch 3 follow-ups remain planned but unfiled
+(see `review_followups_planned_not_filed` in state.yaml), as do the six from Batch 2. Issues #94,
+#95, #96 and #98 are still open and still correctly open.
+
+**Next best action.** Run `run-batch-cycle` for Batch 4 — Logging foundation (T021-T024,
+issues #22-#25).
+
+---
+
+## 2026-09-07 — Filed the outstanding review follow-ups
+
+**Objective.** Clear the backlog of review findings that existed only in local run state.
+
+**Changes made.** No code. Filed #101-#105 and commented on #57 and #4, consolidating twelve
+findings from the Batch 2 and Batch 3 reviews into five issues and two comments.
+
+**Evidence.** Both review run states remained readable
+(`20260902T040356Z-79b5bd57`, `20260903T103000Z-1047541d`), as did the Batch 2 memory note, so no
+finding was reconstructed from recollection.
+
+**Decisions.** Consolidated rather than filed one-per-finding — the tracker already carries 75 open
+issues, and three of the twelve were the same root cause seen by different reviewers. One finding
+(the `rendered == ".."` clause) was deliberately **not** filed: it was proven verdict-neutral over
+27,479 accepted layouts, so an issue would imply latent risk that does not exist.
+
+**Blockers and open questions.** None new. #104 is a decision needed before T035.
+
+**Next best action.** Run `run-batch-cycle` for Batch 4 — Logging foundation (T021-T024,
+issues #22-#25).
+
+## 2026-09-07 — Batch 4: the logging foundation (PR #106, open)
+
+**What was built.** `internal/logging`: the twelve stable event names from
+`contracts/log-events.md` as constants of a defined `Event` type plus `AllEvents()` (T021, T022),
+and the `slog` JSON-handler logger (T023, T024). T021–T024 marked complete; issues #22–#25 to close
+on merge. No new dependency — `slog` is stdlib, and the ULID pin stays with Batch 5.
+
+Two shapes carried the design. First, `Logger` has no logging methods: `Logger.Post(messageID)`
+returns the only type that can emit a record, because `message_id` is contractually on every record
+and an attribute callers are merely asked to remember is one they eventually forget. The event name
+travels in slog's message slot for the same reason — slog always emits a message, so the field
+cannot go missing. Second, `Open` returns neither an error nor a `*Degradation`; a discarding logger
+is still a logger, so there is no state in which the caller has nothing to log to, and `Degraded()`
+is the single source of FR-076's one warning.
+
+**What the review caught, and what it says about the first attempt.** Verdict
+`passed-with-notes` after one fix cycle. Five should-fix findings, and the pattern across them is
+worth recording: three were holes in guards whose own doc comments claimed they were closed, and
+three were tests that could not fail.
+
+- An empty-key group defeated both protections at once. `slog.Group("", …)` is slog's documented
+  inlining idiom; the filter inspected only the group attr's key (`""`, not reserved) and, because
+  slog skips `openGroup` for an empty key, `ReplaceAttr` saw `len(groups) == 0` for each inlined
+  member. One record carried `event` three times, with the forged value winning in every mainstream
+  decoder.
+- The filter enumerated slog's *output* key names while the renamer worked from its *input* names.
+  Only `level` was in both sets, so an attribute keyed `msg` — one character from the contract's own
+  `message` field, and the habitual Go spelling — passed the filter and was then renamed *into*
+  `event`.
+- `os.OpenFile` on a FIFO blocks inside `open(2)` until a reader attaches, so a named pipe at the
+  log path made `Open` never return: no degradation, no warning, no records, and no post. That
+  falsified the batch's own "never blocking a post" and was worse than the case FR-076 was written
+  for.
+- `Close` was not idempotent, and the test asserting idempotence ran only with a supplied writer,
+  where the nil-handle guard made `return nil` unconditional — an assertion that could not fail for
+  any implementation that had the guard at all.
+- The `go/ast` registration scan gated whole const groups on finding a bare `Event` type
+  identifier, so five of six declaration shapes escaped, including `const EventX = Event("x")`.
+  This defeated precisely the half of T022 that a literal expected-set test cannot cover.
+
+**The lesson about coverage.** Statement coverage was 100% for the first attempt and for the fixed
+version, and it masked four defects both times. Every finding this cycle was established by
+introducing the defect and watching a test fail, not by reading. Two findings were themselves
+mutants that survived: the empty-key `ReplaceAttr` group guard was untested until a test was written
+for it, and `TestANamedGroupIsNotTraversed` passed through the filter's allocation-free early return
+so the loop it constrains never ran — a change that silently deleted a caller's entire named group
+left the whole suite green. Both are now pinned.
+
+**Blockers and open questions.** None blocking. Three decisions are recorded in
+`state.yaml` under `batch_4_review_notes.open_notes` and want a maintainer answer: whether
+`logging.path = /dev/null` should keep warning on every run now that a non-regular path is refused
+(there is no other way to disable diagnostics); whether the emission path should `recover()` so a
+panicking `Options.Writer` cannot take down a post, naturally decided with T068–T070; and where the
+bot-token scrub belongs — a chokepoint in `internal/logging`, or every call site plus T084's gate.
+The last is the substantive one: the contract requires an `error` field on failures, and its only
+natural source is `SinkResult.Err`, which for a Telegram transport failure is a `*url.Error`
+carrying the token. It leaked through six ordinary attribute spellings and is unreachable only
+because nothing imports the package yet.
+
+One note for Batch 10: the non-regular-file guard lives in `openLogFile`, which the `Options.Writer`
+seam bypasses entirely, so T068's rotating writer must repeat it or the hang returns. Recorded in
+`Options.Writer`'s doc comment where that work will see it.
+
+**Follow-ups filed.** #107 for the `ResolvePath` gap, plus acceptance notes on #69, #41 and #105.
+Three findings were deliberately not filed and the reasons are recorded in `state.yaml` under
+`batch_4_review_notes.followups_filed.not_filed` — the short-write repair claim was narrowed in
+code rather than tracked, the TOCTOU window's reviewer-stated required outcome was explicitly none,
+and the work-log's dangling key reference is history rather than current state.
