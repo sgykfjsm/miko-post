@@ -36,7 +36,7 @@ exercise (`foo_test.go` next to `foo.go`) rather than in a separate `tests/` tre
 - [x] T002 [P] Create the package skeleton directories `cmd/mp/`, `internal/{cli,gui,post,config,logging,version}/`, `internal/sink/{telegram,obsidian}/`, and `testdata/` per the plan's Source Code layout
 - [ ] T003 [P] Add and pin dependencies `fyne.io/fyne/v2@v2.8.1`, `github.com/pelletier/go-toml/v2@v2.4.3`, `github.com/oklog/ulid/v2@v2.1.2` in `go.mod` and commit `go.sum`
   - **Deferred in Batch 1, partially done in Batch 3.** Go records a dependency only when a package imports it: `go get` marks all three `// indirect` and `go mod tidy` removes them, leaving `go.sum` empty. Pin each one in the batch that first imports it — go-toml in the settings batch, ULID in the orchestrator batch, Fyne in the GUI batch. The intended versions are recorded in research.md (R-003, R-004, R-007).
-  - `github.com/pelletier/go-toml/v2@v2.4.3` is pinned as a **direct** requirement as of the settings batch (T016), with `go.sum` populated. `github.com/oklog/ulid/v2@v2.1.2` and `fyne.io/fyne/v2@v2.8.1` remain outstanding.
+  - `github.com/pelletier/go-toml/v2@v2.4.3` is pinned as a **direct** requirement as of the settings batch (T016), with `go.sum` populated. `github.com/oklog/ulid/v2@v2.1.2` is pinned as of the orchestrator batch (T025). `fyne.io/fyne/v2@v2.8.1` remains outstanding until the GUI batch.
 - [x] T004 [P] Implement build-time version and commit variables with a `runtime/debug.ReadBuildInfo()` fallback in `internal/version/version.go` (research R-009, resolves A-008)
 - [x] T005 [P] Add a `Makefile` at the repository root with `build` (including `-ldflags -X` version stamping), `test`, `race`, `vet`, and `install` targets
 
@@ -80,8 +80,8 @@ neither can be retrofitted later without rewriting every story.
 
 ### Posting core
 
-- [ ] T025 Implement `post.Service` — generate the ULID, start every enabled sink in its own goroutine with its **own** `context.WithTimeout` derived from `context.Background()` (never a shared cancellable parent), await all via `sync.WaitGroup`, and aggregate — in `internal/post/service.go` (FR-012 – FR-016, constitution principle I)
-- [ ] T026 Write orchestrator tests using fake sinks that assert **both** sinks ran and **both** results were reported when one fails, when both fail, and when one blocks; run them under `-race`, in `internal/post/service_test.go` (FR-013, FR-014, FR-070, constitution Quality Gates)
+- [x] T025 Implement `post.Service` — generate the ULID, start every enabled sink in its own goroutine with its **own** `context.WithTimeout` derived from `context.Background()` (never a shared cancellable parent), await all via `sync.WaitGroup`, and aggregate — in `internal/post/service.go` (FR-012 – FR-016, constitution principle I)
+- [x] T026 Write orchestrator tests using fake sinks that assert **both** sinks ran and **both** results were reported when one fails, when both fail, and when one blocks; run them under `-race`, in `internal/post/service_test.go` (FR-013, FR-014, FR-070, constitution Quality Gates)
 
 **Checkpoint**: The posting core, settings, and diagnostics exist and are tested. User story work can begin.
 

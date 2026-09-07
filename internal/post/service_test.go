@@ -1,0 +1,847 @@
+package post
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/oklog/ulid/v2"
+)
+
+// generousTimeout is long enough that no test fails because a machine was
+// briefly busy. Every test that wants an expiry sets its own short one.
+const generousTimeout = 30 * time.Second
+
+// fakeSink is a Sink whose behaviour is supplied per test.
+//
+// It records what it was given rather than only that it was called, because
+// "both sinks ran" is not the whole claim T026 makes: FR-012 also requires
+// that both received the identical original message, and a sink that ran with
+// the wrong text is a different defect from one that did not run.
+type fakeSink struct {
+	name string
+	send func(ctx context.Context, message Message) error
+
+	mu       sync.Mutex
+	calls    int
+	received []Message
+}
+
+func (f *fakeSink) Name() string { return f.name }
+
+func (f *fakeSink) Send(ctx context.Context, message Message) error {
+	f.mu.Lock()
+	f.calls++
+	f.received = append(f.received, message)
+	f.mu.Unlock()
+
+	if f.send == nil {
+		return nil
+	}
+
+	return f.send(ctx, message)
+}
+
+// ran reports how many times this sink was invoked.
+func (f *fakeSink) ran() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	return f.calls
+}
+
+// sawMessage reports the message this sink was handed on its first call.
+func (f *fakeSink) sawMessage(t *testing.T) Message {
+	t.Helper()
+
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	if len(f.received) == 0 {
+		t.Fatalf("sink %s was never called", f.name)
+	}
+
+	return f.received[0]
+}
+
+// succeeds returns a sink that reports success.
+func succeeds(name string) *fakeSink {
+	return &fakeSink{name: name}
+}
+
+// fails returns a sink that reports err.
+func fails(name string, err error) *fakeSink {
+	return &fakeSink{name: name, send: func(context.Context, Message) error { return err }}
+}
+
+// resultFor finds one sink's result by name.
+func resultFor(t *testing.T, outcome Outcome, name string) SinkResult {
+	t.Helper()
+
+	for _, result := range outcome.Results {
+		if result.Name == name {
+			return result
+		}
+	}
+
+	t.Fatalf("no result for sink %q; got %d results", name, len(outcome.Results))
+
+	return SinkResult{}
+}
+
+// mustMessage builds a Message that has passed validation, as Service.Post
+// requires.
+func mustMessage(t *testing.T, text string) Message {
+	t.Helper()
+
+	message := Message{Original: text}
+	if err := message.Validate(); err != nil {
+		t.Fatalf("Message{%q}.Validate: %v", text, err)
+	}
+
+	return message
+}
+
+// TestBothSinksRunAndBothResultsAreReported is T026's central requirement
+// (FR-013, FR-014).
+//
+// The constitution asks for more than "the happy path returns success": every
+// enabled sink must have run and every result must be present, whichever of
+// them failed. A `return` on first error passes an all-succeed test and fails
+// every case below.
+func TestBothSinksRunAndBothResultsAreReported(t *testing.T) {
+	t.Parallel()
+
+	telegramFailure := errors.New("chat not found")
+	obsidianFailure := errors.New("permission denied")
+
+	tests := []struct {
+		name         string
+		telegram     *fakeSink
+		obsidian     *fakeSink
+		wantTelegram bool
+		wantObsidian bool
+		wantOverall  bool
+	}{
+		{
+			name:         "both succeed",
+			telegram:     succeeds("telegram"),
+			obsidian:     succeeds("obsidian"),
+			wantTelegram: true,
+			wantObsidian: true,
+			wantOverall:  true,
+		},
+		{
+			name:         "the first sink fails",
+			telegram:     fails("telegram", telegramFailure),
+			obsidian:     succeeds("obsidian"),
+			wantTelegram: false,
+			wantObsidian: true,
+			wantOverall:  false,
+		},
+		{
+			// The mirror case matters separately: an implementation that
+			// returns on first error passes when the *last* sink is the one
+			// that fails.
+			name:         "the second sink fails",
+			telegram:     succeeds("telegram"),
+			obsidian:     fails("obsidian", obsidianFailure),
+			wantTelegram: true,
+			wantObsidian: false,
+			wantOverall:  false,
+		},
+		{
+			name:         "both fail",
+			telegram:     fails("telegram", telegramFailure),
+			obsidian:     fails("obsidian", obsidianFailure),
+			wantTelegram: false,
+			wantObsidian: false,
+			wantOverall:  false,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			service := New([]Sink{test.telegram, test.obsidian}, generousTimeout)
+			outcome := service.Post(mustMessage(t, "今日も美琴が可愛い♡"))
+
+			// Both sinks ran. Asserted on the sinks themselves, not inferred
+			// from the results: a result could in principle be fabricated for
+			// a sink that was never invoked, and FR-016's converse — that
+			// every sink handed over *is* invoked — is what this checks.
+			if got := test.telegram.ran(); got != 1 {
+				t.Errorf("telegram ran %d times, want 1", got)
+			}
+
+			if got := test.obsidian.ran(); got != 1 {
+				t.Errorf("obsidian ran %d times, want 1", got)
+			}
+
+			// Both results were reported.
+			if len(outcome.Results) != 2 {
+				t.Fatalf("got %d results, want 2: %v", len(outcome.Results), outcome.Results)
+			}
+
+			if got := resultFor(t, outcome, "telegram").Success; got != test.wantTelegram {
+				t.Errorf("telegram Success = %t, want %t", got, test.wantTelegram)
+			}
+
+			if got := resultFor(t, outcome, "obsidian").Success; got != test.wantObsidian {
+				t.Errorf("obsidian Success = %t, want %t", got, test.wantObsidian)
+			}
+
+			if got := outcome.Succeeded(); got != test.wantOverall {
+				t.Errorf("Outcome.Succeeded = %t, want %t", got, test.wantOverall)
+			}
+
+			// A failure keeps its diagnostic error and gains a display reason;
+			// a success has neither (FR-017).
+			for _, result := range outcome.Results {
+				switch {
+				case result.Success && result.Err != nil:
+					t.Errorf("%s succeeded but carries an error", result.Name)
+				case result.Success && result.Reason != "":
+					t.Errorf("%s succeeded but carries reason %q", result.Name, result.Reason)
+				case !result.Success && result.Err == nil:
+					t.Errorf("%s failed with no diagnostic error", result.Name)
+				case !result.Success && result.Reason == "":
+					t.Errorf("%s failed with no display reason", result.Name)
+				}
+			}
+		})
+	}
+}
+
+// TestOneSinkFailingDoesNotCancelItsSibling is the independence guarantee, and
+// the reason deliver derives its context from context.Background() and nothing
+// else (constitution principle I, FR-013).
+//
+// The sibling here does not merely run — it *observes its own context* after
+// the other sink has already failed. An implementation that derived both
+// contexts from one shared cancellable parent would cancel this sink the moment
+// its sibling's deliver returned, so the sibling would report ctx.Canceled and
+// this test would show it as a failure rather than a success.
+func TestOneSinkFailingDoesNotCancelItsSibling(t *testing.T) {
+	t.Parallel()
+
+	firstFailed := make(chan struct{})
+
+	failing := &fakeSink{
+		name: "telegram",
+		send: func(context.Context, Message) error {
+			close(firstFailed)
+
+			return errors.New("chat not found")
+		},
+	}
+
+	watching := &fakeSink{
+		name: "obsidian",
+		send: func(ctx context.Context, _ Message) error {
+			<-firstFailed
+
+			// The sibling has failed and its deliver has run its deferred
+			// cancel. If that cancel reached this context, it is already
+			// closed or closes imminently; the wait is bounded so a
+			// regression fails rather than hanging.
+			select {
+			case <-ctx.Done():
+				return fmt.Errorf("this sink was cancelled by its sibling's failure: %w", ctx.Err())
+			case <-time.After(200 * time.Millisecond):
+				return nil
+			}
+		},
+	}
+
+	service := New([]Sink{failing, watching}, generousTimeout)
+	outcome := service.Post(mustMessage(t, "independent"))
+
+	sibling := resultFor(t, outcome, "obsidian")
+	if !sibling.Success {
+		t.Fatalf("the sibling failed after its peer failed: reason=%q err=%v", sibling.Reason, sibling.Err)
+	}
+
+	if got := resultFor(t, outcome, "telegram").Success; got {
+		t.Error("the failing sink was reported as a success")
+	}
+}
+
+// barrier releases every arrival only once all of them have arrived.
+type barrier struct {
+	mu       sync.Mutex
+	arrived  int
+	expected int
+	released chan struct{}
+}
+
+func newBarrier(expected int) *barrier {
+	return &barrier{expected: expected, released: make(chan struct{})}
+}
+
+// wait blocks until every expected participant has arrived, or until ctx ends.
+func (b *barrier) wait(ctx context.Context) error {
+	b.mu.Lock()
+
+	b.arrived++
+	if b.arrived == b.expected {
+		close(b.released)
+	}
+
+	b.mu.Unlock()
+
+	select {
+	case <-b.released:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// TestSinksActuallyOverlap proves concurrency rather than assuming it
+// (FR-013).
+//
+// Every other test in this file passes against a Service that runs its sinks
+// one after another — the results are the same, only slower. This one cannot:
+// each sink blocks inside Send until *both* have arrived, so a sequential
+// implementation leaves the first sink waiting for a sibling that has not been
+// started, its own deadline expires, and both results come back as timeouts.
+//
+// The short timeout is what turns that regression into a failed assertion
+// instead of a hung test.
+func TestSinksActuallyOverlap(t *testing.T) {
+	t.Parallel()
+
+	both := newBarrier(2)
+
+	rendezvous := func(name string) *fakeSink {
+		return &fakeSink{
+			name: name,
+			send: func(ctx context.Context, _ Message) error {
+				return both.wait(ctx)
+			},
+		}
+	}
+
+	telegram, obsidian := rendezvous("telegram"), rendezvous("obsidian")
+
+	service := New([]Sink{telegram, obsidian}, 5*time.Second)
+	outcome := service.Post(mustMessage(t, "concurrent"))
+
+	for _, result := range outcome.Results {
+		if !result.Success {
+			t.Errorf("%s did not succeed, so the sinks did not overlap: reason=%q err=%v",
+				result.Name, result.Reason, result.Err)
+		}
+	}
+}
+
+// TestABlockingSinkYieldsATimeoutAndDoesNotStallItsSibling covers FR-015 and
+// the "when one blocks" case T026 names.
+func TestABlockingSinkYieldsATimeoutAndDoesNotStallItsSibling(t *testing.T) {
+	t.Parallel()
+
+	const timeout = 150 * time.Millisecond
+
+	// Blocks until its own context expires, which is what a hung network call
+	// looks like from here.
+	blocking := &fakeSink{
+		name: "telegram",
+		send: func(ctx context.Context, _ Message) error {
+			<-ctx.Done()
+
+			return ctx.Err()
+		},
+	}
+
+	quick := succeeds("obsidian")
+
+	service := New([]Sink{blocking, quick}, timeout)
+
+	started := time.Now()
+	outcome := service.Post(mustMessage(t, "one sink hangs"))
+	elapsed := time.Since(started)
+
+	// The blocked sink fails, and says why in words a front door may print.
+	blocked := resultFor(t, outcome, "telegram")
+	if blocked.Success {
+		t.Error("the blocked sink was reported as a success")
+	}
+
+	if blocked.Reason != reasonTimedOut {
+		t.Errorf("blocked sink reason = %q, want %q", blocked.Reason, reasonTimedOut)
+	}
+
+	if !errors.Is(blocked.Err, context.DeadlineExceeded) {
+		t.Errorf("blocked sink Err = %v, want it to wrap context.DeadlineExceeded", blocked.Err)
+	}
+
+	// Its sibling is unaffected and still reported.
+	if sibling := resultFor(t, outcome, "obsidian"); !sibling.Success {
+		t.Errorf("the sibling of a blocked sink failed: reason=%q err=%v", sibling.Reason, sibling.Err)
+	}
+
+	if quick.ran() != 1 {
+		t.Errorf("the sibling ran %d times, want 1", quick.ran())
+	}
+
+	// The post waits for the blocked sink but not for it twice: a sequential
+	// implementation would spend one timeout on each sink. Generous, because
+	// the assertion is about the shape and not the schedule.
+	if elapsed >= 2*timeout {
+		t.Errorf("the post took %s, more than two timeouts; the sinks were not concurrent", elapsed)
+	}
+}
+
+// TestAPanickingSinkBecomesAFailureAndItsSiblingStillReports covers the route
+// that principle I cannot be defended from by context discipline alone.
+//
+// An unrecovered panic in a sink's goroutine ends the process: the sibling's
+// result is lost, nothing is written, and the exit status describes a post that
+// never finished. FR-071 expects panics to be recorded, so they are anticipated
+// rather than impossible.
+func TestAPanickingSinkBecomesAFailureAndItsSiblingStillReports(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		value any
+		want  string
+	}{
+		{name: "a string", value: "sink exploded", want: "sink exploded"},
+		{name: "an error", value: errors.New("nil map write"), want: "nil map write"},
+		// A struct is the case that must not be rendered field by field: a
+		// panicking sink's value can hold a credential, and %v walks exported
+		// fields. Only the type is reported.
+		{
+			// The remaining shape recover() can hand back: a value whose only
+			// rendering is fmt.Stringer.
+			name:  "a Stringer",
+			value: panicStringer{},
+			want:  "a stringer's own words",
+		},
+		{
+			name:  "a struct carrying a secret",
+			value: struct{ Token string }{Token: "SENTINEL-TOKEN"},
+			want:  "a value of type",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			panicking := &fakeSink{
+				name: "telegram",
+				send: func(context.Context, Message) error {
+					panic(test.value)
+				},
+			}
+
+			sibling := succeeds("obsidian")
+
+			service := New([]Sink{panicking, sibling}, generousTimeout)
+			outcome := service.Post(mustMessage(t, "one sink panics"))
+
+			if len(outcome.Results) != 2 {
+				t.Fatalf("got %d results, want 2", len(outcome.Results))
+			}
+
+			failed := resultFor(t, outcome, "telegram")
+			if failed.Success {
+				t.Error("the panicking sink was reported as a success")
+			}
+
+			if failed.Err == nil {
+				t.Fatal("the panicking sink carries no diagnostic error")
+			}
+
+			if !strings.Contains(failed.Err.Error(), test.want) {
+				t.Errorf("Err = %q, want it to mention %q", failed.Err.Error(), test.want)
+			}
+
+			// The display half stays a constant from this package. A panic
+			// value is entirely outside our control, so routing it into Reason
+			// would put arbitrary text — a token, a struct dump — on the
+			// user's terminal (FR-017, FR-029).
+			if failed.Reason != reasonFailed {
+				t.Errorf("Reason = %q, want the fixed-set constant %q", failed.Reason, reasonFailed)
+			}
+
+			if strings.Contains(failed.Reason, "SENTINEL-TOKEN") {
+				t.Errorf("the panic value reached the display reason: %q", failed.Reason)
+			}
+
+			// And the sibling still ran and still reported.
+			if got := resultFor(t, outcome, "obsidian"); !got.Success {
+				t.Errorf("the sibling of a panicking sink failed: %v", got.Err)
+			}
+
+			if sibling.ran() != 1 {
+				t.Errorf("the sibling ran %d times, want 1", sibling.ran())
+			}
+		})
+	}
+}
+
+// panicStringer is a panic value that renders only through fmt.Stringer.
+type panicStringer struct{}
+
+func (panicStringer) String() string { return "a stringer's own words" }
+
+// TestEverySinkReceivesTheIdenticalOriginalMessage covers FR-012.
+//
+// The untrimmed text is the point: T006 keeps the original on purpose, and a
+// sink that received a trimmed or re-wrapped copy would silently change what
+// the user posted. The transformation an obsidian sink applies is its own
+// business (T031) and must not travel back into the message.
+func TestEverySinkReceivesTheIdenticalOriginalMessage(t *testing.T) {
+	t.Parallel()
+
+	const text = "  今日も美琴が可愛い♡\n二行目  "
+
+	telegram, obsidian := succeeds("telegram"), succeeds("obsidian")
+
+	service := New([]Sink{telegram, obsidian}, generousTimeout)
+	outcome := service.Post(mustMessage(t, text))
+
+	for _, sink := range []*fakeSink{telegram, obsidian} {
+		if got := sink.sawMessage(t); got.Original != text {
+			t.Errorf("%s received %q, want the original %q", sink.name, got.Original, text)
+		}
+	}
+
+	if outcome.Message.Original != text {
+		t.Errorf("Outcome.Message = %q, want the original %q", outcome.Message.Original, text)
+	}
+}
+
+// TestResultsFollowTheSinkOrderNotTheCompletionOrder pins the ordering the
+// front doors render.
+//
+// The sinks finish in the opposite order to the one they were given in, so an
+// implementation that appended from each goroutine returns them reversed. That
+// would also make the order vary with the network, which is worse than either
+// fixed order.
+func TestResultsFollowTheSinkOrderNotTheCompletionOrder(t *testing.T) {
+	t.Parallel()
+
+	firstMayFinish := make(chan struct{})
+
+	slow := &fakeSink{
+		name: "telegram",
+		send: func(context.Context, Message) error {
+			<-firstMayFinish
+
+			return nil
+		},
+	}
+
+	fast := &fakeSink{
+		name: "obsidian",
+		send: func(context.Context, Message) error {
+			close(firstMayFinish)
+
+			return nil
+		},
+	}
+
+	service := New([]Sink{slow, fast}, generousTimeout)
+	outcome := service.Post(mustMessage(t, "ordered"))
+
+	if len(outcome.Results) != 2 {
+		t.Fatalf("got %d results, want 2", len(outcome.Results))
+	}
+
+	if outcome.Results[0].Name != "telegram" || outcome.Results[1].Name != "obsidian" {
+		t.Errorf("results are ordered %q, %q; want the order the sinks were given",
+			outcome.Results[0].Name, outcome.Results[1].Name)
+	}
+}
+
+// TestEachResultRecordsHowLongItsSinkTook covers the Duration field that
+// FR-066's duration_ms is built from.
+func TestEachResultRecordsHowLongItsSinkTook(t *testing.T) {
+	t.Parallel()
+
+	const spent = 40 * time.Millisecond
+
+	slow := &fakeSink{
+		name: "telegram",
+		send: func(context.Context, Message) error {
+			time.Sleep(spent)
+
+			return nil
+		},
+	}
+
+	service := New([]Sink{slow}, generousTimeout)
+	outcome := service.Post(mustMessage(t, "timed"))
+
+	if got := resultFor(t, outcome, "telegram").Duration; got < spent {
+		t.Errorf("Duration = %s, want at least %s", got, spent)
+	}
+}
+
+// TestPostWithNoSinksReportsNothingDelivered covers the fail-closed path.
+//
+// FR-018 makes an all-disabled configuration a startup error at the front door,
+// so this is unreachable in a wired application. It is asserted anyway because
+// the alternative — a vacuous success — would exit 0 for a post that reached no
+// destination, which is the single outcome the exit status exists to prevent.
+func TestPostWithNoSinksReportsNothingDelivered(t *testing.T) {
+	t.Parallel()
+
+	outcome := New(nil, generousTimeout).Post(mustMessage(t, "nowhere to go"))
+
+	if len(outcome.Results) != 0 {
+		t.Errorf("got %d results, want none", len(outcome.Results))
+	}
+
+	if outcome.Succeeded() {
+		t.Error("a post with no sinks reported success")
+	}
+}
+
+// TestEveryPostGetsItsOwnIdentifier covers the per-post correlation identifier
+// (FR-066, R-007).
+func TestEveryPostGetsItsOwnIdentifier(t *testing.T) {
+	t.Parallel()
+
+	service := New([]Sink{succeeds("telegram")}, generousTimeout)
+
+	first := service.Post(mustMessage(t, "one"))
+	second := service.Post(mustMessage(t, "two"))
+
+	if first.ID == second.ID {
+		t.Errorf("two posts share the identifier %s; records cannot be correlated to one post", first.ID)
+	}
+
+	if first.ID == (ulid.ULID{}) {
+		t.Error("the identifier is the zero ULID, which is the generation-failure fallback")
+	}
+
+	// Monotonic within a process, so a reader can order two posts that landed
+	// in the same millisecond.
+	if second.ID.Compare(first.ID) <= 0 {
+		t.Errorf("the second identifier %s does not sort after the first %s", second.ID, first.ID)
+	}
+
+	// It must survive as the 26-character string a log record carries.
+	if parsed, err := ulid.ParseStrict(first.ID.String()); err != nil {
+		t.Errorf("the identifier does not round-trip through its string form: %v", err)
+	} else if parsed != first.ID {
+		t.Errorf("round-tripped to %s, want %s", parsed, first.ID)
+	}
+}
+
+// TestAFailureToGenerateAnIdentifierStillPosts covers the fallback branch, and
+// is the reason the generator is a field.
+//
+// ulid.Make panics on monotonic overflow, which is why it is not used. Having
+// declined the panic, the remaining question is what a post does when it cannot
+// be named — and the answer has to be "it still posts", or a diagnostics
+// concern would have decided whether the user's message was delivered.
+func TestAFailureToGenerateAnIdentifierStillPosts(t *testing.T) {
+	t.Parallel()
+
+	sink := succeeds("telegram")
+
+	service := New([]Sink{sink}, generousTimeout)
+	service.newID = func() (ulid.ULID, error) {
+		return ulid.ULID{}, ulid.ErrMonotonicOverflow
+	}
+
+	outcome := service.Post(mustMessage(t, "unnamed but delivered"))
+
+	if sink.ran() != 1 {
+		t.Errorf("the sink ran %d times, want 1; the post was abandoned", sink.ran())
+	}
+
+	if !outcome.Succeeded() {
+		t.Error("the post failed because its identifier could not be generated")
+	}
+
+	if outcome.ID != (ulid.ULID{}) {
+		t.Errorf("ID = %s, want the zero ULID fallback", outcome.ID)
+	}
+
+	// The fallback is still a parseable ULID string, so a log record carrying
+	// it is greppable rather than malformed.
+	if got := outcome.ID.String(); len(got) != 26 {
+		t.Errorf("the fallback renders as %q (%d chars), want a 26-character ULID", got, len(got))
+	}
+}
+
+// TestConcurrentPostsOnOneServiceDoNotInterfere covers the shape a GUI window
+// produces: FR-028 cancels the auto-close on interaction, so a window can
+// still be open — and its Service still live — when the next post begins.
+//
+// Run under -race, this is what would catch shared mutable state on Service.
+func TestConcurrentPostsOnOneServiceDoNotInterfere(t *testing.T) {
+	t.Parallel()
+
+	const posts = 16
+
+	// Stateless sinks, shared across every concurrent post, so any
+	// interference has to come from the Service.
+	service := New([]Sink{
+		&fakeSink{name: "telegram"},
+		&fakeSink{name: "obsidian"},
+	}, generousTimeout)
+
+	var (
+		running sync.WaitGroup
+		mu      sync.Mutex
+		ids     = make(map[ulid.ULID]int, posts)
+	)
+
+	for i := range posts {
+		running.Add(1)
+
+		go func(i int) {
+			defer running.Done()
+
+			outcome := service.Post(mustMessage(t, fmt.Sprintf("post %02d", i)))
+
+			if len(outcome.Results) != 2 || !outcome.Succeeded() {
+				t.Errorf("post %02d: %d results, succeeded=%t", i, len(outcome.Results), outcome.Succeeded())
+
+				return
+			}
+
+			mu.Lock()
+			ids[outcome.ID]++
+			mu.Unlock()
+		}(i)
+	}
+
+	running.Wait()
+
+	if len(ids) != posts {
+		t.Errorf("%d concurrent posts produced %d distinct identifiers", posts, len(ids))
+	}
+}
+
+// TestReasonForNeverEchoesTheError guards the split FR-017 and FR-029 exist
+// for, at the one function that chooses the display half.
+//
+// A classifier that fell back to err.Error() would pass every other test in
+// this file while printing a bot token on the user's terminal the first time a
+// Telegram request failed at the transport layer.
+func TestReasonForNeverEchoesTheError(t *testing.T) {
+	t.Parallel()
+
+	const secret = "1234567890:SENTINEL-BOT-TOKEN"
+
+	fixedSet := map[string]bool{reasonTimedOut: true, reasonFailed: true}
+
+	errs := []error{
+		errors.New("Post \"https://api.telegram.org/bot" + secret + "/sendMessage\": i/o timeout"),
+		fmt.Errorf("wrapped: %w", errors.New(secret)),
+		context.DeadlineExceeded,
+		fmt.Errorf("deadline: %w", context.DeadlineExceeded),
+		context.Canceled,
+		errors.New(""),
+	}
+
+	for _, err := range errs {
+		reason := reasonFor(err)
+
+		if !fixedSet[reason] {
+			t.Errorf("reasonFor(%v) = %q, which is outside the fixed set", err, reason)
+		}
+
+		if strings.Contains(reason, secret) {
+			t.Errorf("reasonFor leaked the credential: %q", reason)
+		}
+	}
+
+	// And the one classification this batch does make.
+	if got := reasonFor(fmt.Errorf("wrapped: %w", context.DeadlineExceeded)); got != reasonTimedOut {
+		t.Errorf("a wrapped deadline classified as %q, want %q", got, reasonTimedOut)
+	}
+}
+
+// TestEachSinkGetsItsOwnDeadline covers two narrow claims about FR-015's
+// per-sink budget, and it is worth being exact about which.
+//
+// It does verify that every sink is handed a context that *has* a deadline, and
+// that the budget is granted per sink rather than consumed across them: both
+// sinks here spend three quarters of the timeout, so an implementation that ran
+// them in sequence against one shared deadline would leave the second with a
+// quarter and expire it.
+//
+// It does not distinguish a shared deadline from per-sink deadlines when the
+// sinks genuinely overlap, and it cannot: two contexts created within
+// microseconds of each other expire at effectively the same instant, so the
+// two implementations are behaviourally identical here. The independence that
+// actually matters — that no sink is ever cancelled because another failed — is
+// carried by TestOneSinkFailingDoesNotCancelItsSibling, and the overlap itself
+// by TestSinksActuallyOverlap. This test is the sequential-shared-budget
+// detector, not the independence proof.
+func TestEachSinkGetsItsOwnDeadline(t *testing.T) {
+	t.Parallel()
+
+	const timeout = 300 * time.Millisecond
+
+	deadlines := make(chan time.Time, 2)
+
+	record := func(name string, spend time.Duration) *fakeSink {
+		return &fakeSink{
+			name: name,
+			send: func(ctx context.Context, _ Message) error {
+				deadline, ok := ctx.Deadline()
+				if !ok {
+					return errors.New("this sink was given no deadline")
+				}
+
+				deadlines <- deadline
+
+				time.Sleep(spend)
+
+				return ctx.Err()
+			},
+		}
+	}
+
+	service := New([]Sink{
+		record("telegram", timeout*3/4),
+		record("obsidian", timeout*3/4),
+	}, timeout)
+
+	outcome := service.Post(mustMessage(t, "budgets"))
+
+	// Both spent three quarters of the timeout, so a budget consumed across
+	// sinks rather than granted to each would have expired the second one.
+	for _, result := range outcome.Results {
+		if !result.Success {
+			t.Errorf("%s failed, so the timeout was shared rather than per-sink: reason=%q err=%v",
+				result.Name, result.Reason, result.Err)
+		}
+	}
+
+	close(deadlines)
+
+	var seen []time.Time
+	for deadline := range deadlines {
+		seen = append(seen, deadline)
+	}
+
+	if len(seen) != 2 {
+		t.Fatalf("recorded %d deadlines, want 2", len(seen))
+	}
+
+	// Each was computed when its own sink started, so they are close but need
+	// not be equal. The gap check only rules out one sink being handed a budget
+	// that had already been spent elsewhere; it deliberately does not claim to
+	// tell a shared deadline from two independent ones.
+	if gap := seen[0].Sub(seen[1]); gap > timeout/2 || gap < -timeout/2 {
+		t.Errorf("the two deadlines are %s apart, which is more than half the budget", gap)
+	}
+}

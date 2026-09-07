@@ -28,14 +28,22 @@ and never a string, making it structurally impossible to send the trimmed form b
 
 ## Post
 
-One user submission. Owned by `internal/post`.
+One user submission. Owned by `internal/post`, where it is the type `Outcome`.
+
+Named `Outcome` in code because `post.Post` stutters and because the type records
+what a submission produced rather than the submission itself — `Service.Post`
+performs it. Amended in the orchestrator batch (T025).
 
 | Field | Type | Notes |
 |---|---|---|
 | `ID` | `ulid.ULID` | Per-post correlation identifier (FR-066, SC-007). Generated once at submission. |
-| `Source` | `Source` | `SourceCLI` or `SourceGUI` (FR-066). |
 | `Message` | `Message` | |
-| `Results` | `[]SinkResult` | One per **enabled** sink (FR-016). |
+| `Results` | `[]SinkResult` | One per **enabled** sink (FR-016), in the order the sinks were given. |
+
+A `Source` field was specified here and is deliberately **not** implemented. The
+front door that knows the source does not read it back off this type, and the
+log record's `source` comes from `logging.Options`, so the field would be state
+nothing reads. Amended in T025.
 
 **Aggregate rule** (FR-059, FR-061): the post succeeds only when every element of `Results` has
 `Success == true`. A chat delivery rescued by the unformatted retry sets `Success == true`, so it
@@ -44,6 +52,11 @@ does not affect the exit status.
 **Lifecycle**: `Validate → StartAll (concurrent) → AwaitAll → Aggregate`. `AwaitAll` waits for
 every started sink (FR-014); it never returns on first error and never cancels a sibling
 (constitution principle I).
+
+`Validate` is the **caller's** step, not the orchestrator's: a whitespace-only submission is not a
+post that failed but one that must never start, and the user needs FR-011's message from the front
+door rather than a report saying every sink failed. `Service.Post` therefore requires an
+already-validated message. Amended in T025.
 
 ---
 
