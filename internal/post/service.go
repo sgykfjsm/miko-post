@@ -237,12 +237,17 @@ func (s *Service) Post(message Message) Outcome {
 //   - The abandoned goroutine outlives the post. It is one goroutine per hung
 //     submission, it holds no lock the caller needs, and its sends cannot block
 //     because both channels are buffered — so nothing the caller does depends
-//     on it ever finishing. Two honest caveats: it is not necessarily *parked*
-//     (a sink returning an error whose Unwrap cycles leaves it spinning inside
-//     errors.Is until the process exits), and nothing caps the count, so a
-//     long-lived GUI session posting repeatedly at a dead mount accumulates one
-//     per attempt along with one retained copy of each message. Measured at
-//     ~0.7 KiB per abandoned sink, all of it reclaimed once the sink unblocks.
+//     on it ever finishing. Three honest caveats. It is not necessarily
+//     *parked*: a sink returning an error whose Unwrap cycles leaves it
+//     spinning inside errors.Is, burning a full core until the process exits.
+//     Nothing caps the count, so a long-lived GUI session posting repeatedly at
+//     a dead mount accumulates one per attempt along with one retained copy of
+//     each message. And the cost is ~4.9 KiB per abandoned sink — 0.9 KiB of
+//     heap plus a 4.1 KiB goroutine stack, measured over 500 abandoned posts.
+//     An earlier version of this note said ~0.7 KiB, which counted only the
+//     heap and omitted the stack: the larger term, and the resource this design
+//     actually chooses to leak. The goroutines are fully reclaimed once the
+//     sink unblocks.
 //   - A write that the sink completes after we stopped waiting still lands. The
 //     user is told the sink timed out and a note may appear in the vault
 //     afterwards. Reporting a timeout for work that was abandoned is the honest
@@ -288,7 +293,18 @@ func (s *Service) run(sink Sink, message Message) SinkResult {
 			Err:     errAbnormalExit,
 		}
 
+		delivered := false
+
 		defer func() {
+			// deliver sets Duration on every path it returns through. It does
+			// not return through any of them on a Goexit, so its value is
+			// discarded and the seed above would report a duration of zero for
+			// work that took real time — which FR-066 turns into a
+			// duration_ms of 0.
+			if !delivered {
+				outcome.Duration = time.Since(started)
+			}
+
 			done <- outcome
 		}()
 
@@ -298,6 +314,7 @@ func (s *Service) run(sink Sink, message Message) SinkResult {
 		outcome.Name = name
 
 		outcome = s.deliver(name, sink, message, started)
+		delivered = true
 	}()
 
 	timer := time.NewTimer(enforcementBound(s.timeout))
@@ -363,6 +380,15 @@ func resolvedName(named <-chan string) string {
 // Name() is sink code, and this is called from inside the delivery goroutine so
 // that it is bounded by the same backstop as Send.
 //
+// What is *not* kept is the recovered value itself. FR-071 wants a trace for
+// every panic, and deliver preserves Send's for that purpose, but a Name panic
+// is discarded here — so a sink that panics in Name while delivering
+// successfully leaves no evidence anywhere, and the information is gone by the
+// time T073 could record it. Recorded as issue #109 rather than fixed here:
+// there is no field on SinkResult for it that would not put an error on a
+// successful result, and inventing one before T073 defines where traces go
+// would be guessing at its shape.
+//
 // Both properties were learned the hard way, one review each. First, Name was
 // called outside any recover, so a panicking Name — or a nil element in the
 // slice T036 builds — killed the process along with the sibling's result. That
@@ -373,7 +399,19 @@ func resolvedName(named <-chan string) string {
 // interface methods; both are sink code; both need the same treatment.
 func (s *Service) nameOf(sink Sink) (name string) {
 	defer func() {
-		if recover() != nil {
+		// recover is called for its arresting effect and its value is
+		// deliberately not branched on.
+		//
+		// Branching on it was wrong twice over. panic(nil) under panicnil=1
+		// arrests a panic while returning nil, so the guard did not fire and
+		// the zero value came back — a blank name, which is exactly what this
+		// sentinel exists to prevent. And a sink that simply returns "" needs
+		// no panic at all to reach the same place. Deciding from the name
+		// rather than from the recovered value covers every route out of here,
+		// including ones nobody has thought of yet.
+		_ = recover()
+
+		if name == "" {
 			name = unknownSinkName
 		}
 	}()
@@ -429,7 +467,17 @@ func (s *Service) deliver(name string, sink Sink, message Message, started time.
 		result.Duration = time.Since(started)
 	}()
 
-	ctx, cancel := context.WithTimeout(context.Background(), s.timeout)
+	// Derived from started, not from now, so the sink's deadline and run's
+	// backstop are measured from the same origin.
+	//
+	// With WithTimeout the context began when deliver was entered — after
+	// nameOf had run — while the backstop timer started before it. A Name()
+	// costing more than the grace therefore pushed the sink's own deadline
+	// past the backstop, and a sink that honoured cancellation was abandoned
+	// anyway: the diagnostic said "abandoned" for a sink that had done nothing
+	// wrong, and a very slow Name lost the attribution too. One origin makes
+	// the grace mean what its comment says it means, whatever Name costs.
+	ctx, cancel := context.WithDeadline(context.Background(), started.Add(s.timeout))
 	defer cancel()
 
 	if err := sink.Send(ctx, message); err != nil {

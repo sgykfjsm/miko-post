@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"os"
+	"os/exec"
 	"runtime"
 	"strings"
 	"sync"
@@ -485,6 +487,20 @@ func TestAPanickingSinkBecomesAFailureAndItsSiblingStillReports(t *testing.T) {
 				t.Errorf("the panic value reached the display reason: %q", failed.Reason)
 			}
 
+			// And, more to the point, absent from the field that can actually
+			// carry it.
+			//
+			// Asserting only on Reason proves nothing: Reason is always one of
+			// two package constants, so no implementation could put a token
+			// there. Err is where describePanic's output lands, and Err is what
+			// T040 and T073 write verbatim to the diagnostic log. Appending
+			// "%v" to describePanic's default arm is a two-line edit that
+			// leaks the struct's fields into exactly this string.
+			if strings.Contains(failed.Err.Error(), "SENTINEL-TOKEN") {
+				t.Errorf("the panic value's contents reached the diagnostic error: %q",
+					failed.Err.Error())
+			}
+
 			// And the sibling still ran and still reported.
 			if got := resultFor(t, outcome, "obsidian"); !got.Success {
 				t.Errorf("the sibling of a panicking sink failed: %v", got.Err)
@@ -630,8 +646,10 @@ func TestEveryPostGetsItsOwnIdentifier(t *testing.T) {
 
 	service := New([]Sink{succeeds("telegram")}, generousTimeout)
 
+	before := time.Now()
 	first := service.Post(mustMessage(t, "one"))
 	second := service.Post(mustMessage(t, "two"))
+	after := time.Now()
 
 	if first.ID == second.ID {
 		t.Errorf("two posts share the identifier %s; records cannot be correlated to one post", first.ID)
@@ -658,6 +676,24 @@ func TestEveryPostGetsItsOwnIdentifier(t *testing.T) {
 	if second.ID.Time() < first.ID.Time() {
 		t.Errorf("the second identifier's timestamp %d precedes the first's %d",
 			second.ID.Time(), first.ID.Time())
+	}
+
+	// And the timestamp is the submission's, not a constant.
+	//
+	// The comparison above holds for a zero timestamp, a frozen one, and any
+	// other constant, so on its own it pins nothing — R-007 chose ULID
+	// precisely so that sorting grepped log lines reconstructs a post's order,
+	// and a frozen timestamp defeats that entirely. Bracketing against the
+	// wall clock either side of the two posts is what makes it falsifiable.
+	for _, entry := range []struct {
+		label string
+		id    ulid.ULID
+	}{{"first", first.ID}, {"second", second.ID}} {
+		stamp := ulid.Time(entry.id.Time())
+		if stamp.Before(before.Add(-time.Second)) || stamp.After(after.Add(time.Second)) {
+			t.Errorf("the %s identifier's timestamp %s is outside the submission window [%s, %s]",
+				entry.label, stamp, before, after)
+		}
 	}
 
 	// It must survive as the 26-character string a log record carries.
@@ -785,6 +821,16 @@ func TestReasonForNeverEchoesTheError(t *testing.T) {
 	const secret = "1234567890:SENTINEL-BOT-TOKEN"
 
 	fixedSet := map[string]bool{reasonTimedOut: true, reasonFailed: true}
+
+	// The timeout phrase is contract text, not an internal label:
+	// contracts/cli-interface.md shows "Telegram: failed — request timed out"
+	// and contracts/log-events.md shows "error":"request timed out". Every
+	// other assertion in this file compares against the constants, so swapping
+	// the two constants' values would invert what users see with a green suite.
+	if reasonTimedOut != "request timed out" {
+		t.Errorf("reasonTimedOut = %q, but the contracts specify %q",
+			reasonTimedOut, "request timed out")
+	}
 
 	errs := []error{
 		errors.New("Post \"https://api.telegram.org/bot" + secret + "/sendMessage\": i/o timeout"),
@@ -984,6 +1030,13 @@ func TestAPanicFromNameIsContainedLikeAnyOther(t *testing.T) {
 				t.Errorf("Name = %q, want the sentinel %q", broken.Name, unknownSinkName)
 			}
 
+			// Independent of the constant's value. Every other assertion here
+			// compares against unknownSinkName itself, so they all hold even
+			// if it were "" — the one value the property forbids.
+			if broken.Name == "" {
+				t.Error("the result names no sink at all; the front door would render a blank line")
+			}
+
 			// Success follows what Send actually did, not what Name did.
 			//
 			// That is deliberate and it is the interesting half of this test.
@@ -1091,10 +1144,11 @@ func TestASinkThatIgnoresItsContextIsAbandoned(t *testing.T) {
 
 			service := New([]Sink{test.sink, succeeds("telegram")}, timeout)
 
+			message := mustMessage(t, "the vault is on a dead mount")
 			finished := make(chan Outcome, 1)
 
 			go func() {
-				finished <- service.Post(mustMessage(t, "the vault is on a dead mount"))
+				finished <- service.Post(message)
 			}()
 
 			var outcome Outcome
@@ -1120,6 +1174,15 @@ func TestASinkThatIgnoresItsContextIsAbandoned(t *testing.T) {
 			// sink noticed its deadline or had to be abandoned.
 			if !errors.Is(blocked.Err, context.DeadlineExceeded) {
 				t.Errorf("Err = %v, want it to wrap context.DeadlineExceeded", blocked.Err)
+			}
+
+			// And it reports the time actually spent waiting. The synthesised
+			// abandonment result is built by hand rather than by deliver's
+			// deferred assignment, so its Duration is the one that can be
+			// dropped without any other assertion noticing.
+			if blocked.Duration < timeout {
+				t.Errorf("Duration = %s, want at least the %s waited before abandoning",
+					blocked.Duration, timeout)
 			}
 
 			// The sibling's result is reported rather than held hostage.
@@ -1170,6 +1233,13 @@ func TestAnAbnormalExitStillYieldsAWellFormedFailure(t *testing.T) {
 
 	if !errors.Is(abnormal.Err, errAbnormalExit) {
 		t.Errorf("Err = %v, want it to wrap errAbnormalExit", abnormal.Err)
+	}
+
+	// A Goexit discards deliver's return value, so the Duration its deferred
+	// assignment computed is thrown away — the seed has to carry one, or a log
+	// record reports duration_ms 0 for work that took real time.
+	if abnormal.Duration <= 0 {
+		t.Errorf("Duration = %s, want the time actually spent", abnormal.Duration)
 	}
 
 	if sibling := resultFor(t, outcome, "obsidian"); !sibling.Success {
@@ -1320,7 +1390,9 @@ func TestNameIsBoundedLikeSend(t *testing.T) {
 		service := New([]Sink{blocked, succeeds("telegram")}, timeout)
 
 		finished := make(chan Outcome, 1)
-		go func() { finished <- service.Post(mustMessage(t, "Name is stuck")) }()
+		message := mustMessage(t, "Name is stuck")
+
+		go func() { finished <- service.Post(message) }()
 
 		var outcome Outcome
 
@@ -1402,7 +1474,9 @@ func TestAnAbandonedSinkKeepsItsNameWhenItHasOne(t *testing.T) {
 	service := New([]Sink{hung, succeeds("telegram")}, 100*time.Millisecond)
 
 	finished := make(chan Outcome, 1)
-	go func() { finished <- service.Post(mustMessage(t, "Send hangs, Name is fine")) }()
+	message := mustMessage(t, "Send hangs, Name is fine")
+
+	go func() { finished <- service.Post(message) }()
 
 	select {
 	case outcome := <-finished:
@@ -1477,5 +1551,267 @@ func TestNewCopiesTheSinks(t *testing.T) {
 
 	if intruder.ran() != 0 {
 		t.Errorf("the intruder sink ran %d times; it was never given to New", intruder.ran())
+	}
+}
+
+// TestACooperativeSinkReportsItsOwnTimeoutNotTheBackstops covers
+// enforcementGrace, which was the one mechanism this design added with no test
+// at all (FR-015).
+//
+// The grace period exists so the per-sink context stays the primary mechanism
+// and the backstop decides only for sinks that cannot be cancelled. Nothing
+// asserted that: with the grace set to zero, or to microseconds, every ordinary
+// cooperative timeout — a hung chat request, the common case — took the
+// abandonment branch instead, discarding the sink's own error in favour of a
+// synthesised one and leaking a goroutine where none had leaked before. Both
+// results say "request timed out", so only the diagnostic half distinguishes
+// them.
+func TestACooperativeSinkReportsItsOwnTimeoutNotTheBackstops(t *testing.T) {
+	t.Parallel()
+
+	const timeout = 80 * time.Millisecond
+
+	cooperative := &fakeSink{
+		name: "telegram",
+		send: func(ctx context.Context, _ Message) error {
+			<-ctx.Done()
+
+			return ctx.Err()
+		},
+	}
+
+	outcome := New([]Sink{cooperative}, timeout).Post(mustMessage(t, "the sink honours its deadline"))
+
+	result := resultFor(t, outcome, "telegram")
+
+	if result.Reason != reasonTimedOut {
+		t.Fatalf("Reason = %q, want %q", result.Reason, reasonTimedOut)
+	}
+
+	// The sink's own error, not the orchestrator's. "abandoned" appears only in
+	// the synthesised backstop error, so its absence is what proves the
+	// cooperative route was taken.
+	if strings.Contains(result.Err.Error(), "abandoned") {
+		t.Errorf("Err = %q; the backstop preempted a sink that honoured its own deadline",
+			result.Err.Error())
+	}
+
+	if !errors.Is(result.Err, context.DeadlineExceeded) {
+		t.Errorf("Err = %v, want it to wrap context.DeadlineExceeded", result.Err)
+	}
+}
+
+// TestASlowNameDoesNotCostTheSinkItsOwnDeadline covers the deadline origin.
+//
+// The backstop timer starts before Name() runs, so if the sink's context began
+// when deliver was entered — after Name — a Name costing more than the grace
+// pushed the sink's deadline past the backstop and a sink that honoured
+// cancellation was abandoned anyway. Both deadlines now come from the same
+// origin, so the grace means what it says whatever Name costs.
+func TestASlowNameDoesNotCostTheSinkItsOwnDeadline(t *testing.T) {
+	t.Parallel()
+
+	// nameCost exceeds the grace, which is the shape that used to cause
+	// preemption, but stays well inside the timeout — because Name is part of
+	// the sink's operation, so it spends the sink's own budget rather than
+	// extending it. A Name costing more than timeout+grace is abandoned, and
+	// correctly so: that is the bound working.
+	const (
+		timeout  = time.Second
+		nameCost = enforcementGrace * 2
+	)
+
+	slowlyNamed := &deadlineObservingSink{label: "obsidian", nameCost: nameCost}
+
+	outcome := New([]Sink{slowlyNamed}, timeout).Post(mustMessage(t, "Name is slower than the grace"))
+
+	result := resultFor(t, outcome, "obsidian")
+
+	// Attribution survives: the name was resolved, so the report says which
+	// sink timed out.
+	if result.Name != "obsidian" {
+		t.Errorf("Name = %q, want the sink's own name", result.Name)
+	}
+
+	if strings.Contains(result.Err.Error(), "abandoned") {
+		t.Errorf("Err = %q; a slow Name let the backstop preempt the sink's own deadline",
+			result.Err.Error())
+	}
+
+	// The sink's deadline is measured from the same origin as the backstop, so
+	// the whole operation — Name included — fits inside the configured timeout
+	// rather than Name pushing the deadline out past it.
+	if result.Duration >= timeout+enforcementGrace {
+		t.Errorf("Duration = %s, want less than the enforcement bound %s",
+			result.Duration, timeout+enforcementGrace)
+	}
+}
+
+// deadlineObservingSink spends nameCost in Name and then waits for its own
+// context to expire.
+type deadlineObservingSink struct {
+	label    string
+	nameCost time.Duration
+}
+
+func (s *deadlineObservingSink) Name() string {
+	time.Sleep(s.nameCost)
+
+	return s.label
+}
+
+func (s *deadlineObservingSink) Send(ctx context.Context, _ Message) error {
+	<-ctx.Done()
+
+	return ctx.Err()
+}
+
+// TestAbandonedDeliveriesAreReclaimed covers the buffering that lets an
+// abandoned goroutine exit at all.
+//
+// run's accepted-consequences note promises the leak is bounded to the blocked
+// window and that everything is reclaimed once the sink unblocks. Nothing
+// observed that: with `done` unbuffered, every abandoned goroutine parks
+// forever on a send nobody will receive, and the whole suite stayed green — so
+// a temporary leak would have become a permanent one for a long-lived GUI
+// session against a dead mount.
+//
+// The assertion is a *relative drop* rather than a comparison against a
+// baseline taken before the posts. An earlier version did the latter and
+// flaked: this package's other tests are parallel, so the process-wide
+// goroutine count drifts underneath any absolute figure (observed at 28
+// sibling goroutines). Requiring the count to fall by at least one per post
+// after the sinks unblock proves both halves at once — that many goroutines
+// must have existed to be reclaimed — and cannot be perturbed by a sibling
+// test starting or finishing work of its own.
+func TestAbandonedDeliveriesAreReclaimed(t *testing.T) {
+	t.Parallel()
+
+	const posts = 40
+
+	release := make(chan struct{})
+	hung := &uncooperativeSink{name: "obsidian", release: release}
+
+	service := New([]Sink{hung}, time.Millisecond)
+
+	for range posts {
+		service.Post(mustMessage(t, "the mount is dead"))
+	}
+
+	// Every delivery is still resident here, which is the documented cost.
+	blocked := runtime.NumGoroutine()
+
+	close(release)
+
+	// And every one exits once the sink unblocks. Polled rather than slept on:
+	// the exact moment is the scheduler's, only the outcome is ours.
+	want := blocked - posts
+
+	deadline := time.Now().Add(20 * time.Second)
+	for runtime.NumGoroutine() > want && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	if settled := runtime.NumGoroutine(); settled > want {
+		t.Errorf("goroutines fell only from %d to %d after the sinks unblocked, want at most %d; "+
+			"%d abandoned deliveries were not reclaimed", blocked, settled, want, posts)
+	}
+}
+
+// panicNilSink panics with an untyped nil.
+type panicNilSink struct{}
+
+func (panicNilSink) Name() string { return "telegram" }
+
+func (panicNilSink) Send(context.Context, Message) error {
+	//nolint:govet // panic(nil) is the case under test.
+	panic(nil)
+}
+
+// TestPanicNilIsAWellFormedFailure covers deliver's pre-seed, which existed
+// for a case no test reached.
+//
+// Under Go 1.21+ defaults, panic(nil) becomes a *runtime.PanicNilError, so
+// recover returns non-nil and the ordinary handler fires. Under
+// GODEBUG=panicnil=1 the old semantics come back: the panic is arrested but
+// recover returns nil, so the handler does not fire and deliver returns its
+// named result — which is why that result is pre-seeded. Deleting the seed left
+// the whole suite green, because nothing in it ever panicked with nil.
+//
+// GODEBUG is read once at startup, so the panicnil half cannot be exercised in
+// this process. It runs as a subprocess of the test binary instead, which is
+// the only way to assert a claim about a runtime mode.
+func TestPanicNilIsAWellFormedFailure(t *testing.T) {
+	if os.Getenv(panicNilSubprocessEnv) == "1" {
+		runPanicNilCase(t)
+
+		return
+	}
+
+	t.Parallel()
+
+	// The default-semantics half, in this process.
+	t.Run("default semantics", func(t *testing.T) {
+		t.Parallel()
+
+		runPanicNilCase(t)
+	})
+
+	// And the panicnil=1 half, in a subprocess with the mode set.
+	t.Run("under GODEBUG=panicnil=1", func(t *testing.T) {
+		t.Parallel()
+
+		command := exec.Command(os.Args[0], "-test.run=^TestPanicNilIsAWellFormedFailure$", "-test.v")
+		command.Env = append(os.Environ(), panicNilSubprocessEnv+"=1", "GODEBUG=panicnil=1")
+
+		output, err := command.CombinedOutput()
+		if err != nil {
+			t.Fatalf("the panicnil=1 subprocess failed: %v\n%s", err, output)
+		}
+	})
+}
+
+// panicNilSubprocessEnv marks the re-executed child of the test above.
+const panicNilSubprocessEnv = "MIKO_POST_PANICNIL_CASE"
+
+// runPanicNilCase asserts the result shape, whichever semantics are in force.
+//
+// Both routes have to produce a well-formed failure: the difference is only
+// which mechanism produces it, and the point of the test is that neither leaves
+// a zero-valued result.
+func runPanicNilCase(t *testing.T) {
+	t.Helper()
+
+	outcome := New([]Sink{panicNilSink{}, succeeds("obsidian")}, generousTimeout).
+		Post(mustMessage(t, "the sink panics with nil"))
+
+	if len(outcome.Results) != 2 {
+		t.Fatalf("got %d results, want 2", len(outcome.Results))
+	}
+
+	failed := resultFor(t, outcome, "telegram")
+
+	if failed.Success {
+		t.Error("a sink that panicked with nil was reported as a success")
+	}
+
+	if failed.Name == "" {
+		t.Error("the failing result names no sink")
+	}
+
+	if failed.Reason != reasonFailed {
+		t.Errorf("Reason = %q, want %q", failed.Reason, reasonFailed)
+	}
+
+	if failed.Err == nil {
+		t.Error("the failing result carries no diagnostic error")
+	}
+
+	if failed.Duration <= 0 {
+		t.Error("the failing result reports no duration")
+	}
+
+	if sibling := resultFor(t, outcome, "obsidian"); !sibling.Success {
+		t.Errorf("the sibling failed: %v", sibling.Err)
 	}
 }
