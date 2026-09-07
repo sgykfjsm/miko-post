@@ -132,3 +132,26 @@ with the ULID and Fyne pins outstanding. On merged `main`: `go build`, `go vet`,
 
 **Next best action.** Run `run-batch-cycle` for Batch 4 — Logging foundation (T021-T024,
 issues #22-#25).
+
+---
+
+## 2026-09-07 — Filed the outstanding review follow-ups
+
+**Objective.** Clear the backlog of review findings that existed only in local run state.
+
+**Changes made.** No code. Filed #101-#105 and commented on #57 and #4, consolidating twelve
+findings from the Batch 2 and Batch 3 reviews into five issues and two comments.
+
+**Evidence.** Both review run states remained readable
+(`20260902T040356Z-79b5bd57`, `20260903T103000Z-1047541d`), as did the Batch 2 memory note, so no
+finding was reconstructed from recollection.
+
+**Decisions.** Consolidated rather than filed one-per-finding — the tracker already carries 75 open
+issues, and three of the twelve were the same root cause seen by different reviewers. One finding
+(the `rendered == ".."` clause) was deliberately **not** filed: it was proven verdict-neutral over
+27,479 accepted layouts, so an issue would imply latent risk that does not exist.
+
+**Blockers and open questions.** None new. #104 is a decision needed before T035.
+
+**Next best action.** Run `run-batch-cycle` for Batch 4 — Logging foundation (T021-T024,
+issues #22-#25).

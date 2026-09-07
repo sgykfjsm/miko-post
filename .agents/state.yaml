@@ -59,11 +59,19 @@ time_sensitive:
 next_best_action: >-
   Run run-batch-cycle for Batch 4 - Logging foundation (T021-T024, issues #22-#25).
 
-review_followups_planned_not_filed:
-  - {ids: [COR-303, ADV-301, COR-302, ADV-302, CON-302], subject: "elide: bound declared generally, applied to two keys; head-only truncation hides the offender; multibyte branch untested", proposed: create-issue}
-  - {id: CON-301, subject: "safe-alphabet enumeration backing AC-9 omits Z and AM/PM", proposed: create-issue}
-  - {id: CON-303, subject: "thread_id > 0 enforced but absent from the schema table", proposed: defer-to-spec-reconciler}
-  - {id: COR-301, subject: "rendered == '..' clause unpinned, proven verdict-neutral", proposed: record-in-pr}
+review_followups_filed:
+  filed_at: 2026-09-07
+  issues:
+    - {number: 101, subject: "elide bounds two settings keys but its rationale applies to six", sources: [COR-303, ADV-301, COR-302, ADV-302, CON-302], batch: 3}
+    - {number: 102, subject: "safe-alphabet enumeration behind the one-rendering argument omits Z and AM/PM", sources: [CON-301], batch: 3}
+    - {number: 103, subject: "SinkResult: xml.Marshal reaches Err; the completeness test skips silently", batch: 2}
+    - {number: 104, subject: "Decision: should Message.Validate reject invalid UTF-8", batch: 2}
+    - {number: 105, subject: "data-model.md stale on SinkResult, AllSucceeded, Secret, thread_id", sources: [CON-303], batches: [2, 3]}
+  comments:
+    - {issue: 57, subject: "T056 acceptance notes: the %p pointer invariant, and Err when Success is true", batch: 2}
+    - {issue: 4, subject: "one of three pins landed; closure condition restated", batches: [2, 3]}
+  not_filed:
+    - {id: COR-301, subject: "rendered == '..' clause unpinned", reason: "proven verdict-neutral over 27,479 accepted layouts; an issue would imply latent risk that does not exist"}
 
 remaining_batches:
   - {id: 4, name: Logging foundation, tasks: "T021-T024"}

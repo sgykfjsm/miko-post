@@ -31,6 +31,13 @@ per PR, driven by the `run-batch-cycle` skill.
 
 Nothing. PR #100 is merged; no work is mid-flight.
 
+## Review follow-ups
+
+Filed 2026-09-07 from the Batch 2 and Batch 3 reviews, which had left twelve findings in local run
+state only: #101 (`elide` bound gaps), #102 (safe-alphabet enumeration), #103 (`SinkResult` XML and
+test-skip), #104 (decision: invalid UTF-8), #105 (`data-model.md` staleness, for spec-reconciler),
+plus acceptance notes on #57 (T056) and a progress comment on #4 (T003).
+
 ## Blockers
 
 None blocking. Two items are time-sensitive rather than blocking:
