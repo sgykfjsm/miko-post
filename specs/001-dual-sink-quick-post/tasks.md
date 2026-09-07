@@ -73,10 +73,10 @@ neither can be retrofitted later without rewriting every story.
 
 ### Diagnostics foundation
 
-- [ ] T021 [P] Define every stable event name from `contracts/log-events.md` as typed constants in `internal/logging/events.go` (FR-067)
-- [ ] T022 [P] Write a test asserting the exact complete set of event-name constants so a rename or typo cannot pass silently, in `internal/logging/events_test.go` (FR-067)
-- [ ] T023 Implement the `slog` JSON-handler logger, creating the log directory when missing and failing soft (never panicking, never blocking a post) when it cannot, in `internal/logging/logger.go` (FR-064, FR-075)
-- [ ] T024 Write tests asserting every emitted line is an independently valid self-contained JSON object carrying `ts`, `level`, `event`, `source`, and `message_id`, in `internal/logging/logger_test.go` (FR-064, FR-066, SC-007)
+- [x] T021 [P] Define every stable event name from `contracts/log-events.md` as typed constants in `internal/logging/events.go` (FR-067)
+- [x] T022 [P] Write a test asserting the exact complete set of event-name constants so a rename or typo cannot pass silently, in `internal/logging/events_test.go` (FR-067)
+- [x] T023 Implement the `slog` JSON-handler logger, creating the log directory when missing and failing soft (never panicking, never blocking a post) when it cannot, in `internal/logging/logger.go` (FR-064, FR-075)
+- [x] T024 Write tests asserting every emitted line is an independently valid self-contained JSON object carrying `ts`, `level`, `event`, `source`, and `message_id`, in `internal/logging/logger_test.go` (FR-064, FR-066, SC-007)
 
 ### Posting core
 
