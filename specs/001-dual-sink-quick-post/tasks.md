@@ -95,15 +95,16 @@ neither can be retrofitted later without rewriting every story.
 
 ### Tests for User Story 1
 
-- [ ] T027 [P] [US1] Write daily-note append tests using `t.TempDir()` covering a new note, an existing note, and an existing note not ending in a newline, in `internal/sink/obsidian/sink_test.go` (FR-044, FR-046, FR-049, SC-009)
+- [x] T027 [P] [US1] Write daily-note append tests using `t.TempDir()` covering a new note, an existing note, and an existing note not ending in a newline, in `internal/sink/obsidian/sink_test.go` (FR-044, FR-046, FR-049, SC-009)
 - [ ] T028 [P] [US1] Write Telegram happy-path tests against an `httptest` server asserting `chat_id`, verbatim `text`, `parse_mode=MarkdownV2`, and `message_thread_id` present only when configured, in `internal/sink/telegram/sink_test.go` (FR-031 – FR-033, FR-040)
 - [ ] T029 [P] [US1] Write a CLI end-to-end test covering single-quoted message, multiple bare words joined with one ASCII space, and whitespace-only rejection with no sink contacted, in `internal/cli/cli_test.go` (FR-003, FR-004, FR-010)
 
 ### Implementation for User Story 1
 
-- [ ] T030 [P] [US1] Implement daily-note path resolution from `daily_note_dir` and `filename_format` in local time, in `internal/sink/obsidian/path.go` (FR-044, FR-051)
-- [ ] T031 [P] [US1] Implement the four-step entry transformation in its normative order — CRLF and bare CR to LF, then LF to `<br>`, then the `- <time> ` prefix — in `internal/sink/obsidian/transform.go` (FR-047, SC-010)
-- [ ] T032 [US1] Implement the append writer using `O_APPEND|O_WRONLY` plus `O_CREATE` only when `create_if_missing` is true, never `O_TRUNC`, writing UTF-8 with exactly one trailing LF, in `internal/sink/obsidian/sink.go`; do **not** search for, create, or insert into a named section (FR-045, FR-046, FR-048 – FR-050)
+- [x] T030 [P] [US1] Implement daily-note path resolution from `daily_note_dir` and `filename_format` in local time, in `internal/sink/obsidian/path.go` (FR-044, FR-051)
+- [x] T031 [P] [US1] Implement the four-step entry transformation in its normative order — CRLF and bare CR to LF, then LF to `<br>`, then the `- <time> ` prefix — in `internal/sink/obsidian/transform.go` (FR-047, SC-010)
+- [x] T032 [US1] Implement the append writer using `O_APPEND|O_WRONLY` plus `O_CREATE` only when `create_if_missing` is true, never `O_TRUNC`, writing UTF-8 with exactly one trailing LF, in `internal/sink/obsidian/sink.go`; do **not** search for, create, or insert into a named section (FR-045, FR-046, FR-048 – FR-050)
+  - **`post.Targeter` landed with this task**, since T030 is where the path is resolved and this batch is the first to have a type that implements it (issue #98). The obsidian sink records what `Send` actually wrote and returns that, never re-resolving. Three of #98's four acceptance criteria are discharged; the fourth — `path` on the three obsidian events, and chat events carrying none — is T040.
 - [ ] T033 [P] [US1] Implement the Telegram request builder with an injectable base URL defaulting to `https://api.telegram.org`, in `internal/sink/telegram/request.go` (FR-031, FR-032, research R-008)
 - [ ] T034 [P] [US1] Implement Telegram response decoding of `ok`, `error_code`, and `description`, in `internal/sink/telegram/response.go` (FR-035, FR-066)
 - [ ] T035 [US1] Implement `Send` performing the single MarkdownV2 attempt bounded by the configured request timeout, in `internal/sink/telegram/sink.go`; do **not** add a queue or automatic re-send (FR-019, FR-033, FR-040, FR-041)
