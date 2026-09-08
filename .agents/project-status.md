@@ -38,8 +38,16 @@ per PR, driven by the `run-batch-cycle` skill.
 
 ## In progress
 
-Nothing mid-flight. PR #108 is merged; branch `sgykfjsm/batch-6-us1-cli` is cut from the merged
-`main` and carries the Batch 5 merge record, ready for Batch 6.
+**Batch 6a — the Obsidian daily-note sink.** PR #112, branch `sgykfjsm/batch-6-us1-cli`, open and
+under review. T027, T030, T031, T032 (issues #28, #31, #32, #33), plus `post.Targeter` from settled
+decision #98. 100.0% statement coverage.
+
+Batch 6 as recorded was fourteen tasks (T027–T040) across four packages and two unrelated external
+surfaces, so triage split it into 6a (this PR), 6b (the Telegram sink) and 6c (the CLI and wiring).
+The split is recorded in `state.yaml` under `batch_6_split`. **Do not re-derive Batch 6 as one
+unit.**
+
+Also carries the Batch 5 merge record, which had no PR of its own.
 
 ## Review follow-ups
 
@@ -58,37 +66,33 @@ construct the logger with `Options.Redact`, and the `slog.Duration` nanosecond t
 
 None blocking. Two items are time-sensitive rather than blocking:
 
-- Issue #98's decision must be honored when T025/T030/T040 are written, not discovered afterwards.
+- Issue #98's decision is honoured in T025 and T030; T040 still owes the `path` field on the obsidian events and chat events carrying none.
 - Issue #94 (`git_commit` reads `unknown` on tagged installs) must be resolved before `v0.1.0` is
   tagged. Still an open maintainer decision.
 
 ## Next best action
 
-Run `run-batch-cycle` for **Batch 6 — US1 MVP (CLI)** (T027–T040, issues #28–#41) on
-`sgykfjsm/batch-6-us1-cli`.
+Merge PR #112 (Batch 6a), then run `run-batch-cycle` for **Batch 6b — the Telegram sink** (T028,
+T033–T035; issues #29, #34, #35, #36).
 
-Batch 6 is the first end-to-end slice and the first batch to wire a front door, so it inherits five
-obligations earlier batches correctly declined:
+**Batch 6c** — the CLI and wiring (T029, T036–T040) — comes last and owns every obligation the
+earlier batches correctly declined:
 
 - **#107** — `logging.Open` does not apply `ResolvePath`, so a default install writes no
   diagnostics at all (T039).
 - **#41** — T040 must pass `Options.Redact` or the bot-token scrub is inert.
-- **#98** — the settled `Targeter` interface and the `path` field on the obsidian events (T030,
-  T040). `Target()` must return what `Send` resolved, never re-resolve.
+- **#98** — the `path` field on the three obsidian events, and chat events carrying none (T040).
+  Batch 6a discharged the `Sink`-stays-two-methods box and the midnight property at the sink.
 - **#109** — an upper bound on `sink_timeout_seconds`, at whichever task converts seconds to a
   `time.Duration` (T036).
-- **#110** — a `Name()` panic leaves no trace for FR-071, if that is to be recorded at all.
+- **#110** — a `Name()` panic leaves no trace for FR-071, if that is to be recorded.
+- **#111** — `Targeter` reports the last *started* post's path, not the calling post's, when two
+  posts overlap (T040).
 
-At fourteen tasks it is also the largest batch so far; triage should decide whether it splits.
-
-Batch 6 wires the front door, so it owns the three obligations Batch 5 correctly did not:
-#107 (`logging.Open` does not apply `ResolvePath`, so a default install writes nothing — T039),
-the `Options.Redact` argument that makes the token scrub live (#41, T040), and #98's `Targeter`
-interface plus the `path` field on the obsidian events (T030, T040).
-
-An earlier version of this section assigned #107 to Batch 5 on the belief that the orchestrator
-constructs the `Logger`. It does not: T040 emits from `service.go` and T039 does the construction.
-Corrected during the Batch 5 review.
+6c also carries a known blocker: T036 places `build.go` in `internal/post`, which cannot compile —
+the sink packages import `internal/post` to implement `post.Sink`, so `internal/post` constructing
+them is an import cycle. Reproduced during the 6a contract review. It has to live in `cmd/mp` or a
+small wiring package.
 
 ## Important decisions
 

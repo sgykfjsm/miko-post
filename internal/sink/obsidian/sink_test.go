@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -84,6 +85,10 @@ func TestAppendNeverAltersExistingContent(t *testing.T) {
 		existing string
 		// create says whether the note exists at all before the post.
 		create bool
+		// separated says whether the entry must be preceded by a line feed of
+		// its own, which is the case exactly when the note already has content
+		// that does not end in one.
+		separated bool
 	}{
 		{name: "a new note", create: false},
 		{
@@ -93,10 +98,12 @@ func TestAppendNeverAltersExistingContent(t *testing.T) {
 		},
 		{
 			// The case that catches a read-modify-write, and the one SC-009
-			// calls out.
-			name:     "an existing note not ending in a newline",
-			existing: "# 2026-09-08\n\n- 09:15 朝の思いつき",
-			create:   true,
+			// calls out. It also gets a leading separator (decision DEC-A1),
+			// because otherwise the entry continues the user's last line.
+			name:      "an existing note not ending in a newline",
+			existing:  "# 2026-09-08\n\n- 09:15 朝の思いつき",
+			create:    true,
+			separated: true,
 		},
 		{
 			// A note with content that must not be interpreted: FR-045 forbids
@@ -135,10 +142,21 @@ func TestAppendNeverAltersExistingContent(t *testing.T) {
 				t.Fatalf("existing content was altered.\n got: %q\nwant prefix: %q", got, test.existing)
 			}
 
-			// And exactly one entry was added.
-			added := strings.TrimPrefix(got, test.existing)
-			if added != "- 11:42 今日も美琴が可愛い♡\n" {
-				t.Errorf("appended %q, want %q", added, "- 11:42 今日も美琴が可愛い♡\n")
+			// And exactly one entry was added, on a line of its own.
+			want := "- 11:42 今日も美琴が可愛い♡\n"
+			if test.separated {
+				want = "\n" + want
+			}
+
+			if added := strings.TrimPrefix(got, test.existing); added != want {
+				t.Errorf("appended %q, want %q", added, want)
+			}
+
+			// However the note ended, the entry is the whole of the final
+			// physical line — which is the property DEC-A1 exists for.
+			lines := strings.Split(strings.TrimSuffix(got, "\n"), "\n")
+			if final := lines[len(lines)-1]; final != "- 11:42 今日も美琴が可愛い♡" {
+				t.Errorf("the last physical line is %q, want the entry alone", final)
 			}
 		})
 	}
@@ -446,6 +464,16 @@ func TestConcurrentAppendsToOneNoteAreWhole(t *testing.T) {
 	dir := t.TempDir()
 	sink := obsidian.NewWithClock(settingsFor(dir), fixedClock(noon))
 
+	// Built here, not in the goroutines: mustMessage can call t.Fatalf, and
+	// FailNow must not be reached from a goroutine other than the one running
+	// the test. It happens not to deadlock today only because the deferred
+	// Done is registered first; moving that line, or adding a fixture that
+	// fails validation, would turn a fixture mistake into a hung test.
+	messages := make([]post.Message, posts)
+	for i := range messages {
+		messages[i] = mustMessage(t, fmt.Sprintf("post-%02d", i))
+	}
+
 	var running sync.WaitGroup
 
 	for i := range posts {
@@ -454,7 +482,7 @@ func TestConcurrentAppendsToOneNoteAreWhole(t *testing.T) {
 		go func(i int) {
 			defer running.Done()
 
-			if err := sink.Send(context.Background(), mustMessage(t, fmt.Sprintf("post-%02d", i))); err != nil {
+			if err := sink.Send(context.Background(), messages[i]); err != nil {
 				t.Errorf("post %02d: %v", i, err)
 			}
 		}(i)
@@ -626,9 +654,54 @@ type failingNote struct {
 	writeErr error
 	closeErr error
 	closes   int
+
+	// content is what the note already holds, so the separator decision can be
+	// driven. statErr and readErr force unterminated's failure paths.
+	content string
+	statErr error
+	readErr error
+
+	// wrote records what AppendEntry actually handed the note, so a test can
+	// assert on the separator.
+	wrote string
 }
 
+func (f *failingNote) Stat() (os.FileInfo, error) {
+	if f.statErr != nil {
+		return nil, f.statErr
+	}
+
+	return sizeOnly(len(f.content)), nil
+}
+
+func (f *failingNote) ReadAt(p []byte, off int64) (int, error) {
+	if f.readErr != nil {
+		return 0, f.readErr
+	}
+
+	if off < 0 || off >= int64(len(f.content)) {
+		return 0, io.EOF
+	}
+
+	p[0] = f.content[off]
+
+	return 1, nil
+}
+
+// sizeOnly is an os.FileInfo that answers only Size, which is all unterminated
+// asks of it.
+type sizeOnly int
+
+func (s sizeOnly) Name() string       { return "note" }
+func (s sizeOnly) Size() int64        { return int64(s) }
+func (s sizeOnly) Mode() os.FileMode  { return 0o600 }
+func (s sizeOnly) ModTime() time.Time { return noon }
+func (s sizeOnly) IsDir() bool        { return false }
+func (s sizeOnly) Sys() any           { return nil }
+
 func (f *failingNote) WriteString(s string) (int, error) {
+	f.wrote += s
+
 	if f.written > 0 || f.writeErr != nil {
 		return f.written, f.writeErr
 	}
@@ -773,15 +846,17 @@ func TestSendReportsAnUnopenableNote(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name  string
-		build func(t *testing.T, root string) string
+		name     string
+		wantText string
+		build    func(t *testing.T, root string) string
 	}{
 		{
 			// The vault directory does not exist. This sink appends to a note
 			// in a vault the user set up; creating missing directories is not
 			// its job, and doing so silently would scatter directories on a
 			// typo in daily_note_dir.
-			name: "the vault directory does not exist",
+			name:     "the vault directory does not exist",
+			wantText: "daily-note directory does not exist",
 			build: func(t *testing.T, root string) string {
 				t.Helper()
 
@@ -789,7 +864,8 @@ func TestSendReportsAnUnopenableNote(t *testing.T) {
 			},
 		},
 		{
-			name: "a directory sits where the note belongs",
+			name:     "a directory sits where the note belongs",
+			wantText: "opening",
 			build: func(t *testing.T, root string) string {
 				t.Helper()
 
@@ -801,7 +877,8 @@ func TestSendReportsAnUnopenableNote(t *testing.T) {
 			},
 		},
 		{
-			name: "the note is not writable",
+			name:     "the note is not writable",
+			wantText: "opening",
 			build: func(t *testing.T, root string) string {
 				t.Helper()
 
@@ -832,14 +909,14 @@ func TestSendReportsAnUnopenableNote(t *testing.T) {
 				t.Fatal("Send succeeded for a note it cannot open")
 			}
 
-			// Not translated: create_if_missing is true here, so this is not
-			// the configured-refusal case.
+			// Never the configured-refusal case: that error means the note is
+			// absent inside a vault that exists, and none of these are that.
 			if errors.Is(err, obsidian.ErrNoteMissing) {
-				t.Errorf("Send: %v, want a real open failure rather than ErrNoteMissing", err)
+				t.Errorf("Send: %v, want a real failure rather than ErrNoteMissing", err)
 			}
 
-			if !strings.Contains(err.Error(), "opening") {
-				t.Errorf("Send: %v, want it to say the open failed", err)
+			if !strings.Contains(err.Error(), test.wantText) {
+				t.Errorf("Send: %v, want it to mention %q", err, test.wantText)
 			}
 
 			// And it names the path, so the user can act on it.
@@ -848,4 +925,413 @@ func TestSendReportsAnUnopenableNote(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestAMissingVaultIsNotReportedAsAConfiguredRefusal covers the misdiagnosis
+// both review stages found independently (FR-046).
+//
+// os.OpenFile returns the same ENOENT whether today's note is absent or the
+// directory holding it is, and the two want opposite answers: one is the
+// configuration behaving as the user asked, the other is a vault that is not
+// there. Reporting the second as the first tells the user to flip
+// `create_if_missing`, which produces a different failure — this sink does not
+// create directories — so they get two dead ends instead of a cause.
+//
+// `config.Validate` requires `daily_note_dir` to be absolute but cannot require
+// it to exist: an external drive or a synced folder may legitimately be absent
+// when settings load and present when a post is made.
+func TestAMissingVaultIsNotReportedAsAConfiguredRefusal(t *testing.T) {
+	t.Parallel()
+
+	for _, createIfMissing := range []bool{true, false} {
+		t.Run(fmt.Sprintf("create_if_missing=%t", createIfMissing), func(t *testing.T) {
+			t.Parallel()
+
+			absent := filepath.Join(t.TempDir(), "unmounted-vault")
+
+			settings := settingsFor(absent)
+			settings.CreateIfMissing = createIfMissing
+
+			err := obsidian.NewWithClock(settings, fixedClock(noon)).
+				Send(context.Background(), mustMessage(t, "the drive is not mounted"))
+			if err == nil {
+				t.Fatal("Send succeeded with a non-existent vault directory")
+			}
+
+			if !errors.Is(err, obsidian.ErrVaultMissing) {
+				t.Errorf("Send: %v, want it to wrap ErrVaultMissing", err)
+			}
+
+			// The whole point: never the benign one, whichever way
+			// create_if_missing is set.
+			if errors.Is(err, obsidian.ErrNoteMissing) {
+				t.Errorf("Send: %v, reported as the configured refusal; the vault is what is missing", err)
+			}
+
+			// The cause stays inspectable. Discarding it is what made the
+			// original misdiagnosis untraceable.
+			if !errors.Is(err, os.ErrNotExist) {
+				t.Errorf("Send: %v, want the underlying ENOENT to remain wrapped", err)
+			}
+
+			if !strings.Contains(err.Error(), absent) {
+				t.Errorf("Send: %v, want it to name the missing directory %s", err, absent)
+			}
+		})
+	}
+}
+
+// TestOnlyAnAbsentNoteBecomesErrNoteMissing is the other half of the guard, and
+// closes the mutation the correctness review found surviving.
+//
+// A guard of `if !CreateIfMissing` alone — dropping the ENOENT test — would
+// report a permission problem, a full disk or an EISDIR as the configured
+// refusal. Every existing unopenable-note case ran with create_if_missing true,
+// so nothing exercised the combination that matters.
+func TestOnlyAnAbsentNoteBecomesErrNoteMissing(t *testing.T) {
+	t.Parallel()
+
+	if os.Geteuid() == 0 {
+		t.Skip("root bypasses the permission bits this test relies on")
+	}
+
+	dir := t.TempDir()
+	path := notePath(dir, noon)
+
+	// A note that exists, inside a vault that exists, that cannot be opened
+	// for writing. Nothing here is absent, so ErrNoteMissing would be a lie.
+	if err := os.WriteFile(path, []byte("# existing\n"), 0o400); err != nil {
+		t.Fatalf("create the read-only note: %v", err)
+	}
+
+	settings := settingsFor(dir)
+	settings.CreateIfMissing = false
+
+	err := obsidian.NewWithClock(settings, fixedClock(noon)).
+		Send(context.Background(), mustMessage(t, "読めるけど書けない"))
+	if err == nil {
+		t.Fatal("Send succeeded on a read-only note")
+	}
+
+	if errors.Is(err, obsidian.ErrNoteMissing) {
+		t.Errorf("Send: %v, want a permission failure rather than the configured refusal", err)
+	}
+
+	if errors.Is(err, obsidian.ErrVaultMissing) {
+		t.Errorf("Send: %v, the vault exists", err)
+	}
+
+	if !errors.Is(err, os.ErrPermission) {
+		t.Errorf("Send: %v, want it to wrap os.ErrPermission", err)
+	}
+}
+
+// TestASymlinkedNotePathIsRefused covers decision DEC-A2.
+//
+// Following a symlink at the note path let anything with write access to the
+// vault redirect the append outside it — into an existing file, or, with a
+// dangling link and O_CREATE, into a file this sink then created wherever the
+// link pointed. A link to /dev/null was worse than either: the post was
+// reported as delivered and nothing was stored.
+//
+// The precondition is write access to the vault, which already permits deleting
+// the notes outright, so this is not a privilege boundary. It is a scope one:
+// this sink's promise is that it appends inside the vault the user configured.
+func TestASymlinkedNotePathIsRefused(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		build func(t *testing.T, root, note string) string
+	}{
+		{
+			name: "pointing at a file outside the vault",
+			build: func(t *testing.T, root, note string) string {
+				t.Helper()
+
+				victim := filepath.Join(root, "outside.txt")
+				if err := os.WriteFile(victim, []byte("PRECIOUS\n"), 0o600); err != nil {
+					t.Fatalf("seed the victim: %v", err)
+				}
+
+				if err := os.Symlink(victim, note); err != nil {
+					t.Fatalf("symlink: %v", err)
+				}
+
+				return victim
+			},
+		},
+		{
+			// The dangling case is the sharpest: following it would have this
+			// sink *create* a file wherever the link pointed.
+			name: "dangling, pointing outside the vault",
+			build: func(t *testing.T, root, note string) string {
+				t.Helper()
+
+				victim := filepath.Join(root, "would-be-created")
+				if err := os.Symlink(victim, note); err != nil {
+					t.Fatalf("symlink: %v", err)
+				}
+
+				return victim
+			},
+		},
+		{
+			name: "pointing at /dev/null, which would swallow the post",
+			build: func(t *testing.T, _, note string) string {
+				t.Helper()
+
+				if err := os.Symlink(os.DevNull, note); err != nil {
+					t.Fatalf("symlink: %v", err)
+				}
+
+				return os.DevNull
+			},
+		},
+		{
+			// Even a link that stays inside the vault is refused: the rule is
+			// about the note path being a link, not about where it lands, so
+			// there is one behaviour to reason about rather than two.
+			name: "pointing at another file inside the vault",
+			build: func(t *testing.T, root, note string) string {
+				t.Helper()
+
+				sibling := filepath.Join(root, "vault", "other.md")
+				if err := os.WriteFile(sibling, []byte("KEEP\n"), 0o600); err != nil {
+					t.Fatalf("seed the sibling: %v", err)
+				}
+
+				if err := os.Symlink(sibling, note); err != nil {
+					t.Fatalf("symlink: %v", err)
+				}
+
+				return sibling
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			root := t.TempDir()
+
+			vault := filepath.Join(root, "vault")
+			if err := os.Mkdir(vault, 0o700); err != nil {
+				t.Fatalf("create the vault: %v", err)
+			}
+
+			note := notePath(vault, noon)
+			victim := test.build(t, root, note)
+
+			before, _ := os.ReadFile(victim)
+
+			err := obsidian.NewWithClock(settingsFor(vault), fixedClock(noon)).
+				Send(context.Background(), mustMessage(t, "リンクの先には書かない"))
+			if err == nil {
+				t.Fatal("Send followed a symlinked note path")
+			}
+
+			if !errors.Is(err, obsidian.ErrNoteIsSymlink) {
+				t.Errorf("Send: %v, want it to wrap ErrNoteIsSymlink", err)
+			}
+
+			if !strings.Contains(err.Error(), note) {
+				t.Errorf("Send: %v, want it to name the note path %s", err, note)
+			}
+
+			// Nothing beyond the link was touched, and nothing was created.
+			if victim == os.DevNull {
+				return
+			}
+
+			after, readErr := os.ReadFile(victim)
+			switch {
+			case len(before) == 0 && readErr == nil:
+				t.Errorf("%s was created; the append followed a dangling link", victim)
+			case readErr == nil && string(after) != string(before):
+				t.Errorf("%s changed from %q to %q", victim, before, after)
+			}
+		})
+	}
+}
+
+// TestASeparatorIsAddedOnlyWhenTheNoteNeedsOne covers decision DEC-A1's
+// boundaries directly, including the read failures that must not fail a post.
+func TestASeparatorIsAddedOnlyWhenTheNoteNeedsOne(t *testing.T) {
+	t.Parallel()
+
+	const entry = "- 11:42 本文\n"
+
+	tests := []struct {
+		name string
+		note *failingNote
+		want string
+	}{
+		{
+			name: "an empty note needs none",
+			note: &failingNote{path: "/vault/note.md"},
+			want: entry,
+		},
+		{
+			name: "a note ending in a line feed needs none",
+			note: &failingNote{path: "/vault/note.md", content: "# head\n- 09:15 earlier\n"},
+			want: entry,
+		},
+		{
+			name: "a note not ending in a line feed gets one",
+			note: &failingNote{path: "/vault/note.md", content: "# head\n- 09:15 earlier"},
+			want: "\n" + entry,
+		},
+		{
+			// The torn-write case: a fragment left by ENOSPC or a killed
+			// process. Without the separator every later entry chains onto it
+			// for as long as the file stands.
+			name: "a note ending mid-entry after a torn write gets one",
+			note: &failingNote{path: "/vault/note.md", content: "- 11:00 a post that hit ENOSPC halfw"},
+			want: "\n" + entry,
+		},
+		{
+			// A read failure must not fail the post. A possibly-redundant
+			// blank line would be worse than a glued one, and both are far
+			// better than not appending at all.
+			name: "a Stat failure appends without a separator",
+			note: &failingNote{path: "/vault/note.md", content: "unterminated", statErr: errors.New("stat failed")},
+			want: entry,
+		},
+		{
+			name: "a read failure appends without a separator",
+			note: &failingNote{path: "/vault/note.md", content: "unterminated", readErr: errors.New("read failed")},
+			want: entry,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			if err := obsidian.AppendEntry(context.Background(), test.note, entry); err != nil {
+				t.Fatalf("AppendEntry: %v", err)
+			}
+
+			if test.note.wrote != test.want {
+				t.Errorf("wrote %q, want %q", test.note.wrote, test.want)
+			}
+		})
+	}
+}
+
+// TestTargetIsSafeToReadWhileAPostIsInFlight covers the read side of the mutex,
+// which nothing exercised.
+//
+// The field's own comment says it is read by the orchestrator while other posts
+// may still be running. Removing the lock from Target alone survived the whole
+// suite under -race -count=8, because no test ever read it off the writing
+// goroutine — so the protection was correct but unverified in exactly the
+// property it is documented for.
+func TestTargetIsSafeToReadWhileAPostIsInFlight(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	sink := obsidian.NewWithClock(settingsFor(dir), fixedClock(noon))
+
+	message := mustMessage(t, "並行して読む")
+
+	var (
+		posting sync.WaitGroup
+		stop    = make(chan struct{})
+	)
+
+	posting.Add(1)
+
+	go func() {
+		defer posting.Done()
+
+		for range 200 {
+			if err := sink.Send(context.Background(), message); err != nil {
+				t.Errorf("Send: %v", err)
+
+				return
+			}
+		}
+
+		close(stop)
+	}()
+
+	// Read continuously while those posts run. Under -race this is what
+	// detects an unsynchronised read of the string header.
+	reads := 0
+
+	for {
+		select {
+		case <-stop:
+			if reads == 0 {
+				t.Error("Target was never read while a post was in flight")
+			}
+
+			posting.Wait()
+
+			return
+		default:
+			_ = sink.Target()
+			reads++
+		}
+	}
+}
+
+// TestACreatedNoteIsPrivateToTheUser covers the file mode, which nothing
+// asserted.
+//
+// The mode is a deliberate privacy decision the code documents, and nothing
+// else in the repo constrains it — the spec, the contract and the design
+// document are all silent — so a regression to 0644 would silently make the
+// user's private notes world-readable on a shared machine.
+func TestACreatedNoteIsPrivateToTheUser(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a note this sink creates", func(t *testing.T) {
+		t.Parallel()
+
+		dir := t.TempDir()
+
+		if err := obsidian.NewWithClock(settingsFor(dir), fixedClock(noon)).
+			Send(context.Background(), mustMessage(t, "新規作成")); err != nil {
+			t.Fatalf("Send: %v", err)
+		}
+
+		info, err := os.Stat(notePath(dir, noon))
+		if err != nil {
+			t.Fatalf("stat: %v", err)
+		}
+
+		if perm := info.Mode().Perm(); perm != 0o600 {
+			t.Errorf("created note mode is %#o, want 0600", perm)
+		}
+	})
+
+	t.Run("an existing note keeps the mode the user chose", func(t *testing.T) {
+		t.Parallel()
+
+		dir := t.TempDir()
+		path := notePath(dir, noon)
+
+		// A vault the user set up themselves, group-readable on purpose.
+		if err := os.WriteFile(path, []byte("# mine\n"), 0o640); err != nil {
+			t.Fatalf("seed the note: %v", err)
+		}
+
+		if err := obsidian.NewWithClock(settingsFor(dir), fixedClock(noon)).
+			Send(context.Background(), mustMessage(t, "既存")); err != nil {
+			t.Fatalf("Send: %v", err)
+		}
+
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatalf("stat: %v", err)
+		}
+
+		if perm := info.Mode().Perm(); perm != 0o640 {
+			t.Errorf("existing note mode changed to %#o, want the user's 0640", perm)
+		}
+	})
 }

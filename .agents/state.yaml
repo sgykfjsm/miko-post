@@ -106,7 +106,8 @@ completed:
         a vault on a synced or network mount would otherwise hold a post open indefinitely with its
         sibling's finished result unreachable.
 
-in_progress: []
+in_progress:
+  - {id: 6a, name: "Obsidian daily-note sink", tasks: [T027, T030, T031, T032], issues: [28, 31, 32, 33], pr: 112, branch: sgykfjsm/batch-6-us1-cli, state: open, coverage: "100.0%"}
 blockers: []
 
 time_sensitive:
