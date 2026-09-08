@@ -146,15 +146,11 @@ time_sensitive:
     deadline: before tagging v0.1.0
 
 next_best_action: >-
-  Run run-batch-cycle for Batch 6 - US1 MVP (CLI) (T027-T040, issues #28-#41) on branch
-  sgykfjsm/batch-6-us1-cli, which already carries the Batch 5 merge record. Batch 6 is the first
-  end-to-end slice and the first batch to wire a front door, so it inherits five obligations that
-  earlier batches correctly declined: #107 (logging.Open does not apply ResolvePath, so a default
-  install writes nothing - T039), #41's Options.Redact argument without which the token scrub is
-  inert (T040), #98's Targeter interface and the path field on the obsidian events (T030, T040),
-  #109's upper bound on sink_timeout_seconds at whichever task converts seconds to a Duration
-  (T036), and #110 if the Name-panic trace is to be recorded at all. It is also the largest batch
-  so far at fourteen tasks - triage should consider whether it splits.
+  Merge PR #112 (Batch 6a), then run run-batch-cycle for Batch 6b - the telegram sink.
+
+  Batch 6 as recorded was fourteen tasks (T027-T040) across four packages and two unrelated
+  external surfaces, so triage split it. 6a is the obsidian sink and is in flight; 6b and 6c
+  remain. Do not re-derive Batch 6 as a single unit.
 
 review_followups_filed:
   filed_at: 2026-09-07
@@ -219,6 +215,25 @@ batch_4_review_notes:
       - {id: ADV-009, reason: "resolved in-batch by narrowing the comment's claim; looping the repair write could spin on an always-zero writer, and FR-076's first duty is not to block the post"}
       - {id: ADV-010, reason: "documented acceptance, and the reviewer's required outcome was explicitly none. The precondition — write access to a 0700 dir this package created — is an adversary who can already do worse directly."}
       - {id: CON-002, reason: "accepted as history and disclosed in the PR body; the work-log records what was true when written"}
+
+batch_6_split:
+  reason: >-
+    Fourteen tasks across four packages and two unrelated external surfaces is not one review lens,
+    and the diff would have been several times batch 5's - which needed three review cycles at a
+    quarter of the size. state.yaml's own assumptions note says the recorded decomposition is
+    orientation and not binding, and tasks.md's parallel-opportunities section already treats the
+    two sinks as separable.
+  parts:
+    - {id: 6a, name: "Obsidian daily-note sink", tasks: [T027, T030, T031, T032], issues: [28, 31, 32, 33], package: internal/sink/obsidian, surface: filesystem, pr: 112, state: open}
+    - {id: 6b, name: "Telegram sink", tasks: [T028, T033, T034, T035], issues: [29, 34, 35, 36], package: internal/sink/telegram, surface: HTTP, state: pending}
+    - {id: 6c, name: "US1 front door and wiring", tasks: [T029, T036, T037, T038, T039, T040], issues: [30, 37, 38, 39, 40, 41], packages: [internal/cli, cmd/mp, internal/post], surface: "process, exit status", state: pending, requires: [6a, 6b]}
+  6c_owns: [107, 41, 98, 109, 110, 111]
+  6c_blocker: >-
+    T036 places build.go in internal/post, which cannot compile: the sink packages import
+    internal/post to implement post.Sink, so internal/post constructing them is an import cycle.
+    Reproduced independently during the 6a contract review. build.go has to live in cmd/mp or a
+    small wiring package, which also preserves the property that internal/post imports no other
+    internal package.
 
 remaining_batches:
   - {id: 7, name: "US2 GUI", tasks: "T041-T051", pins: "fyne/v2"}
