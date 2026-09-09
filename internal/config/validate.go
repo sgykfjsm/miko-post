@@ -448,9 +448,10 @@ func elide(value string) string {
 //
 //   - "2006/01/02.md" is a plausible typo for a nested date hierarchy, and it
 //     is the reason this check cannot live in the sink. It renders
-//     "2026/09/03.md", and the sink opens its target with O_APPEND|O_WRONLY|
-//     O_CREATE and no MkdirAll, so the subdirectory is never created and that
-//     destination fails with ENOENT every day until someone edits the file.
+//     "2026/09/03.md", and the sink opens its target with O_APPEND|O_RDWR|
+//     O_NOFOLLOW (plus O_CREATE when permitted) and no MkdirAll, so the
+//     subdirectory is never created and that destination fails with ENOENT
+//     every day until someone edits the file.
 //   - "../../../../etc/cron.d/2006-01-02.md" renders an escape from the vault.
 //     The sink appends with the user's privileges, so accepting it turns a
 //     settings file into an append-anywhere primitive.

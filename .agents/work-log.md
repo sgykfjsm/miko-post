@@ -320,3 +320,31 @@ FR-015 forces and pins the invariant that `Reason` is never derived from `Err`. 
 validation, no logger field — an unused field is a claim a batch cannot test. Sub-notes now record
 that this batch's suite already carries T052, T054 and T053's reporting half, so US3 is a
 verification pass.
+
+## 2026-09-08 — Batch 5 merged; Phase 2 complete
+
+PR #108 squash-merged as `35d24e2`; issues #26–#27 auto-closed. Verified the squashed tree is
+byte-identical to the reviewed tip `523e79a` — both resolve to tree `049683e`. `make check` clean on
+merged `main`. Still no CI in this repository, so that local gate remains the whole gate.
+
+**Phase 2 Foundational is complete**: posting core contracts, settings, diagnostics, orchestrator.
+Twenty-six tasks done. User story work can begin.
+
+**Ready for Batch 6.** Branch `sgykfjsm/batch-6-us1-cli` is cut from merged `main` and carries this
+merge record, continuing the pattern: batch N's record ships in batch N+1's PR rather than
+accumulating as unpushed commits.
+
+**What Batch 6 inherits.** It is the first end-to-end slice and the first batch to wire a front
+door, so five obligations that earlier batches correctly declined all land there at once: #107
+(`logging.Open` ignores `ResolvePath`, so a default install writes nothing), #41 (`Options.Redact`,
+without which the token scrub is inert), #98 (`Targeter` and the `path` field), #109 (the upper
+bound on `sink_timeout_seconds`), and #110 (the discarded `Name` panic). At fourteen tasks — T027
+through T040, spanning the obsidian sink, the telegram sink, the CLI and the wiring — it is also the
+largest batch attempted so far, and the first where triage should seriously weigh splitting it.
+
+**One process note worth carrying forward.** Three batches in a row now, the most valuable review
+output has been mutation rather than reading: Batch 4's staged review found a FIFO that hung the
+whole application, and Batch 5's found nine assertions of mine that could not fail. In both cases
+statement coverage was 100% and indicated nothing. For Batch 6 the equivalent risk is different in
+kind — real I/O against a real filesystem and a real HTTP surface, rather than pure logic — so the
+fakes will need the same scrutiny the assertions did.

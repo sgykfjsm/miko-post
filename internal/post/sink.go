@@ -29,3 +29,34 @@ type Sink interface {
 	// because another failed (constitution principle I).
 	Send(ctx context.Context, message Message) error
 }
+
+// Targeter is an optional interface a Sink may implement to report the
+// destination it resolved for the current post.
+//
+// It exists because contracts/log-events.md requires a `path` field on the
+// three obsidian append events while Sink is deliberately two methods, so an
+// orchestrator holding a Sink has no route to the resolved path — and for the
+// `_started` event there is no return value yet, so a typed error could not
+// carry it either. The orchestrator type-asserts this and adds `path` only when
+// it is satisfied, which is why the telegram sink does not implement it and why
+// chat events carry no path (issue #98).
+//
+// Additive on purpose: Sink stays exactly Name and Send, so a sink that has no
+// meaningful target is unaffected and a third sink cannot acquire different
+// event semantics by accident (constitution principle II).
+//
+// The rejected alternative is worth recording, because it looks equivalent and
+// is not. Having the orchestrator re-derive the path from settings would make
+// both sides call time.Now() independently, and a post spanning local midnight
+// would then log a `path` that is not the file that was appended to — the exact
+// reconstruction trail SC-008 and constitution principle III exist to
+// guarantee.
+type Targeter interface {
+	// Target is the destination this sink resolved for the current post, such
+	// as today's daily-note path.
+	//
+	// It must return what Send actually resolved and wrote, recorded during
+	// Send. An implementation that re-resolves on call reintroduces the
+	// midnight mismatch this interface was introduced to avoid.
+	Target() string
+}
