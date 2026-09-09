@@ -106,15 +106,38 @@ completed:
         a vault on a synced or network mount would otherwise hold a post open indefinitely with its
         sibling's finished result unreachable.
 
-in_progress:
   - id: 6a
-    name: "Obsidian daily-note sink"
+    summary: >-
+      Obsidian daily-note sink - path resolution in local time from one clock reading, the
+      four-step entry transformation, and the append writer. Declares post.Targeter, which
+      issue #98 settled and which this batch is the first to have an implementer for.
     tasks: [T027, T030, T031, T032]
     issues: [28, 31, 32, 33]
+    advances: [98]
+    filed_from_this_work: [111]
+    commits: [95235d4, 59b876b]
+    squashed_as: 69e17e3
     pr: 112
-    branch: sgykfjsm/batch-6-us1-cli
-    state: open
+    state: merged
+    merged_at: 2026-09-09
+    review_verdict: passed-with-notes
+    review_cycles: 4
+    fix_passes: 4
     coverage: "100.0%"
+    review_run_state: "~/.agents/review-runs/sgykfjsm__miko-post/20260908T010910Z-15c151d6/"
+    note: >-
+      Verified the squashed tree is byte-identical to the reviewed tip 59b876b (both tree 604f510d).
+      Three silent-loss defects were caught by review and would otherwise have shipped: a FIFO at
+      the note path swallowing the entry and returning nil (found independently by the correctness
+      and adversarial stages), unterminated() returning an uninitialised byte on the io.EOF path,
+      and a descriptor leaked on the non-regular refusal. Statement coverage read 100% throughout
+      and flagged none of them - the third consecutive batch where that happened. The fix passes
+      exceeded the protocol's nominal three-cycle limit; continued because blockers went 4 -> 0 and
+      stayed there, i.e. the run was converging, which is what the limit exists to detect.
+      PR #112's body was NOT corrected before merge (the user authorised the merge but not the body
+      rewrite), so it still describes the first implementation as O_APPEND|O_WRONLY with no
+      read-back. The squash commit message 69e17e3 and contracts/obsidian-sink.md are the accurate
+      record; a corrected 150-line body draft exists if it is ever wanted.
     decision_numbering: >-
       Batch 6a numbers its decisions DEC-B*. The A series is batch 5's - DEC-A1 is the
       orchestrator-enforced timeout above, and 6a's code cites it twice for exactly that. An earlier
@@ -223,9 +246,103 @@ in_progress:
           itself still does not say it. Raised as CON-009 in the 6a contract review; amending
           spec.md was not authorised in that fix pass, and a spec amendment needs a consistency
           sweep across plan.md and tasks.md rather than a local edit.
+
+in_progress:
+  - id: 6b
+    name: "Telegram chat sink"
+    tasks: [T028, T033, T034, T035]
+    issues: [29, 34, 35, 36]
+    advances: [98]
+    branch: sgykfjsm/batch-6b-telegram-sink
+    state: under-review
+    coverage: "98.8%"
+    coverage_note: >-
+      The single uncovered statement is request.go's http.NewRequestWithContext error arm, which
+      Send cannot reach - the method is a constant and the URL is already parsed inside JoinPath.
+      Kept and commented rather than deleted to buy a round number.
+    pre_satisfies:
+      - task: T064
+        part: "the parse_mode third only"
+        by: TestSendAlwaysUsesMarkdownV2WhateverParseModeSays
+        note: >-
+          That test exists to kill a mutant reading settings.ParseMode instead of the MarkdownV2
+          constant. T064's other two thirds are not discharged: fallback_to_plain_text is never
+          read by this package, and asserting it does not alter delivery needs the rescue (T062)
+          to exist. Batch 9 should UPDATE this test, not duplicate or replace it.
+    batch_9_obligations:
+      - >-
+        TestSendMakesExactlyOneAttempt - after T062 exactly one of its four rows (the formatting
+        rejection) legitimately becomes two requests. The other three must stay at one, because
+        they are the FR-041 guard for 429, 5xx and undecodable. Update the one row; do not delete
+        the test.
+      - >-
+        TestFormattingRejectionKeepsTheFieldsTheRescuePredicateNeeds - its handler replies 400
+        unconditionally, so after T062 both attempts get the same 400 and every assertion still
+        holds except the single-request check. One line changes.
+    decision_numbering: >-
+      The A series is batch 5's, B is 6a's, C is 6b's. Numbering per batch because 6a's decisions
+      were drafted reusing DEC-A1, which was already batch 5's orchestrator-timeout decision, and
+      cited a second A-series id that was never recorded at all.
+    decisions:
+      - id: DEC-C1
+        decision: >-
+          The sendMessage body is application/x-www-form-urlencoded, not JSON. url.Values.Encode
+          percent-encodes byte by byte, so the bytes the user typed are the bytes that go on the
+          wire.
+        why: >-
+          json.Marshal(map[string]string{"text": "a\xffb"}) returns {"text":"a\ufffdb"} with
+          err == nil - a silent U+FFFD substitution. With a JSON body Telegram would hold U+FFFD
+          where the obsidian note holds the raw 0xFF, which is issue #113's option 3 - the two
+          sinks storing different text for one post - and that option was rejected in advance.
+          Reaching a rejected outcome by accident is worse than choosing it. What Telegram's
+          server then does with a non-UTF-8 sequence is outside our control; the claim is only
+          that we do not rewrite the user's bytes. #113 (and #104, its probable duplicate) remain
+          open - this records a decision, it does not answer them.
+      - id: DEC-C2
+        decision: >-
+          No error leaving Send carries the bot token. Every *url.Error layer is stripped BEFORE
+          fmt.Errorf wraps, with a textual net behind it for shapes nobody enumerated.
+        why: >-
+          The token is a path segment of every Bot API URL, so net/http renders it verbatim in
+          both Error() and %#v, and that error becomes post.SinkResult.Err, which
+          internal/post/result.go deliberately leaves unredacted. Options.Redact (#41) cannot help
+          - nothing on this path constructs a logger. Order matters: wrapping first bakes the URL
+          into the message string where stripping can no longer reach it. This is the only layer
+          that exists today; #103 and #115 cover the general case, and #115 is explicitly about
+          the fact that this invariant is now load-bearing and unenforced.
+      - id: DEC-C3
+        decision: >-
+          http_timeout_seconds is clamped where it becomes a time.Duration, inside this package,
+          and a non-positive value floors to FR-040's 30s.
+        why: >-
+          T035 is the first code in the repo to convert a settings seconds int to a Duration, and
+          18446744074 passes validation while wrapping to a positive ~290ms deadline. Clamping
+          here keeps internal/config byte-unchanged, which is what lets this batch claim its
+          boundary. The floor exists because http.Client reads Timeout: 0 as unbounded, so a
+          zero would remove the bound rather than default it. Issue #114 owns the validation-layer
+          fix; this clamp does not close it, and #114's acceptance requires that the clamp later
+          be either kept as documented defence in depth or removed as redundant - deliberately,
+          not by omission.
+    spec_amendments_owed:
+      - requirement: FR-043
+        artifact: "internal/config/secret.go (the Reveal doc comment)"
+        owed_at: "whenever internal/config is next edited; not now, because 6b's boundary claim rests on that package being byte-unchanged"
+        amendment: >-
+          Reveal now has two call sites, not one: building the Telegram request URL, and the
+          sink's credential net, which needs the string it is scrubbing for. The count is a review
+          obligation, not a type invariant. data-model.md has been corrected in this batch;
+          secret.go's comment still says "exactly one place".
 blockers: []
 
 time_sensitive:
+  - issue: 114
+    note: >-
+      config.Validate bounds sink.telegram.http_timeout_seconds only from below, exactly as it
+      does sink_timeout_seconds, and 18446744074 wraps to a positive 290ms HTTP deadline that
+      passes validation. T035 already converts this key, so the exposure is live now rather than
+      pending a front door. Batch 6b clamps locally (DEC-C3), which makes the misconfiguration
+      behave sanely but silently; the user-visible rejection belongs in internal/config.
+    deadline: now - T035 has shipped the conversion
   - issue: 109
     note: >-
       config.Validate bounds sink_timeout_seconds only from below, and 18446744074 wraps to a
@@ -262,11 +379,12 @@ time_sensitive:
     deadline: before tagging v0.1.0
 
 next_best_action: >-
-  Merge PR #112 (Batch 6a), then run run-batch-cycle for Batch 6b - the telegram sink.
+  Finish Batch 6b's review (contract returned VALID; correctness and adversarial still to run),
+  then open and merge its PR, then run run-batch-cycle for Batch 6c.
 
-  Batch 6 as recorded was fourteen tasks (T027-T040) across four packages and two unrelated
-  external surfaces, so triage split it. 6a is the obsidian sink and is in flight; 6b and 6c
-  remain. Do not re-derive Batch 6 as a single unit.
+  6c is blocked on a decision, not on code: T036 places build.go in internal/post, which cannot
+  compile. Settle the placement - cmd/mp, or a small wiring package - before 6c starts. See
+  batch_6_split.6c_blocker. Do not re-derive Batch 6 as a single unit.
 
 review_followups_filed:
   filed_at: 2026-09-07
@@ -340,8 +458,8 @@ batch_6_split:
     orientation and not binding, and tasks.md's parallel-opportunities section already treats the
     two sinks as separable.
   parts:
-    - {id: 6a, name: "Obsidian daily-note sink", tasks: [T027, T030, T031, T032], issues: [28, 31, 32, 33], package: internal/sink/obsidian, surface: filesystem, pr: 112, state: open}
-    - {id: 6b, name: "Telegram sink", tasks: [T028, T033, T034, T035], issues: [29, 34, 35, 36], package: internal/sink/telegram, surface: HTTP, state: pending}
+    - {id: 6a, name: "Obsidian daily-note sink", tasks: [T027, T030, T031, T032], issues: [28, 31, 32, 33], package: internal/sink/obsidian, surface: filesystem, pr: 112, state: merged, squashed_as: 69e17e3}
+    - {id: 6b, name: "Telegram sink", tasks: [T028, T033, T034, T035], issues: [29, 34, 35, 36], package: internal/sink/telegram, surface: HTTP, state: in-flight, branch: sgykfjsm/batch-6b-telegram-sink}
     - {id: 6c, name: "US1 front door and wiring", tasks: [T029, T036, T037, T038, T039, T040], issues: [30, 37, 38, 39, 40, 41], packages: [internal/cli, cmd/mp, internal/post], surface: "process, exit status", state: pending, requires: [6a, 6b]}
   6c_owns: [107, 41, 98, 109, 110, 111]
   6c_blocker: >-
@@ -389,4 +507,4 @@ assumptions:
     The batch decomposition above is re-derived by run-batch-cycle's triage step each run; it is
     recorded here for orientation, not as a binding plan.
 
-last_updated: 2026-09-08
+last_updated: 2026-09-09

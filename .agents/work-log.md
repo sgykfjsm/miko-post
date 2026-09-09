@@ -348,3 +348,55 @@ whole application, and Batch 5's found nine assertions of mine that could not fa
 statement coverage was 100% and indicated nothing. For Batch 6 the equivalent risk is different in
 kind — real I/O against a real filesystem and a real HTTP surface, rather than pure logic — so the
 fakes will need the same scrutiny the assertions did.
+
+## Batch 6a — the Obsidian daily-note sink (PR #112, squashed as `69e17e3`, 2026-09-09)
+
+Merged `passed-with-notes` after four review cycles and four fix passes. The squashed tree is
+byte-identical to the reviewed tip `59b876b` (both tree `604f510d`). Closed #28, #31, #32, #33;
+advanced #98; filed #111.
+
+**Three silent-loss defects were caught that would otherwise have shipped**, all the same shape — a
+post reported as delivered whose text is not in the note. A FIFO at the note path, found
+independently by the correctness and adversarial stages from different directions: switching
+`O_WRONLY` to `O_RDWR` for the separator rule removed an accidental guard, because `O_RDWR` opens a
+pipe instantly where `O_WRONLY` blocked and failed loudly. `unterminated()` returning an
+uninitialised byte on the `io.EOF` path, whose branch no test could reach because the fake derived
+its size from its own content. And a descriptor leaked on the non-regular refusal, which would cost
+a long-lived GUI session one fd per post until `EMFILE`.
+
+**Statement coverage read 100% through all four cycles and flagged none of them.** That is the third
+consecutive batch. The lesson has now changed shape: it is no longer "write mutants", it is "make
+the assertion itself the thing you mutate". The two moves that actually worked here were neutering a
+test's *error* assertions so only its data assertion could speak — which is what proved the FIFO
+test's "nothing was stored" check was real rather than decorative — and asserting through the OS
+instead of a proxy, since a leaked `O_RDWR` descriptor is still a writer on a pipe and makes a
+non-blocking read answer `EAGAIN` rather than `(0, nil)`.
+
+**A bookkeeping failure worth not repeating.** This batch's decisions were coined as `DEC-A1` and
+`DEC-A2` in conversation and cited in nine places across five files, but neither was ever written to
+`state.yaml` — and `DEC-A1` was already Batch 5's. The most consequential behaviour in the batch had
+no resolvable authority at all. Renumbering them then introduced a smaller version of the same
+error, because the citation list was built from `grep` output without reading the sentence at each
+hit, sweeping a line that legitimately meant the timeout decision. Decisions now get written down
+when they are coined, namespaced per batch, and a renumbering is a reading task rather than a
+search-and-replace.
+
+**Three residuals are accepted and documented rather than closed** (DEC-B2-RESIDUAL): a hardlink at
+the note path, a vault reached through a symlinked parent directory, and — the one adversarial found
+— an external writer replacing the note by `rename` between the open and the write, which is how
+Obsidian itself and every sync client saves. A successful append means the bytes reached the inode
+that was opened, not necessarily the file now at that path. Detection needs a post-write
+`Nlink == 0` check behind a second build-tag pair that cannot distinguish a sync client from a
+deliberate delete.
+
+**One thing did not get corrected before merge.** PR #112's body still describes the first
+implementation — `O_APPEND|O_WRONLY`, "never a read-back" — which is the inverse of what shipped.
+The merge was authorised without the body rewrite, so the accurate account went into the squash
+commit message and `contracts/obsidian-sink.md` instead. A corrected draft exists if the description
+is ever worth fixing retroactively.
+
+**What 6b inherits.** An HTTP surface rather than a filesystem one, so the fake-fidelity problem
+that hid the `io.EOF` branch here recurs in a different form: a stub HTTP server that cannot produce
+the failure being asserted is the same defect as a fake whose `Stat` and `ReadAt` cannot disagree.
+#41 (`Options.Redact`, without which the token scrub is inert) becomes directly relevant the moment
+a bot token is in play.

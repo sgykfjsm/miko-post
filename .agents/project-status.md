@@ -38,16 +38,20 @@ per PR, driven by the `run-batch-cycle` skill.
 
 ## In progress
 
-**Batch 6a — the Obsidian daily-note sink.** PR #112, branch `sgykfjsm/batch-6-us1-cli`, open and
-under review. T027, T030, T031, T032 (issues #28, #31, #32, #33), plus `post.Targeter` from settled
-decision #98. 100.0% statement coverage.
+**Batch 6b — the Telegram sink.** Branch `sgykfjsm/batch-6b-telegram-sink`, cut from merged `main`
+and carrying the Batch 6a merge record. T028, T033, T034, T035 (issues #29, #34, #35, #36 — confirm
+against triage). HTTP surface, `internal/sink/telegram`.
 
 Batch 6 as recorded was fourteen tasks (T027–T040) across four packages and two unrelated external
-surfaces, so triage split it into 6a (this PR), 6b (the Telegram sink) and 6c (the CLI and wiring).
-The split is recorded in `state.yaml` under `batch_6_split`. **Do not re-derive Batch 6 as one
-unit.**
+surfaces, so triage split it into 6a (merged as `69e17e3`), 6b (this branch) and 6c (the CLI and
+wiring). The split is recorded in `state.yaml` under `batch_6_split`. **Do not re-derive Batch 6 as
+one unit.**
 
-Also carries the Batch 5 merge record, which had no PR of its own.
+**6c still carries its recorded blocker.** T036 places `build.go` in `internal/post`, which cannot
+compile: the sink packages must import `internal/post` to implement `post.Sink`, so constructing
+them from there is a cycle. It also breaks the property Batch 5 established, that `internal/post`
+imports no other internal package. Decide the placement — `cmd/mp`, or a small wiring package —
+before 6c starts.
 
 ## Review follow-ups
 
