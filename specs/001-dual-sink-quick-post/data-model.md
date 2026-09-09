@@ -156,10 +156,14 @@ testable:
 Step 1 must precede step 2, or a `\r\n` pasted from another application yields `<br><br>`.
 
 **Write rule** (FR-049, FR-050, constitution principle VI): `os.OpenFile` with
-`O_APPEND|O_WRONLY|O_CREATE` when `create_if_missing` is true, and without `O_CREATE` when it is
-false, so a missing note fails rather than being created (FR-046). Never `O_TRUNC`, never
-read-modify-write. A file not ending in a newline is appended to as-is — the transformation adds
-no leading newline, matching FR-049's prohibition on rewriting existing content.
+`O_APPEND|O_RDWR|O_NOFOLLOW`, plus `O_CREATE` when `create_if_missing` is true and without it when
+that is false, so a missing note fails rather than being created (FR-046). Never `O_TRUNC`, never
+read-modify-write. `O_RDWR` because the separator rule reads the note's last byte;
+`O_NOFOLLOW`, with an `Lstat`, refuses a symlinked note path, and an `fstat` on the descriptor
+refuses one that is not a regular file (amended in Batch 6a, see
+`contracts/obsidian-sink.md`). A file not ending in a newline keeps every byte it has: one `\n` is
+written *before* the entry so the entry starts its own physical line, which adds content and
+rewrites none, as FR-049 requires.
 
 ---
 

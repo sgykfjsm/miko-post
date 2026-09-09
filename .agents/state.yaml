@@ -107,7 +107,122 @@ completed:
         sibling's finished result unreachable.
 
 in_progress:
-  - {id: 6a, name: "Obsidian daily-note sink", tasks: [T027, T030, T031, T032], issues: [28, 31, 32, 33], pr: 112, branch: sgykfjsm/batch-6-us1-cli, state: open, coverage: "100.0%"}
+  - id: 6a
+    name: "Obsidian daily-note sink"
+    tasks: [T027, T030, T031, T032]
+    issues: [28, 31, 32, 33]
+    pr: 112
+    branch: sgykfjsm/batch-6-us1-cli
+    state: open
+    coverage: "100.0%"
+    decision_numbering: >-
+      Batch 6a numbers its decisions DEC-B*. The A series is batch 5's - DEC-A1 is the
+      orchestrator-enforced timeout above, and 6a's code cites it twice for exactly that. An earlier
+      draft of this batch reused DEC-A1 for the separator rule and cited a second A-series id that
+      was never recorded anywhere; both were renumbered into the B series during the 6a contract
+      review (CON-008), so an A-series citation in this repository now means batch 5 and nothing
+      else.
+    decisions:
+      - id: DEC-B1
+        decision: >-
+          An entry always starts its own physical line. When the note already has content and its
+          last byte is not a line feed, one line feed is written ahead of the entry. Knowing that
+          costs one byte read at an explicit offset, so the note is opened O_RDWR rather than
+          O_WRONLY; O_APPEND still forces every write to the end and nothing is ever rewritten. A
+          failure to determine the last byte adds no separator and never fails the post. Accepted
+          race: a foreign append landing between the read and the write costs a redundant blank line
+          if it ends in a line feed, or one glued line if it does not - the outcome this rule exists
+          to prevent, reached through the window this rule's own read opens. Two senders of this
+          sink cannot produce it, because every entry it writes ends in a line feed.
+        why: >-
+          Written verbatim, an entry appended to a note whose last byte is not a line feed continues
+          the user's last line - "- 09:15 an earlier thought- 11:42 a new thought" - so their own
+          sentence looks edited and the new capture is not a bullet. Notes saved by editors that
+          omit a trailing newline are ordinary, and after a torn write (a killed process, ENOSPC, a
+          revoked mount) the note is guaranteed to end mid-entry, so every later post would chain
+          onto that fragment for as long as the file stood. A spurious blank line is the worse of the two
+          mistakes - it edits a note that was already correct, where a glued line only fails to
+          improve one that was already broken - and both are far better than not appending at all,
+          which is why a read failure answers "no separator" rather than being returned. Accepted cost of the O_RDWR this
+          needs: a note whose mode denies reading now fails to open - see DEC-B2, which also records
+          the second consequence, a FIFO that no longer blocks.
+      - id: DEC-B2
+        decision: >-
+          The sink refuses two things at the note path before anything is written, each with its own
+          sentinel. A path that is itself a symbolic link is refused and not followed
+          (ErrNoteIsSymlink): O_NOFOLLOW makes that atomic where the platform provides it, and an
+          Lstat supplies the message and covers platforms that do not. An opened object that is not
+          a regular file - a FIFO, a socket, a device node - is refused (ErrNoteNotRegular) by an
+          fstat on the descriptor os.OpenFile returned; a descriptor whose fstat fails is refused on
+          the same branch. Serves FR-044.
+        why: >-
+          Following a symlink let anything with write access to the vault redirect the append
+          outside it: into an existing file, or - with a dangling link and O_CREATE - into a file
+          this sink then created wherever the link pointed. A link to /dev/null was worse than
+          either, reporting the post as delivered while storing nothing. A named pipe reaches that
+          same harm with no symlink at all: under the O_WRONLY this sink used to open with, a FIFO
+          at the note path blocked inside open(2) until a reader attached, so the post failed loudly
+          on the orchestrator's timeout - an accidental guard that DEC-B1's O_RDWR removed, because
+          the process then holds the read end itself, the entry goes into the pipe buffer, close
+          discards it and Send returns nil. Not a privilege boundary - the precondition is write
+          access to the vault, which already permits deleting the notes outright - but a scope one:
+          this sink's promise is that the append lands in a note inside the configured vault.
+          Deliberately stricter than internal/logging's usableAsLog, which permits a device node
+          because logging.path has no companion disable setting; obsidian.enabled is this sink's off
+          switch, so the test is a plain IsRegular and must stay one.
+        accepted_cost: >-
+          The O_RDWR that made the FIFO case reachable costs one configuration that previously
+          worked: a note whose mode denies reading - 0200, or a restrictive ACL, as a user, a sync
+          client or a backup tool may leave it - opened under O_WRONLY and now fails with permission
+          denied. Retrying with O_WRONLY when the read is refused was rejected: it would give the
+          sink a second write path that cannot read its own note, so DEC-B1's separator would hold
+          on some notes and not others with nothing in the output to say which. This failure is
+          loud, names the file, and one chmod clears it.
+      - id: DEC-B2-RESIDUAL
+        decision: >-
+          Three things that defeat the same "appends inside the configured vault" promise are
+          accepted rather than refused. Two are configurations, because DEC-B2's refusals are about
+          the leaf path only: a hardlink at the note path, and a vault reached through a symlinked
+          parent directory. Both are pinned by passing cases in TestTheNotePathRefusalsStopAtTheLeaf
+          so that a later tightening has to fail a test rather than silently take them away. The
+          third is a race and cannot be pinned by a test: an external writer that replaces the note
+          by rename(tmp, note) - or unlinks it - between our open and our write sends the entry to
+          the orphaned inode, and the post is reported delivered. A successful append means the
+          bytes reached the inode that was opened, not necessarily the file now at the note path.
+        why: >-
+          Refusing a hardlink means testing Nlink > 1, and that test is a false positive on every
+          vault a snapshot, backup or dedup tool has touched, since those hardlink unchanged files
+          as a matter of course. The common legitimate case is indistinguishable from the rare
+          hostile one, so the refusal would cost working vaults to close a hole an attacker who
+          already has vault write access does not need. It also needs a second build-tag pair for
+          platforms that cannot report link counts. A symlinked parent is outside what O_NOFOLLOW
+          can constrain - it covers the final component only - and keeping a vault on another volume
+          behind a symlinked directory is an ordinary setup that must keep working. The first two need write
+          access to the vault, which already permits deleting the notes outright. The third needs
+          only a vault the user already syncs: rename-on-save is how Obsidian itself, Obsidian Sync,
+          iCloud Drive, Dropbox, Syncthing and git checkout all write. Detecting it would mean a
+          post-write Nlink == 0 check - the same second build-tag pair, unable to tell a sync client
+          from the user deleting the note, and it would convert a microsecond-wide race into a new
+          failure mode. DEC-B1's Stat and ReadAt sit inside that window and widen it slightly
+          against the O_WRONLY predecessor, which is a real cost of the separator rule and is
+          recorded here rather than left for someone to rediscover. The contract promises what it
+          keeps rather than the stronger claim it cannot enforce.
+    spec_amendments_owed:
+      - requirement: FR-044
+        owed_at: feature close, by spec-reconciler
+        amendment: >-
+          Add a sub-clause to FR-044: the append MUST land in a regular file at the resolved path,
+          and a path that is a symbolic link or any non-regular object MUST be refused without
+          writing.
+        why: >-
+          DEC-B2 ships two new user-visible ways for a post to fail, and spec.md contains no
+          occurrence of symlink, symbolic link, regular file, named pipe or hardlink. FR-044 - the
+          append must land in the note resolved from the configured directory and format - is the
+          strongest implicit hook, since a redirecting symlink or a FIFO defeats exactly that, so
+          contracts/obsidian-sink.md now names FR-044 in both refusal headings. The requirement
+          itself still does not say it. Raised as CON-009 in the 6a contract review; amending
+          spec.md was not authorised in that fix pass, and a spec amendment needs a consistency
+          sweep across plan.md and tasks.md rather than a local edit.
 blockers: []
 
 time_sensitive:

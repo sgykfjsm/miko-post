@@ -252,7 +252,13 @@ func (s *Service) Post(message Message) Outcome {
 //     user is told the sink timed out and a note may appear in the vault
 //     afterwards. Reporting a timeout for work that was abandoned is the honest
 //     description of what this process knows; the alternative was a front door
-//     that hangs with no report at all.
+//     that hangs with no report at all. Narrower than it reads for the sink
+//     that motivated it, in the safe direction: the obsidian sink consults the
+//     context again after its open and before its write, so an append abandoned
+//     while the open blocked — the stalled-mount case — writes nothing, and
+//     only one abandoned inside the write itself becomes a phantom entry. The
+//     cost is stated at its widest because Sink is an interface and no
+//     implementation is obliged to check anything.
 func (s *Service) run(sink Sink, message Message) SinkResult {
 	// Before anything the sink can influence, so a slow Name() is counted in
 	// Duration rather than excluded from it.

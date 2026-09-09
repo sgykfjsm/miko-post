@@ -98,7 +98,7 @@ func TestAppendNeverAltersExistingContent(t *testing.T) {
 		},
 		{
 			// The case that catches a read-modify-write, and the one SC-009
-			// calls out. It also gets a leading separator (decision DEC-A1),
+			// calls out. It also gets a leading separator (decision DEC-B1),
 			// because otherwise the entry continues the user's last line.
 			name:      "an existing note not ending in a newline",
 			existing:  "# 2026-09-08\n\n- 09:15 朝の思いつき",
@@ -153,7 +153,7 @@ func TestAppendNeverAltersExistingContent(t *testing.T) {
 			}
 
 			// However the note ended, the entry is the whole of the final
-			// physical line — which is the property DEC-A1 exists for.
+			// physical line — which is the property DEC-B1 exists for.
 			lines := strings.Split(strings.TrimSuffix(got, "\n"), "\n")
 			if final := lines[len(lines)-1]; final != "- 11:42 今日も美琴が可愛い♡" {
 				t.Errorf("the last physical line is %q, want the entry alone", final)
@@ -317,6 +317,14 @@ func TestAMissingNoteRespectsCreateIfMissing(t *testing.T) {
 			t.Errorf("os.Stat(%s) = %v, want the note not to exist", path, statErr)
 		}
 
+		// The errno stays wrapped, as it does on the ErrVaultMissing arm.
+		// Only that arm asserted it, so this — the far more common of the two
+		// — could lose the cause without anything failing, and discarding the
+		// cause is what made the original ENOENT misdiagnosis untraceable.
+		if !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("Send: %v, want the underlying ENOENT to remain wrapped", err)
+		}
+
 		// The error names the file, because a failure the user cannot locate
 		// is most of a failure they cannot act on.
 		if !strings.Contains(err.Error(), path) {
@@ -409,6 +417,139 @@ func TestTargetIsRecordedEvenWhenTheWriteFails(t *testing.T) {
 
 	if got, want := sink.Target(), notePath(dir, noon); got != want {
 		t.Errorf("Target() = %q after a failed append, want %q", got, want)
+	}
+}
+
+// observingContext runs a hook whenever its Err is consulted, which is how a
+// test looks at the sink from inside Send without adding a seam for it.
+//
+// Send checks ctx.Err() at exactly one point before it opens anything, so the
+// first observation is taken between setTarget and the open. The second comes
+// from appendEntry, with the note already open.
+type observingContext struct {
+	context.Context
+
+	observe func()
+}
+
+func (c observingContext) Err() error {
+	c.observe()
+
+	return c.Context.Err()
+}
+
+// TestTheTargetIsRecordedBeforeTheNoteIsOpened pins the ordering sink.go
+// documents on Target and T040's obsidian_append_started event will depend on
+// for its path field.
+//
+// Deferring setTarget to the end of Send passes every other test here, because
+// they all read Target after Send has returned. The difference is only visible
+// from inside, and for a started event it is the whole difference: the open it
+// precedes is unbounded on a stalled mount, so an event emitted first with an
+// empty path names no file for as long as that lasts.
+func TestTheTargetIsRecordedBeforeTheNoteIsOpened(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	path := notePath(dir, noon)
+	sink := obsidian.NewWithClock(settingsFor(dir), fixedClock(noon))
+
+	var (
+		observations int
+		targetSeen   string
+		noteExisted  bool
+	)
+
+	ctx := observingContext{
+		Context: context.Background(),
+		observe: func() {
+			observations++
+
+			if observations > 1 {
+				return
+			}
+
+			targetSeen = sink.Target()
+			_, statErr := os.Stat(path)
+			noteExisted = statErr == nil
+		},
+	}
+
+	if err := sink.Send(ctx, mustMessage(t, "場所は先に決まる")); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+
+	if observations == 0 {
+		t.Fatal("Send never consulted the context; the observation point this test depends on is gone")
+	}
+
+	if targetSeen != path {
+		t.Errorf("Target() = %q at the first point inside Send, want %q already recorded", targetSeen, path)
+	}
+
+	// The same observation confirms the point is the one claimed: no I/O has
+	// happened yet, so "before the open" is not being read off a note this
+	// post had already created.
+	if noteExisted {
+		t.Error("the note existed at the first check inside Send; that point is after the open, not before it")
+	}
+}
+
+// TestAWriteOnlyNoteIsRefused records what O_RDWR costs, so that it stays a
+// decision rather than becoming an accident (decision DEC-B1).
+//
+// O_WRONLY appended to a 0200 note without complaint; O_RDWR cannot open one
+// at all. A note left write-only by the user, a sync client or a restrictive
+// ACL therefore fails every post until its mode changes.
+//
+// Accepted over the alternative, which was to fall back to O_WRONLY when the
+// read is refused. That would give this sink a second write path that cannot
+// read its own note, so the separator rule would hold on some notes and not
+// others with nothing in the output to say which. This failure is loud, names
+// the file, and one chmod fixes it.
+func TestAWriteOnlyNoteIsRefused(t *testing.T) {
+	t.Parallel()
+
+	if os.Geteuid() == 0 {
+		t.Skip("root bypasses the permission bits this test relies on")
+	}
+
+	const existing = "# mine\n- 09:15 earlier\n"
+
+	dir := t.TempDir()
+	path := notePath(dir, noon)
+
+	if err := os.WriteFile(path, []byte(existing), 0o200); err != nil {
+		t.Fatalf("create the write-only note: %v", err)
+	}
+
+	err := obsidian.NewWithClock(settingsFor(dir), fixedClock(noon)).
+		Send(context.Background(), mustMessage(t, "書き込み専用"))
+	if err == nil {
+		t.Fatal("Send succeeded on a write-only note; the trade recorded here has changed and the contract needs amending")
+	}
+
+	if !errors.Is(err, os.ErrPermission) {
+		t.Errorf("Send: %v, want it to wrap os.ErrPermission", err)
+	}
+
+	// Never the configured refusal: the note is right there.
+	if errors.Is(err, obsidian.ErrNoteMissing) {
+		t.Errorf("Send: %v, want a permission failure rather than the configured refusal", err)
+	}
+
+	if !strings.Contains(err.Error(), path) {
+		t.Errorf("Send: %v, want it to name %s", err, path)
+	}
+
+	// The note is untouched, which is what makes this an honest refusal rather
+	// than a partial write.
+	if chmodErr := os.Chmod(path, 0o600); chmodErr != nil {
+		t.Fatalf("chmod to read the note back: %v", chmodErr)
+	}
+
+	if got := readNote(t, path); got != existing {
+		t.Errorf("the note reads %q, want it unchanged at %q", got, existing)
 	}
 }
 
@@ -661,6 +802,19 @@ type failingNote struct {
 	statErr error
 	readErr error
 
+	// statSize, when non-zero, is the size Stat reports in place of
+	// len(content) — the shape a note that shrank between the Stat and the
+	// ReadAt presents. A size derived from content can never disagree with
+	// what ReadAt can deliver, and that fidelity gap is why the (0, io.EOF)
+	// path went unexercised while it was wrong.
+	statSize int64
+
+	// eofWithLastByte makes ReadAt report io.EOF alongside the byte it did
+	// deliver. io.ReaderAt expressly permits that for a read reaching the end
+	// of the file, and it is the case unterminated's EOF tolerance exists for;
+	// without a fake that does it, the tolerance is unpinned.
+	eofWithLastByte bool
+
 	// wrote records what AppendEntry actually handed the note, so a test can
 	// assert on the separator.
 	wrote string
@@ -669,6 +823,10 @@ type failingNote struct {
 func (f *failingNote) Stat() (os.FileInfo, error) {
 	if f.statErr != nil {
 		return nil, f.statErr
+	}
+
+	if f.statSize != 0 {
+		return sizeOnly(f.statSize), nil
 	}
 
 	return sizeOnly(len(f.content)), nil
@@ -684,6 +842,10 @@ func (f *failingNote) ReadAt(p []byte, off int64) (int, error) {
 	}
 
 	p[0] = f.content[off]
+
+	if f.eofWithLastByte && off == int64(len(f.content))-1 {
+		return 1, io.EOF
+	}
 
 	return 1, nil
 }
@@ -828,6 +990,50 @@ func TestAppendEntrySucceedsAndCloses(t *testing.T) {
 
 	if err := obsidian.AppendEntry(context.Background(), note, "- 11:42 本文\n"); err != nil {
 		t.Fatalf("AppendEntry: %v", err)
+	}
+
+	if note.closes != 1 {
+		t.Errorf("the note was closed %d times, want exactly 1", note.closes)
+	}
+}
+
+// TestADescriptorThatCannotBeStattedIsRefusedWithItsCause covers the other arm
+// of the non-regular refusal (decision DEC-B2).
+//
+// The FIFO in sink_unix_test.go reaches the arm where fstat succeeds and
+// answers "not a regular file". This one is the arm where fstat itself fails,
+// which a descriptor os.OpenFile has just returned does not do on any platform
+// this ships to — it takes a revoked network mount (ESTALE) or failing media
+// (EIO), both of which arrive on notes that are perfectly ordinary regular
+// files.
+//
+// Two properties, and the second is why this is not just a message test. The
+// errno has to survive, or the user is sent looking for a named pipe that is
+// not there while the real fault is the mount. And the descriptor has to be
+// released: FR-028 keeps one process posting for the life of a GUI window, so a
+// vault failing this check on every post would leak one per post until EMFILE
+// takes down every sink in the process.
+func TestADescriptorThatCannotBeStattedIsRefusedWithItsCause(t *testing.T) {
+	t.Parallel()
+
+	revoked := errors.New("stale NFS file handle")
+	note := &failingNote{path: "/vault/note.md", statErr: revoked}
+
+	err := obsidian.RefuseUnlessRegular(note.Name(), note)
+	if err == nil {
+		t.Fatal("a descriptor whose fstat failed was accepted as a note")
+	}
+
+	if !errors.Is(err, obsidian.ErrNoteNotRegular) {
+		t.Errorf("refusal: %v, want it to wrap ErrNoteNotRegular", err)
+	}
+
+	if !errors.Is(err, revoked) {
+		t.Errorf("refusal: %v, want it to wrap the fstat failure %v", err, revoked)
+	}
+
+	if !strings.Contains(err.Error(), note.Name()) {
+		t.Errorf("refusal: %v, want it to name %s", err, note.Name())
 	}
 
 	if note.closes != 1 {
@@ -1026,7 +1232,9 @@ func TestOnlyAnAbsentNoteBecomesErrNoteMissing(t *testing.T) {
 	}
 }
 
-// TestASymlinkedNotePathIsRefused covers decision DEC-A2.
+// TestTheNotePathRefusalsStopAtTheLeaf covers decision DEC-B2 and the
+// boundary DEC-B2-RESIDUAL draws around it: refused at the leaf, accepted
+// above it. Both halves are asserted here, so the name says so.
 //
 // Following a symlink at the note path let anything with write access to the
 // vault redirect the append outside it — into an existing file, or, with a
@@ -1037,12 +1245,26 @@ func TestOnlyAnAbsentNoteBecomesErrNoteMissing(t *testing.T) {
 // The precondition is write access to the vault, which already permits deleting
 // the notes outright, so this is not a privilege boundary. It is a scope one:
 // this sink's promise is that it appends inside the vault the user configured.
-func TestASymlinkedNotePathIsRefused(t *testing.T) {
+//
+// The last two cases are the other side of that boundary: the configurations
+// DEC-B2-RESIDUAL deliberately accepts. They are here rather than in a test of
+// their own because the boundary is one decision — refused at the leaf,
+// accepted above it — and a tightening that erased the accepted half would
+// otherwise pass a suite whose every symlink case expected a refusal.
+func TestTheNotePathRefusalsStopAtTheLeaf(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name  string
+		name string
+
+		// build prepares the case and returns the path it is about: for a
+		// refusal, the thing beyond the link that must be left untouched; for
+		// an accepted case, the second name for the note's bytes, which must
+		// end up holding the entry.
 		build func(t *testing.T, root, note string) string
+
+		// accepted inverts the expectation to "the append succeeds and lands".
+		accepted bool
 	}{
 		{
 			name: "pointing at a file outside the vault",
@@ -1108,6 +1330,63 @@ func TestASymlinkedNotePathIsRefused(t *testing.T) {
 				return sibling
 			},
 		},
+		{
+			// Accepted (DEC-B2-RESIDUAL). O_NOFOLLOW constrains the final
+			// component only, and keeping a vault on another volume behind a
+			// symlinked directory is an ordinary way to run one. A refusal
+			// that walked the path instead of stat-ing the leaf would break
+			// it, which is what this case exists to stop.
+			name:     "reached through a symlinked vault directory, which is accepted",
+			accepted: true,
+			build: func(t *testing.T, root, note string) string {
+				t.Helper()
+
+				// The real directory is put elsewhere and the vault the
+				// harness made becomes a link to it, so the path the sink
+				// resolves is unchanged and every component but the leaf now
+				// arrives through a link.
+				vault := filepath.Dir(note)
+				if err := os.Remove(vault); err != nil {
+					t.Fatalf("clear the real vault out of the link's way: %v", err)
+				}
+
+				volume := filepath.Join(root, "another-volume")
+				if err := os.Mkdir(volume, 0o700); err != nil {
+					t.Fatalf("create the directory the vault links to: %v", err)
+				}
+
+				if err := os.Symlink(volume, vault); err != nil {
+					t.Fatalf("symlink the vault directory: %v", err)
+				}
+
+				return filepath.Join(volume, filepath.Base(note))
+			},
+		},
+		{
+			// Accepted (DEC-B2-RESIDUAL). A hardlink redirects the append to
+			// content outside the vault exactly as a symlink does, and it is a
+			// regular file, so neither refusal can see it. Closing it means
+			// refusing Nlink > 1, which every snapshot, backup and dedup tool
+			// that hardlinks unchanged files would trip — so the note keeps
+			// working, and the assertion is deliberately that the *other* name
+			// sees the bytes.
+			name:     "a hardlinked note, whose second name is accepted too",
+			accepted: true,
+			build: func(t *testing.T, root, note string) string {
+				t.Helper()
+
+				if err := os.WriteFile(note, []byte("# 既存\n"), 0o600); err != nil {
+					t.Fatalf("seed the note: %v", err)
+				}
+
+				outside := filepath.Join(root, "outside-the-vault.md")
+				if err := os.Link(note, outside); err != nil {
+					t.Fatalf("hardlink the note out of the vault: %v", err)
+				}
+
+				return outside
+			},
+		},
 	}
 
 	for _, test := range tests {
@@ -1122,12 +1401,36 @@ func TestASymlinkedNotePathIsRefused(t *testing.T) {
 			}
 
 			note := notePath(vault, noon)
-			victim := test.build(t, root, note)
 
-			before, _ := os.ReadFile(victim)
+			// Named for what it is in both halves of the table: the path this
+			// case watches. A refusal must leave it exactly as it was; an
+			// accepted case must find the entry in it.
+			watched := test.build(t, root, note)
+
+			before, _ := os.ReadFile(watched)
+
+			const text = "リンクの先には書かない"
 
 			err := obsidian.NewWithClock(settingsFor(vault), fixedClock(noon)).
-				Send(context.Background(), mustMessage(t, "リンクの先には書かない"))
+				Send(context.Background(), mustMessage(t, text))
+
+			if test.accepted {
+				if err != nil {
+					t.Fatalf("Send: %v, want the append to succeed", err)
+				}
+
+				// Read through the second name, not through the note path.
+				// That the append reached the same object by another route is
+				// the entire content of what DEC-B2-RESIDUAL accepts, and
+				// reading the note path would assert nothing about it.
+				want := string(before) + "- 11:42 " + text + "\n"
+				if got := readNote(t, watched); got != want {
+					t.Errorf("%s holds %q, want %q", watched, got, want)
+				}
+
+				return
+			}
+
 			if err == nil {
 				t.Fatal("Send followed a symlinked note path")
 			}
@@ -1141,22 +1444,22 @@ func TestASymlinkedNotePathIsRefused(t *testing.T) {
 			}
 
 			// Nothing beyond the link was touched, and nothing was created.
-			if victim == os.DevNull {
+			if watched == os.DevNull {
 				return
 			}
 
-			after, readErr := os.ReadFile(victim)
+			after, readErr := os.ReadFile(watched)
 			switch {
 			case len(before) == 0 && readErr == nil:
-				t.Errorf("%s was created; the append followed a dangling link", victim)
+				t.Errorf("%s was created; the append followed a dangling link", watched)
 			case readErr == nil && string(after) != string(before):
-				t.Errorf("%s changed from %q to %q", victim, before, after)
+				t.Errorf("%s changed from %q to %q", watched, before, after)
 			}
 		})
 	}
 }
 
-// TestASeparatorIsAddedOnlyWhenTheNoteNeedsOne covers decision DEC-A1's
+// TestASeparatorIsAddedOnlyWhenTheNoteNeedsOne covers decision DEC-B1's
 // boundaries directly, including the read failures that must not fail a post.
 func TestASeparatorIsAddedOnlyWhenTheNoteNeedsOne(t *testing.T) {
 	t.Parallel()
@@ -1204,6 +1507,24 @@ func TestASeparatorIsAddedOnlyWhenTheNoteNeedsOne(t *testing.T) {
 			note: &failingNote{path: "/vault/note.md", content: "unterminated", readErr: errors.New("read failed")},
 			want: entry,
 		},
+		{
+			// The note shrank between the Stat and the read, so ReadAt returns
+			// (0, io.EOF) and the one-byte buffer is untouched. Answering from
+			// it reads the buffer's zero value, which is not '\n', and puts a
+			// blank line in the user's note on the strength of a byte nobody
+			// read — the opposite of "every failure answers false".
+			name: "a note that shrank between the size and the read appends without a separator",
+			note: &failingNote{path: "/vault/note.md", content: "abc\n", statSize: 5},
+			want: entry,
+		},
+		{
+			// io.EOF reported *with* the byte is the case the EOF tolerance
+			// exists for: the read succeeded, so the note's own last byte
+			// decides, and this one is unterminated.
+			name: "io.EOF alongside the last byte is not a failure and still separates",
+			note: &failingNote{path: "/vault/note.md", content: "# head\n- 09:15 earlier", eofWithLastByte: true},
+			want: "\n" + entry,
+		},
 	}
 
 	for _, test := range tests {
@@ -1245,7 +1566,13 @@ func TestTargetIsSafeToReadWhileAPostIsInFlight(t *testing.T) {
 	posting.Add(1)
 
 	go func() {
+		// Both deferred, and stop is closed unconditionally. Closing it only
+		// on the success path meant a Send failure left the reader's default
+		// arm spinning — no yield, a whole core busy — until the package's own
+		// timeout panicked, which takes every other test down with it and
+		// prints a goroutine dump instead of the assertion that failed.
 		defer posting.Done()
+		defer close(stop)
 
 		for range 200 {
 			if err := sink.Send(context.Background(), message); err != nil {
@@ -1254,8 +1581,6 @@ func TestTargetIsSafeToReadWhileAPostIsInFlight(t *testing.T) {
 				return
 			}
 		}
-
-		close(stop)
 	}()
 
 	// Read continuously while those posts run. Under -race this is what

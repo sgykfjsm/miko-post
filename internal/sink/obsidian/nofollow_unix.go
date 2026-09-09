@@ -5,7 +5,7 @@ package obsidian
 import "syscall"
 
 // noFollowFlag refuses to open a symbolic link, atomically, as part of the open
-// itself (decision DEC-A2).
+// itself (decision DEC-B2).
 //
 // The Lstat in open gives the user a message worth reading; this closes the
 // window between that check and the open, where the path could become a symlink.

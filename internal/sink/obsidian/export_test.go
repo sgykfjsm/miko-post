@@ -40,3 +40,12 @@ var AppendEntry = appendEntry
 // NoteHandle is the interface AppendEntry writes through, so a test can supply
 // a failing one.
 type NoteHandle = noteHandle
+
+// RefuseUnlessRegular exposes the post-open check on the note's type.
+//
+// Same reason as AppendEntry: its fstat-failure arm needs a descriptor that
+// os.OpenFile returned and that then cannot answer fstat — a revoked mount or
+// failing media — which no test can arrange portably. That arm decides both the
+// error the user reads and whether the descriptor is released, and the FIFO
+// case in sink_unix_test.go can only reach the other one.
+var RefuseUnlessRegular = refuseUnlessRegular
