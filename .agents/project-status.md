@@ -38,20 +38,25 @@ per PR, driven by the `run-batch-cycle` skill.
 
 ## In progress
 
-**Batch 6b — the Telegram sink.** Branch `sgykfjsm/batch-6b-telegram-sink`, cut from merged `main`
-and carrying the Batch 6a merge record. T028, T033, T034, T035 (issues #29, #34, #35, #36 — confirm
-against triage). HTTP surface, `internal/sink/telegram`.
+**Batch 6c — the US1 front door and wiring.** Branch `sgykfjsm/batch-6c-us1-front-door`, cut from
+merged `main` and carrying the Batch 6b merge record. T029, T036–T040 (issues #30, #37–#41).
+Packages `internal/cli`, `cmd/mp`, `internal/post`.
 
-Batch 6 as recorded was fourteen tasks (T027–T040) across four packages and two unrelated external
-surfaces, so triage split it into 6a (merged as `69e17e3`), 6b (this branch) and 6c (the CLI and
-wiring). The split is recorded in `state.yaml` under `batch_6_split`. **Do not re-derive Batch 6 as
-one unit.**
+**A decision has to be settled before implementation starts.** T036 places `build.go` in
+`internal/post`, which cannot compile: the sink packages import `internal/post` to implement
+`post.Sink`, so constructing them from there is an import cycle. It would also break the property
+Batch 5 established and every review since has verified, that `internal/post` imports no other
+internal package. The placement — `cmd/mp`, or a small wiring package — is `batch_6_split.6c_blocker`.
 
-**6c still carries its recorded blocker.** T036 places `build.go` in `internal/post`, which cannot
-compile: the sink packages must import `internal/post` to implement `post.Sink`, so constructing
-them from there is a cycle. It also breaks the property Batch 5 established, that `internal/post`
-imports no other internal package. Decide the placement — `cmd/mp`, or a small wiring package —
-before 6c starts.
+6c is the first batch to wire a front door, so five obligations earlier batches correctly declined
+all land here: #107 (`logging.Open` ignores `ResolvePath`, so a default install writes no
+diagnostics), #41 (T040's event emission, which is also what makes `Options.Redact` non-inert),
+#98 boxes 1–3, #110, and #111. T040 must reach `*telegram.APIError` through `errors.As` for
+`http_status`.
+
+Batch 6 as recorded was fourteen tasks across four packages and two unrelated external surfaces,
+so triage split it into 6a (merged as `69e17e3`), 6b (merged as `13705e0`) and 6c (this branch).
+**Do not re-derive Batch 6 as one unit.**
 
 ## Review follow-ups
 

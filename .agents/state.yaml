@@ -247,19 +247,39 @@ completed:
           spec.md was not authorised in that fix pass, and a spec amendment needs a consistency
           sweep across plan.md and tasks.md rather than a local edit.
 
-in_progress:
   - id: 6b
-    name: "Telegram chat sink"
+    summary: >-
+      Telegram chat sink - request builder with an injectable base URL, fail-closed response
+      decoding, and a single MarkdownV2 attempt bounded by its own request timeout. Exports
+      *telegram.APIError so T040 has a route to http_status.
     tasks: [T028, T033, T034, T035]
     issues: [29, 34, 35, 36]
     advances: [98]
-    branch: sgykfjsm/batch-6b-telegram-sink
-    state: under-review
-    coverage: "98.8%"
-    coverage_note: >-
-      The single uncovered statement is request.go's http.NewRequestWithContext error arm, which
-      Send cannot reach - the method is a constant and the URL is already parsed inside JoinPath.
-      Kept and commented rather than deleted to buy a round number.
+    commits: [0deb4ad, 01d258f]
+    squashed_as: 13705e0
+    pr: 116
+    state: merged
+    merged_at: 2026-09-09
+    review_verdict: passed-with-notes
+    review_cycles: 3
+    fix_passes: 3
+    coverage: "98.9%"
+    review_run_state: "~/.agents/review-runs/sgykfjsm__miko-post/20260909T032239Z-6b24c3c2/"
+    note: >-
+      Verified the squashed tree is byte-identical to the reviewed tip 01d258f (both tree dbbaf29).
+      Five defects were caught by review that would otherwise have shipped, four in the two worst
+      outcome classes this sink has. Missing CheckRedirect: a single 302 converted POST to GET,
+      dropped the message, reported the final host's ok:true as success, and handed that host the
+      token in the Referer header; a 307 chain produced four wire requests. The credential net
+      redacted the rendering but not the value - *APIError carried the token in its exported
+      Description field, one errors.As away, and errors.As is exactly what log-events.md tells T040
+      to call for http_status. %#v leaked on the contradiction path alone. The read cap did not fail
+      closed as claimed: a body sized to exactly the cap truncates on a complete JSON document.
+      Every finding traced to one root cause - assertions written against httptest doubles that
+      could not produce the failure they claimed to rule out. Coverage read 98.8% throughout and
+      indicated none of it, the fourth consecutive batch where that happened.
+    followups_filed: [117, 118]
+    followups_commented: [115]
     pre_satisfies:
       - task: T064
         part: "the parse_mode third only"
@@ -323,6 +343,24 @@ in_progress:
           fix; this clamp does not close it, and #114's acceptance requires that the clamp later
           be either kept as documented defence in depth or removed as redundant - deliberately,
           not by omission.
+      - id: DEC-C4
+        decision: >-
+          Redirects are not followed. The http.Client sets CheckRedirect to return
+          http.ErrUseLastResponse, so a 3xx becomes an ordinary response that the decode path fails
+          closed on. Which arm it lands on depends on whether the 3xx body parses: an unparseable
+          body reaches the decode arm, and a parseable one claiming ok reaches the contradiction
+          arm and therefore carries errContradictoryStatus - which T061's rescue predicate has to
+          know, because it is specified to exclude that sentinel.
+        why: >-
+          Go's default policy follows up to ten redirects, and measured against this sink that was
+          three separate defects at once. A single 302 converted POST to GET, dropped the message
+          body entirely, and reported the final host's {"ok":true} as success - delivered-but-absent,
+          the worst outcome class this component has. The same hop handed the bot token to that
+          host in the Referer header, because Go's refererForURL strips userinfo but keeps the path
+          and the token is a path segment. And a 307 chain produced four wire requests each carrying
+          the full user message, breaking FR-041's one-attempt guarantee. Telegram does not redirect
+          sendMessage; anything that does is an intermediary this sink should refuse rather than
+          obey. FR-041, FR-043.
     spec_amendments_owed:
       - requirement: FR-043
         artifact: "internal/config/secret.go (the Reveal doc comment)"
@@ -332,6 +370,8 @@ in_progress:
           sink's credential net, which needs the string it is scrubbing for. The count is a review
           obligation, not a type invariant. data-model.md has been corrected in this batch;
           secret.go's comment still says "exactly one place".
+
+in_progress: []
 blockers: []
 
 time_sensitive:
@@ -379,12 +419,19 @@ time_sensitive:
     deadline: before tagging v0.1.0
 
 next_best_action: >-
-  Finish Batch 6b's review (contract returned VALID; correctness and adversarial still to run),
-  then open and merge its PR, then run run-batch-cycle for Batch 6c.
+  Run run-batch-cycle for Batch 6c - the US1 front door and wiring. Both sinks are merged, so its
+  prerequisites are met.
 
-  6c is blocked on a decision, not on code: T036 places build.go in internal/post, which cannot
-  compile. Settle the placement - cmd/mp, or a small wiring package - before 6c starts. See
-  batch_6_split.6c_blocker. Do not re-derive Batch 6 as a single unit.
+  SETTLE THE BLOCKER FIRST, it is a decision and not code: T036 places build.go in internal/post,
+  which cannot compile, because the sink packages import internal/post to implement post.Sink.
+  Decide the placement - cmd/mp, or a small wiring package - before implementation starts. See
+  batch_6_split.6c_blocker.
+
+  6c also inherits five obligations earlier batches correctly declined: #107 (logging.Open ignores
+  ResolvePath, so a default install writes no diagnostics), #41 (T040's event emission, which is
+  also what makes Options.Redact non-inert), #98 boxes 1-3, #110, #111. T040 must reach
+  *telegram.APIError via errors.As for http_status, and must exclude errContradictoryStatus when
+  Batch 9 writes the rescue predicate.
 
 review_followups_filed:
   filed_at: 2026-09-07
@@ -459,8 +506,8 @@ batch_6_split:
     two sinks as separable.
   parts:
     - {id: 6a, name: "Obsidian daily-note sink", tasks: [T027, T030, T031, T032], issues: [28, 31, 32, 33], package: internal/sink/obsidian, surface: filesystem, pr: 112, state: merged, squashed_as: 69e17e3}
-    - {id: 6b, name: "Telegram sink", tasks: [T028, T033, T034, T035], issues: [29, 34, 35, 36], package: internal/sink/telegram, surface: HTTP, state: in-flight, branch: sgykfjsm/batch-6b-telegram-sink}
-    - {id: 6c, name: "US1 front door and wiring", tasks: [T029, T036, T037, T038, T039, T040], issues: [30, 37, 38, 39, 40, 41], packages: [internal/cli, cmd/mp, internal/post], surface: "process, exit status", state: pending, requires: [6a, 6b]}
+    - {id: 6b, name: "Telegram sink", tasks: [T028, T033, T034, T035], issues: [29, 34, 35, 36], package: internal/sink/telegram, surface: HTTP, pr: 116, state: merged, squashed_as: 13705e0}
+    - {id: 6c, name: "US1 front door and wiring", tasks: [T029, T036, T037, T038, T039, T040], issues: [30, 37, 38, 39, 40, 41], packages: [internal/cli, cmd/mp, internal/post], surface: "process, exit status", state: ready, requires: [6a, 6b], requires_met: true, branch: sgykfjsm/batch-6c-us1-front-door}
   6c_owns: [107, 41, 98, 109, 110, 111]
   6c_blocker: >-
     T036 places build.go in internal/post, which cannot compile: the sink packages import

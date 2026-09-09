@@ -400,3 +400,57 @@ that hid the `io.EOF` branch here recurs in a different form: a stub HTTP server
 the failure being asserted is the same defect as a fake whose `Stat` and `ReadAt` cannot disagree.
 #41 (`Options.Redact`, without which the token scrub is inert) becomes directly relevant the moment
 a bot token is in play.
+
+## Batch 6b — the Telegram chat sink (PR #116, squashed as `13705e0`, 2026-09-09)
+
+Merged `passed-with-notes` after three review cycles and three fix passes. The squashed tree is
+byte-identical to the reviewed tip `01d258f` (both tree `dbbaf29`). Closed #29, #34, #35, #36;
+advanced #98; filed #117 and #118 and commented on #115.
+
+**Five defects were caught that would otherwise have shipped**, four in the two worst outcome
+classes this sink has. The `http.Client` had no `CheckRedirect`, so a single 302 converted POST to
+GET, dropped the message, and reported the final host's `{"ok":true}` as success — while handing
+that host the bot token in the `Referer` header, because Go strips userinfo from referers but keeps
+the path. The credential net redacted the *rendering* and not the *value*: `*APIError` still carried
+the token in its exported `Description`, one `errors.As` away, and `errors.As` is precisely what
+`contracts/log-events.md` tells T040 to call for `http_status` — the batch shipped the trap and the
+contract instructed the next batch to spring it. `%#v` leaked on the contradiction path alone,
+because `Error()` suppresses `Description` when a cause is present and the net decided by reading
+`Error()`. And the read cap did not fail closed as its comment claimed: a body sized to exactly the
+cap truncates on a *complete* JSON document and parses as success.
+
+**One root cause, named by the reviewers rather than inferred:** assertions written against
+`httptest` doubles that could not produce the failure they claimed to rule out. A token-free reply
+body. A non-redirecting server. A missing negative direction. A padding size that happened to
+truncate mid-string. Statement coverage read 98.8% throughout and indicated none of it — the fourth
+consecutive batch.
+
+**The most transferable thing learned here is about doubles, not about HTTP.** Batch 6a's lesson was
+"mutate the assertion, not just the code". 6b sharpens it: the assertion can be perfectly written
+and still prove nothing, because the *fixture* cannot reach the state being denied. Every one of
+these five was a correct assertion pointed at an input that could not fail it. The check that works
+is to ask, of each negative assertion, what input would make it fail — and then to actually build
+that input.
+
+**Two moments of the process working as designed.** The adversarial reviewer upgraded a clearance
+from reading to executing: correctness had cleared HTTP/1.1 transport replay by reading
+`isReplayable`, and adversarial built a raw listener that kills a cached keep-alive connection — the
+precise condition triggering Go's idempotent replay — and measured one wire request for one `Send`.
+And the third fixer caught a regression in its own pass: fixing the value-level leak removed the
+only fixture exercising the net's `%#v` arm, so that mutant would have silently stopped being
+killed. It noticed, and closed it with a dedicated fixture guarded so the fixture cannot decay into
+testing the other arm.
+
+**The bookkeeping failure recurred for the third time.** 6a's headline defect was decisions coined
+without being recorded. 6b coined four more — form encoding, credential scrubbing, the timeout
+clamp, the redirect refusal — and again none was written down until review demanded it, and `DEC-C4`
+was still missing from `state.yaml` after the merge because I said I would add it and did not. The
+lesson has not stuck by being written in a work log. What would actually stop it: the implementer
+brief must require the `state.yaml` entry as a deliverable, in the same sentence that asks for the
+decision.
+
+**What 6c inherits.** The front door, and with it every obligation earlier batches deferred: #107,
+#41/T040, #98 boxes 1–3, #110, #111. Its recorded blocker is a decision, not code — `build.go`
+cannot live in `internal/post`. T040 must reach `*telegram.APIError` via `errors.As` for
+`http_status`, and must exclude `errContradictoryStatus`, which now also covers refused redirects
+whose body parses.
