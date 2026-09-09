@@ -17,6 +17,30 @@ POST {baseURL}/bot{token}/sendMessage
 | `parse_mode` | `MarkdownV2` on attempt 1; **omitted** on the rescue | FR-033, FR-035 |
 | `message_thread_id` | `sink.telegram.thread_id` | Sent only when configured; omitted otherwise (FR-032) |
 
+### Body encoding — form, not JSON (amended in Batch 6b, DEC-C1)
+
+The body is `application/x-www-form-urlencoded`. Telegram accepts either encoding, so this is a
+decision rather than a default: **JSON cannot carry the user's bytes unchanged, and this sink is not
+allowed to change them** (FR-011, FR-012, FR-033).
+
+`encoding/json` substitutes U+FFFD for any byte sequence that is not valid UTF-8 and returns a
+**nil error** while doing it — `json.Marshal(map[string]string{"text": "a\xffb"})` yields
+`{"text":"a\ufffdb"}` and no error at all. On Unix a command-line argument may carry such bytes,
+and they really do reach a destination: the obsidian sink writes them verbatim. A JSON body would
+therefore leave Telegram holding U+FFFD where the note holds the raw `0xFF` — the two sinks storing
+different text for one post, which is issue #113's option 3 and was rejected in advance as exactly
+the divergence constitution principle II exists to prevent. Arriving at a rejected outcome by
+accident, through a library's silent substitution, is the failure this encoding rules out.
+
+`url.Values.Encode` percent-encodes byte by byte instead, so `0xFF` travels as `%FF` and arrives as
+`0xFF`. What Telegram's server then does with a non-UTF-8 sequence is **outside our control and is
+not part of this claim**. The claim is narrower, and is the only one a sink can honour: we do not
+rewrite the user's bytes on the way out.
+
+#113 is still open and is a `Message`-layer question. If it is answered by rejecting invalid UTF-8
+in `Message.Validate`, this section stays true and stops mattering; if it is answered the other way,
+this is the encoding that keeps the two sinks agreeing.
+
 ## Verbatim rule (FR-033)
 
 The first attempt sends the message **verbatim**. The application MUST NOT escape, transform, or
@@ -60,8 +84,78 @@ description — makes **no second attempt of any kind** (FR-038, FR-041). Fail c
 logs, on-screen errors, CLI errors, or settings dumps — including inside a URL echoed in an error
 message, which is the most likely accidental leak given the token sits in the request path.
 
+### What the sink does about it (amended in Batch 6b, DEC-C2)
+
+**No error leaving `Send` carries the bot token.** Every `*url.Error` layer is stripped from a
+transport failure **before** `fmt.Errorf` wraps it, and that order is load-bearing: `fmt.Errorf`
+bakes the wrapped error's rendering into its own message, so wrapping first would copy the URL into
+a string no later unwrapping could reach.
+
+The stripping is **structural, not textual**. `%#v` on a `*url.Error` renders its exported `URL`
+field whatever `Error()` says, so rewriting the message would leave the credential one verb away.
+Dropping the wrapper keeps the cause — which carries host and port but never the path — so
+`errors.Is(err, context.DeadlineExceeded)` still answers and a timeout is still reported as one.
+
+Behind that stands a **textual net**: an error whose rendering still contains the token is returned
+with the token replaced by the marker `config.Secret` prints, cause intact. It exists because the
+claim is "no error out of `Send` carries the credential", and that claim must not rest on this
+package having enumerated every error shape `net/http` can produce.
+
+That net reads **two** renderings, not one. `%v`, `%s`, `%q` and `%+v` all route through `Error()`;
+`%#v` does not, and reflects the exported fields whatever `Error()` chose to say. Scanning the
+reflected form as well as the message is what makes the guarantee cover the surfaces this document
+states it over.
+
+The request URL is also **not the only carrier**. `APIError.Description` is copied from the response
+body, and **the body is not necessarily Telegram's** — the proxy and captive portal this contract
+already accounts for can quote the request they could not forward, credential and all.
+
+That carrier is closed at the **value**, not at the rendering, and the distinction is the whole
+point. Redacting an error's message leaves the exported field intact one `errors.As` away, and
+`errors.As` is precisely what this contract tells T040 to call to reach `HTTPStatus` — so the
+supported route to the log field was also the route to the credential. `decodeResponse` therefore
+removes the token from any body-derived string **before the `*APIError` is constructed**. It is
+scrubbed, not blanked: Batch 9's T061 predicate reads `Description` for `can't parse entities`, so
+the credential comes out of the description rather than the description out of the error. **No
+`*APIError` leaving this package holds the token in any field.**
+
+**The sink boundary is the only layer that exists today.** `Options.Redact` cannot help: nothing on
+this path constructs a logger, and the error is a value handed upward rather than a line written
+down — `internal/post/result.go` deliberately leaves `SinkResult.Err` unredacted for whatever
+assembles the log record. Issues #103 and #115 cover the general case; #115 is specifically about
+this invariant now being load-bearing and enforced nowhere else. A sentinel-token sweep asserts
+absence for every failure class across `Error()`, `%v`, `%+v` and `%#v`, and then walks the chain
+with `errors.As` for both typed carriers — `*url.Error` must be gone, `*APIError` must survive with
+its `Description` and its own `%v` and `%#v` clean — so the guarantee is checked rather than
+described.
+
 ## No transport retry (FR-041)
 
 v0.1 performs no automatic retry for transport errors, timeouts, HTTP status codes, or Telegram
 API errors. The formatting fallback is a **format** fallback, not a transport retry
 (constitution, Additional Constraints).
+
+### Redirects are not followed (amended in Batch 6b, DEC-C4)
+
+The HTTP client sets an explicit redirect policy: a **3xx is returned as a response, never
+followed**. Leaving Go's default in place is not neutral — it follows up to ten hops — and both
+things that follow are disqualifying:
+
+- A **302** is reissued as a GET with no body. The user's message is never sent, and the redirect
+  target's reply is then decoded as Telegram's, so `Send` reports **success**. That is a post
+  reported delivered with nothing delivered, and it needs no involvement from Telegram at all,
+  only something positioned to answer for the origin.
+- A **307** or **308** replays the method and the body. One `Send` becomes several wire requests,
+  each carrying the user's message — a re-send FR-041 and FR-019 forbid and the sink never chose.
+- Either way, `net/http` sets a `Referer` on the cross-origin hop. It strips userinfo but **keeps
+  the path**, and the path is `/bot{token}/sendMessage`, so following a redirect hands the
+  credential to a third-party host. That is FR-043 broken on the wire, where no error-value guard
+  can reach it.
+
+The 3xx is handed back through `http.ErrUseLastResponse` rather than a bespoke error, so it is
+judged by the same decode path as every other status and fails closed there, carrying its status
+for the `http_status` log field. Which failure arm it lands on depends on the redirect's body: a
+bodiless or HTML 3xx fails as an unreadable reply, while a 3xx whose body parses as `{"ok":true,…}`
+is a body claiming success under a non-success status and therefore carries `errContradictoryStatus`
+— which T061 must account for, since it is specified to exclude that sentinel. Asserted by counting
+requests at the redirect target: zero.

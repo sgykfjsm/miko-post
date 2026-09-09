@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"math"
 	"net/http"
 	"net/url"
@@ -28,36 +27,60 @@ const SinkName = "telegram"
 // unconfigured settings struct would produce a sink with no bound on FR-040's
 // request. config.Validate rejects a non-positive http_timeout_seconds, but New
 // is exported and a caller can construct settings without going through Load —
-// the tests do — so the floor lives here too.
+// the tests do — so the floor lives here too (decision DEC-C3).
 const defaultRequestTimeout = 30 * time.Second
 
 // maxRequestTimeoutSeconds is the largest whole second a time.Duration can
 // hold, about 292 years.
 //
-// This constant exists because of issue #109, which is about
-// posting.sink_timeout_seconds and applies word for word to
-// sink.telegram.http_timeout_seconds: internal/config/validate.go bounds both
-// only from below. T035 is the first code in the repository to convert a
-// settings seconds value into a time.Duration, so it is the first place the
-// gap is reachable.
+// This constant exists because of issue #114, which owns
+// sink.telegram.http_timeout_seconds: internal/config/validate.go bounds it
+// only from below. #114 is the sibling of #109, which says the same thing about
+// posting.sink_timeout_seconds — one gap, two keys, and #114 is the one scoped
+// to this one. T035 is the first code in the repository to convert a settings
+// seconds value into a time.Duration, so it is the first place the gap is
+// reachable, and #114 names T035 as that converter.
 //
-// The residue #109 documents is not the obvious overflow. A value that wraps
-// negative or to zero is caught by any sane floor. `18446744074` wraps to a
-// *positive* 290.448384ms — it passes validation, passes the floor, and gives a
-// user who asked for ~584 years a request that times out in under a third of a
-// second, tighter than the default they were trying to raise.
+// The residue is not the obvious overflow. A value that wraps negative or to
+// zero is caught by any sane floor. `18446744074` wraps to a *positive*
+// 290.448384ms — it passes validation, passes the floor, and gives a user who
+// asked for ~584 years a request that times out in under a third of a second,
+// tighter than the default they were trying to raise.
 //
 // Clamped here rather than fixed in internal/config, which keeps this batch to
-// its own package. #109 should still be amended to cover http_timeout_seconds
-// as well as sink_timeout_seconds and to reject the value at load time, where
-// the user can be told; saturating here means the misconfiguration behaves
-// sanely but silently.
+// its own package (decision DEC-C3) and is what lets the batch claim that
+// package is byte-unchanged. #114 records this clamp as interim and owns the
+// real fix — rejecting the value at load time, where the user can be told —
+// because saturating here means the misconfiguration behaves sanely but
+// silently. #114's acceptance carries an obligation back to this constant: when
+// that fix lands, the clamp must be settled deliberately rather than left to
+// rot, either kept as documented defence in depth for the callers that build
+// settings without going through Load, or removed as redundant.
 const maxRequestTimeoutSeconds = int64(math.MaxInt64 / time.Second)
 
-// credentialMarker stands in for the bot token if one ever survives as far as
-// the credential net. Deliberately the same text config.Secret renders, so a
-// reader who greps for it finds both.
+// credentialMarker stands in for the bot token wherever one is removed.
+// Deliberately the same text config.Secret renders, so a reader who greps for
+// it finds every site at once.
 const credentialMarker = "[redacted]"
+
+// redactToken is the one substitution both credential guards perform.
+//
+// Shared rather than written twice because the two sites are a value guard and
+// a rendering guard over the same secret: decodeResponse scrubs the description
+// a proxy quoted the request into, and Sink.safe scrubs an error's message. Two
+// copies could drift on the marker, and the marker is what a reader greps for.
+//
+// The empty token is the unconfigured sink and returns text untouched.
+// strings.Contains answers true for an empty needle and ReplaceAll would splice
+// the marker between every rune, so the arm is load-bearing rather than
+// defensive.
+func redactToken(text, token string) string {
+	if token == "" {
+		return text
+	}
+
+	return strings.ReplaceAll(text, token, credentialMarker)
+}
 
 // errRequestFailed is the fallback for a *url.Error with no cause of its own —
 // a shape net/http does not produce today, and the one branch of
@@ -73,6 +96,12 @@ var errRequestFailed = errors.New("the request failed without a reported cause")
 // unformatted rescue FR-035 permits is narrower than any of those and is Batch
 // 9's work (T059 – T064); nothing here re-sends anything, and the test asserting
 // exactly one request per Send is what keeps it that way.
+//
+// "Nothing here" was once narrower than the guarantee, which is what decision
+// DEC-C4 fixed: this package re-sending nothing does not stop http.Client from
+// doing it, and its default redirect policy replays a POST body along a 307
+// chain without asking. One attempt is a property of the client as configured,
+// not of the code in this file; see refuseRedirect.
 //
 // Unlike the obsidian sink this type holds no mutable state and needs no mutex:
 // it does not implement post.Targeter, so there is nothing to record between
@@ -107,13 +136,71 @@ var _ post.Sink = (*Sink)(nil)
 // New builds the sink from its settings.
 //
 // The settings are copied by value, so a later reload cannot change where a
-// post in flight is going. Mirrors obsidian.New.
+// post in flight is going. Mirrors obsidian.New. The client's two fields are
+// both decisions and neither is a default: see requestTimeout for the bound and
+// refuseRedirect for the redirect policy.
 func New(settings config.TelegramSettings) *Sink {
 	return &Sink{
 		settings: settings,
 		baseURL:  DefaultBaseURL,
-		client:   &http.Client{Timeout: requestTimeout(settings.HTTPTimeoutSeconds)},
+		client: &http.Client{
+			Timeout:       requestTimeout(settings.HTTPTimeoutSeconds),
+			CheckRedirect: refuseRedirect,
+		},
 	}
+}
+
+// refuseRedirect is the client's redirect policy: 3xx answers are handed back
+// as responses rather than followed (decision DEC-C4, FR-041, FR-043).
+//
+// Leaving CheckRedirect nil is not "no policy". It selects Go's default, which
+// follows up to ten redirects, and both things that then happen are
+// disqualifying. Measured against this sink before this policy existed, with a
+// single 302 pointing at a second httptest server:
+//
+//	Send err      = <nil>      ← the post was reported delivered
+//	final method  = "GET"      ← net/http converted the POST
+//	final body    = ""         ← the user's message was never sent
+//	final Referer = "http://127.0.0.1:62700/bot7654321:AA-…-SENTINEL-…/sendMessage"
+//
+// The first three lines are the failure this whole package is shaped around —
+// delivered reported, nothing delivered — arriving without Telegram being
+// involved at all, because anything positioned to answer for api.telegram.org
+// can answer 302 and decodeResponse then reads the redirect target's reply as
+// Telegram's. The fourth is FR-043: net/http's refererForURL strips userinfo
+// from a cross-origin Referer but keeps the path, and the path is
+// "/bot<token>/sendMessage", so following the hop hands the credential to
+// whatever host the Location names. Neither withoutRequestURL nor safe can see
+// that one — it is a header on the wire, not an error value.
+//
+// A 307 or 308 keeps the method and replays the body instead. One Send became
+// four wire requests, each carrying the user's message in full: FR-041 allows a
+// single attempt and forbids re-sending, FR-019 forbids automatic re-delivery,
+// and a redirect chain is a re-send this sink never decided to make.
+//
+// ErrUseLastResponse rather than an error of this package's own, because the
+// 3xx should be judged by the same code as every other status. Returned that
+// way it becomes an ordinary response, the body is read and handed to
+// decodeResponse, and it fails closed as an *APIError carrying the 3xx.
+// Inventing an error here would add a second failure shape for callers to
+// recognise and would bypass the reading that makes HTTPStatus available to
+// T040.
+//
+// Which arm it fails on depends on the 3xx's body, and an earlier version of
+// this comment asserted the wrong one. A redirect normally carries no body or
+// an HTML one, and that reaches the decode arm. A 3xx whose body does parse as
+// `{"ok":true,…}` — which anything answering for the origin can send, and which
+// is measurably what happens — is a body claiming success under a non-success
+// status, so it lands on the contradiction arm and wraps
+// errContradictoryStatus. That matters to more than prose: response.go tells
+// T061 to exclude errContradictoryStatus, so T061's author needs to know that
+// refused redirects are inside that sentinel's set and not, as the old wording
+// implied, categorically outside it.
+//
+// The signature ignores both arguments deliberately: no redirect is acceptable,
+// so neither the hop nor the history can change the answer.
+func refuseRedirect(*http.Request, []*http.Request) error {
+	return http.ErrUseLastResponse
 }
 
 // Name identifies this sink (post.Sink).
@@ -123,10 +210,11 @@ func (s *Sink) Name() string { return SinkName }
 //
 // The shape is four steps and one exit rule: every error leaves through
 // s.safe, and every transport error is stripped of its request URL before it is
-// wrapped. That is not tidiness. The URL is "/bot<token>/sendMessage", so a
-// *url.Error escaping this function puts the bot token in SinkResult.Err, which
-// internal/post/result.go deliberately leaves unredacted for whatever assembles
-// the log record. Verified, before this guard existed:
+// wrapped (decision DEC-C2). That is not tidiness. The URL is
+// "/bot<token>/sendMessage", so a *url.Error escaping this function puts the
+// bot token in SinkResult.Err, which internal/post/result.go deliberately
+// leaves unredacted for whatever assembles the log record. Verified, before
+// this guard existed:
 //
 //	Post "http://127.0.0.1:1/bot123456:AA-SECRET/sendMessage": dial tcp …:
 //	connect: connection refused
@@ -136,6 +224,8 @@ func (s *Sink) Name() string { return SinkName }
 // cannot help: nothing on this path constructs a logger at all, and the error
 // is a value handed upward, not a line written down. The sink boundary is the
 // only layer that exists today, so the redaction has to be complete here.
+// Issues #103 and #115 cover the general case; #115 is specifically about this
+// invariant now being load-bearing and enforced nowhere else.
 //
 // The wrapping must happen after the stripping, in that order. fmt.Errorf bakes
 // the wrapped error's rendering into its own message, so wrapping first would
@@ -168,25 +258,26 @@ func (s *Sink) Send(ctx context.Context, message post.Message) error {
 	}()
 
 	// A read error here — a connection cut mid-body, a body shorter than its
-	// Content-Length — must not reach decodeResponse, which would diagnose the
-	// truncated bytes as Telegram sending something malformed. It is not that:
-	// we simply did not receive what Telegram sent.
+	// Content-Length, or a reply past the size cap — must not reach
+	// decodeResponse, which would diagnose the bytes it did get as Telegram
+	// sending something malformed. It is not that: we simply do not have what
+	// Telegram sent.
 	//
 	// It is still an *APIError, because a response line did arrive and its
 	// status is real, and contracts/log-events.md wants http_status on
 	// "Telegram failures with a response". Code and Description stay zero, so a
 	// half-read body cannot be mistaken for a decoded refusal — including by
 	// Batch 9's rescue predicate.
-	body, err := io.ReadAll(io.LimitReader(response.Body, maxResponseBytes))
+	body, err := readResponseBody(response.Body)
 	if err != nil {
 		return s.safe(&APIError{HTTPStatus: response.StatusCode, cause: withoutRequestURL(err)})
 	}
 
-	return s.safe(decodeResponse(response.StatusCode, body))
+	return s.safe(decodeResponse(response.StatusCode, body, s.botToken()))
 }
 
 // requestTimeout converts the configured seconds into FR-040's per-request
-// bound, saturating rather than overflowing (issue #109).
+// bound, saturating rather than overflowing (issue #114, decision DEC-C3).
 //
 // Both arms are reachable from a settings file config.Validate accepts today,
 // which is the whole reason this is a function and not an expression:
@@ -201,7 +292,8 @@ func (s *Sink) Send(ctx context.Context, message post.Message) error {
 // Saturating is the right answer for the upper arm only because the value is
 // absurd either way — nobody who wrote 18446744074 wanted 292 years any more
 // than they wanted 290 milliseconds. The honest fix is to reject it at load
-// time with a message, which is #109's, not this batch's.
+// time with a message, which is #114's, not this batch's; #109 is the same gap
+// on posting.sink_timeout_seconds and does not scope this key.
 func requestTimeout(seconds int) time.Duration {
 	switch {
 	case seconds <= 0:
@@ -214,7 +306,7 @@ func requestTimeout(seconds int) time.Duration {
 }
 
 // withoutRequestURL removes every *url.Error layer from a transport failure,
-// and with them the request URL that carries the bot token.
+// and with them the request URL that carries the bot token (decision DEC-C2).
 //
 // Structural rather than textual, and that matters: %#v on a *url.Error renders
 // its exported URL field whatever its Error() says, so replacing the URL inside
@@ -245,17 +337,45 @@ func withoutRequestURL(err error) error {
 // safe is the second net under withoutRequestURL: it returns err unless the bot
 // token appears in its rendering, and replaces it if it does.
 //
-// withoutRequestURL is the mechanism; this is the guarantee. It exists because
+// withoutRequestURL is the mechanism; this is the guarantee, and it is the
+// textual net decision DEC-C2 puts behind the structural one. It exists because
 // the claim being made is "no error out of Send carries the credential", and
 // that claim should not depend on this package having enumerated every error
 // shape net/http can produce. The obsidian sink has no equivalent because it has
 // no credential in its error paths.
 //
-// It is honest about its limits. It reads err.Error(), so it catches a token in
-// a rendered message and not one sitting in an exported field of some type
-// reflection would reach — that case is what withoutRequestURL handles
-// structurally, and the leak sweep in sink_test.go checks %#v as well as %v to
-// keep both honest.
+// It scans two renderings, because fmt reaches an error's contents by two
+// routes that do not agree. %v, %s, %q and %+v all call Error(); %#v does not —
+// it reflects the value and prints every exported field whatever Error() chose
+// to say. Reading Error() alone therefore left a real hole rather than a
+// theoretical one, and APIError is the type that opened it: Error() suppresses
+// Description whenever a cause is set, so on the contradiction path — a non-2xx
+// whose body claimed ok, the proxy-or-captive-portal reply decodeResponse
+// exists to refuse — a Description quoting the request URL rendered clean,
+// this guard declined to fire, and %#v printed the token verbatim.
+//
+// Firing is what closes it, and not by rewriting the field. redactedError holds
+// its cause unexported, so once this returns, %#v prints a pointer address
+// instead of walking into whatever leaked — the same mechanism config.Secret
+// relies on. That also means the two arms can disagree harmlessly: when only
+// the reflected form carried the token, the substitution on the message is a
+// no-op and the wrapping alone does the work.
+//
+// # What this net is not
+//
+// It is a net over renderings, and for a while it was mistaken for a net over
+// values. Wrapping a leaking *APIError hides the field from fmt; it does not
+// take the token out of the field, and errors.As walks straight past the
+// wrapper to it. T040 is specified to make exactly that call. So the *APIError
+// path is fixed where the string is built instead — see decodeResponse — and
+// what remains here is the original job: the error shapes nobody enumerated,
+// caught by their rendering because a rendering is all this layer has.
+//
+// It is honest about the rest of its limits too. %#v does not follow pointers,
+// so this is not "everything reflection could reach" — but it is exactly the
+// surface the leak sweep in sink_test.go renders, and the sweep now also walks
+// the chain for the two typed carriers, so the guarantee and the assertion
+// cover the same ground rather than one of them being wider on paper.
 //
 // The cause is retained through Unwrap rather than discarded, so
 // errors.Is(err, context.DeadlineExceeded) still answers and the orchestrator
@@ -263,19 +383,20 @@ func withoutRequestURL(err error) error {
 // withoutRequestURL has already run: the chain below this point holds no
 // *url.Error to reach into.
 //
-// This is this package's second config.Secret.Reveal call site. That type's
-// comment says Reveal is meant for exactly one — building the request URL — and
-// two is the honest count now: a guard looking for a string has to be given the
-// string. Nothing else changes, in particular nothing stores the revealed value
-// on the Sink: an unexported plain-string field would be dumped by fmt's
-// reflection on any print of the Sink, which is the exposure config.Secret
-// exists to remove.
+// The match is unanchored, which is safe for the value this looks for and
+// would not be for an arbitrary one: a one- or two-character token would shred
+// every diagnostic into "telegr[redacted]m", and no Bot API token is anything
+// like that short. A minimum-length rule belongs with issue #114 in the
+// validation layer, where the user can be told, rather than as a second guess
+// here. The substitution itself is literal — strings.ReplaceAll interprets
+// neither the needle nor the replacement — so a token containing %s, $1 or a
+// backslash, or one that happens to contain the marker, behaves like any other.
 func (s *Sink) safe(err error) error {
 	if err == nil {
 		return nil
 	}
 
-	token := s.settings.BotToken.Reveal()
+	token := s.botToken()
 
 	// An empty credential is the unconfigured sink, and strings.Contains
 	// answers true for an empty needle — without this arm every error would be
@@ -284,16 +405,33 @@ func (s *Sink) safe(err error) error {
 		return err
 	}
 
+	// Error() first because it is the cheap surface and the usual carrier; the
+	// reflected form only when the message came back clean, since that is the
+	// case where a suppressed exported field can still be one verb away.
 	rendered := err.Error()
-	if !strings.Contains(rendered, token) {
+	if !strings.Contains(rendered, token) && !strings.Contains(fmt.Sprintf("%#v", err), token) {
 		return err
 	}
 
 	return &redactedError{
-		message: strings.ReplaceAll(rendered, token, credentialMarker),
+		message: redactToken(rendered, token),
 		cause:   err,
 	}
 }
+
+// botToken is this package's second config.Secret.Reveal call site, and its
+// last.
+//
+// That type's comment says Reveal is meant for exactly one — building the
+// request URL — and two is the honest count now: the credential guards look for
+// a string and remove it, and both halves have to be given the string. Routing
+// them through one accessor is what keeps the count at two as the guards grow;
+// Sink.safe needs it to search, decodeResponse to scrub.
+//
+// Nothing stores the revealed value on the Sink. An unexported plain-string
+// field would be dumped by fmt's reflection on any print of the Sink, which is
+// the exposure config.Secret exists to remove.
+func (s *Sink) botToken() string { return s.settings.BotToken.Reveal() }
 
 // redactedError carries a rewritten message over an intact cause.
 //

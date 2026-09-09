@@ -121,9 +121,14 @@ therefore cannot assume `Load` already enforced it.
 
 **Credential** (FR-042, FR-043, FR-069): held in a dedicated `Secret` type whose `String()`,
 `GoString()`, `MarshalJSON()`, and `slog.LogValue()` all return a redaction marker. The real value
-is reachable only through an explicit `Reveal()` method called at exactly one place — building the
-Telegram request URL. This makes the "never appears anywhere" requirement a property of the type
-rather than a rule every future call site must remember.
+is reachable only through an explicit `Reveal()` method, called at **two** places as of Batch 6b —
+building the Telegram request URL, and the Telegram sink's credential net, which cannot scan an
+error for a string it has not been given (DEC-C2). What the type guarantees is that every route to
+the value is explicit and greppable; the *count* of those routes is a **review obligation, not a
+type invariant**, and a third caller may one day be as honest as the second.
+`internal/config/secret.go` still says "exactly one place" and is owed the same correction —
+deliberately not made in Batch 6b, whose boundary claim rests on `internal/config` being
+byte-unchanged.
 
 ---
 

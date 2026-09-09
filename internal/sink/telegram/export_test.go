@@ -35,12 +35,14 @@ func BaseURL(s *Sink) string { return s.baseURL }
 // see.
 func ClientTimeout(s *Sink) time.Duration { return s.client.Timeout }
 
-// RequestTimeout exposes the seconds-to-Duration conversion (issue #109).
+// RequestTimeout exposes the seconds-to-Duration conversion (issue #114,
+// decision DEC-C3).
 //
 // Exposed rather than driven through New because the interesting inputs are the
-// ones that must never reach an http.Client at all — the overflow residue
-// #109 documents — and asserting on the resulting Duration directly says what
-// the guard is for. ClientTimeout covers the wiring.
+// ones that must never reach an http.Client at all — the overflow residue #114
+// documents for this key, and #109 for its sibling — and asserting on the
+// resulting Duration directly says what the guard is for. ClientTimeout covers
+// the wiring.
 var RequestTimeout = requestTimeout
 
 // WithoutRequestURL exposes the structural half of the credential guard.
@@ -61,6 +63,11 @@ func Safe(s *Sink, err error) error { return s.safe(err) }
 
 // DecodeResponse exposes response decoding for the assertions that are about
 // the decoder rather than about a round trip.
+//
+// The token parameter is passed through rather than defaulted away, because
+// scrubbing it out of the description is the decoder's job now (FR-043) and a
+// seam that supplied "" for the caller would make every test here exercise the
+// unconfigured sink.
 var DecodeResponse = decodeResponse
 
 // SendMessageForm exposes the wire fields the builder produces, so a mutation
@@ -71,6 +78,14 @@ var SendMessageForm = sendMessageForm
 // MaxResponseBytes is the read cap, so a test can size a body against the real
 // value instead of a copy that can drift from it.
 const MaxResponseBytes = maxResponseBytes
+
+// ErrResponseTooLarge is the cause a reply past the read cap fails with.
+//
+// Exported to the test package for the same reason as ErrContradictoryStatus: a
+// boundary test that only asserted "some error" would pass a cap that rejected
+// the reply for an unrelated reason, and the one thing the boundary case is
+// about is which side of the cap the refusal starts on.
+var ErrResponseTooLarge = errResponseTooLarge
 
 // MaxRequestTimeoutSeconds is the saturation point requestTimeout clamps to.
 const MaxRequestTimeoutSeconds = maxRequestTimeoutSeconds
@@ -97,3 +112,15 @@ func SendMessagePath(settings config.TelegramSettings) string {
 
 // Method is the verb Send uses.
 const Method = http.MethodPost
+
+// ErrContradictoryStatus is the cause that separates a body claiming ok under a
+// non-2xx from a genuine refusal.
+//
+// Exported to the test package rather than the API because the distinction is
+// invariant, not interface: T061's rescue predicate reads it from inside the
+// package, and a caller outside it has no use for a sentinel that only says
+// "this reply contradicted itself". A test asserting merely that some cause is
+// present would pass a mutant that swapped one non-nil error for another, which
+// is the whole failure mode CON-004 is about — so the assertion needs the exact
+// sentinel, and that needs this seam.
+var ErrContradictoryStatus = errContradictoryStatus

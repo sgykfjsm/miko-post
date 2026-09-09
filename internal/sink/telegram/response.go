@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 )
 
 // maxResponseBytes caps how much of a reply is read.
@@ -11,13 +12,44 @@ import (
 // A sendMessage reply is a few hundred bytes. What arrives instead, when
 // something between here and Telegram goes wrong, is whatever a proxy or a
 // captive portal felt like serving — an HTML error page of no particular size.
-// The cap costs nothing on the real path and turns "the reply was enormous"
-// into an ordinary decode failure rather than an allocation.
-//
-// Truncating a large body makes its JSON invalid, which fails closed by the
-// same route as any other unparseable reply. That is the intended outcome: a
-// 1 MiB sendMessage response is not a response we should be acting on.
+// The cap costs nothing on the real path and bounds the allocation one reply
+// can cause. A 1 MiB sendMessage response is not a response we should be acting
+// on, and readResponseBody is what makes that a refusal rather than a hope.
 const maxResponseBytes = 1 << 20
+
+// errResponseTooLarge reports a reply with more to give than the cap allows.
+var errResponseTooLarge = errors.New("the reply exceeded the readable size limit")
+
+// readResponseBody reads at most maxResponseBytes and refuses a reply that had
+// more to send.
+//
+// The limit is read plus one byte, and that byte is the whole point. An earlier
+// version read exactly the cap and this file claimed that "truncating a large
+// body makes its JSON invalid, which fails closed by the same route as any
+// other unparseable reply". Measured, that is false at the boundary: a body
+// whose JSON document ends at byte maxResponseBytes exactly, followed by
+// anything at all, truncates on a complete document, parses, and — for
+// `{"ok":true,…}` under a 200 — reports the post delivered on a reply we did
+// not finish reading. That is this package's one forbidden outcome arriving
+// through the guard meant to prevent it.
+//
+// One extra byte separates "the reply was exactly this long" from "there was
+// more", which truncation alone cannot distinguish. A reply of exactly the cap
+// still succeeds; one byte past it fails, and fails as itself rather than as a
+// decode error, because "the reply was too large to read" and "Telegram sent
+// something malformed" are different things to put in front of a user.
+func readResponseBody(body io.Reader) ([]byte, error) {
+	read, err := io.ReadAll(io.LimitReader(body, maxResponseBytes+1))
+	if err != nil {
+		return nil, err
+	}
+
+	if len(read) > maxResponseBytes {
+		return nil, errResponseTooLarge
+	}
+
+	return read, nil
+}
 
 // errContradictoryStatus reports a body claiming success under an HTTP status
 // that says otherwise.
@@ -59,13 +91,60 @@ type apiResponse struct {
 // entities"`. A predicate re-parsing that out of a formatted string would be
 // matching this package's own prose instead of Telegram's answer.
 //
-// Nothing on it carries the request URL, and so nothing carries the bot token:
-// the URL is the only place the token appears, and Sink.Send strips it from
-// every transport error before wrapping (see withoutRequestURL). The fields
-// here come from the response body, which Telegram does not echo credentials
-// into. That property is asserted rather than assumed — see the leak sweep in
-// sink_test.go, which renders every error this package returns through %v, %+v
-// and %#v.
+// They are necessary but not sufficient, and T061 has to be told so. `ok` is
+// not one of them — it survives only as the absence of a cause — because two
+// structurally different replies fill Code and Description from the same body:
+// the genuine refusal (`ok: false`, no cause) and the contradiction (`ok: true`
+// under a non-2xx, cause errContradictoryStatus; see decodeResponse). A
+// predicate reading the three exported fields alone therefore fires on a reply
+// that said `ok: true`, which R-008 requires to fail closed, and producing one
+// takes nothing exotic — a proxy or captive portal answering 400 with
+//
+//	{"ok":true,"error_code":400,"description":"Bad Request: can't parse entities …"}
+//
+// is indistinguishable from a real formatting rejection through Code and
+// Description alone. So T061 must additionally exclude
+// errors.Is(err, errContradictoryStatus): unexported, but rescue.go will be in
+// this package. That the two paths stay distinguishable is asserted by
+// TestAContradictoryReplyIsNotAFormattingRejection rather than left to this
+// comment.
+//
+// # FR-043 is a property of this struct
+//
+// Nothing on it carries the request URL: the URL is where the token lives, and
+// Sink.Send strips it from every transport error before wrapping (see
+// withoutRequestURL). Description is a different matter, and two earlier
+// versions of this comment got it wrong in turn. The first said the fields come
+// from a body "Telegram does not echo credentials into". They come from a body,
+// and this same file spends two paragraphs on who else writes that body — a
+// proxy rewriting a status, a captive portal answering for Telegram. Such a
+// thing quoting the request it could not forward,
+//
+//	{"ok":true,"error_code":400,
+//	 "description":"cannot proxy POST https://api.telegram.org/bot<token>/sendMessage"}
+//
+// puts the credential straight into Description.
+//
+// The second said that was fine because Sink.safe caught it at the boundary. It
+// does not, and could not: safe rewrites what an error *prints*, and Description
+// is exported. A caller holding the returned error is one errors.As from the
+// struct itself, and the token was still in the field — measured, on both the
+// ok:false and ok:true paths. That is not a hypothetical caller. T040 has to
+// read HTTPStatus off this type to satisfy contracts/log-events.md, errors.As
+// is the mechanism this comment recommends for it, and internal/post/result.go
+// deliberately leaves SinkResult.Err unredacted for whatever assembles the log
+// record. The supported path to the status was also the path to the credential.
+//
+// So the redaction happens here, at construction, before the string is ever
+// stored: decodeResponse takes the token and scrubs it out of any body-derived
+// text (see redactToken). Scrubbed, not dropped — Batch 9's T061 predicate
+// reads Description for "can't parse entities", and a blanked field would
+// answer the sweep while breaking the rescue. Sink.safe stays where it is as
+// the net over renderings it cannot see inside; this is the one over the value.
+// Asserted rather than assumed: the leak sweep in sink_test.go sends exactly
+// that body on both the ok:true and ok:false paths, renders the result through
+// %v, %+v and %#v, and then walks the chain with errors.As to check the fields
+// no rendering of the outer error would reach.
 type APIError struct {
 	// HTTPStatus is the response status. Always set, including when the body
 	// could not be decoded, because it is the field T040 must log.
@@ -143,10 +222,21 @@ func (e *APIError) Unwrap() error { return e.cause }
 // because it comes from the response line, not the body.
 //
 // body is []byte rather than an io.Reader because the read is bounded by the
-// caller (maxResponseBytes) and the read error has to be distinguishable from a
+// caller (readResponseBody) and the read error has to be distinguishable from a
 // decode error: a connection cut mid-body is a transport failure, not Telegram
 // saying something malformed.
-func decodeResponse(status int, body []byte) error {
+//
+// token is the credential to scrub out of the decoded description, and it is a
+// parameter because this is a package function with no Sink to ask. Of the
+// shapes available — take a scrubbing closure, take the token, or let Sink.Send
+// clean the error afterwards — the token is chosen because it is required by
+// the signature, so no future call site can construct an *APIError without
+// deciding what to do about the credential, and because a nil closure would
+// disarm the guard silently. The empty string is the unconfigured sink and is a
+// no-op, matching Sink.safe. The remaining fields cannot carry a credential:
+// two are ints, and the decode cause is an encoding/json error, whose messages
+// quote at most one offending character of the body and never a run of it.
+func decodeResponse(status int, body []byte, token string) error {
 	var payload apiResponse
 
 	if err := json.Unmarshal(body, &payload); err != nil {
@@ -157,7 +247,7 @@ func decodeResponse(status int, body []byte) error {
 		return &APIError{
 			HTTPStatus:  status,
 			Code:        payload.ErrorCode,
-			Description: payload.Description,
+			Description: redactToken(payload.Description, token),
 		}
 	}
 
@@ -165,7 +255,7 @@ func decodeResponse(status int, body []byte) error {
 		return &APIError{
 			HTTPStatus:  status,
 			Code:        payload.ErrorCode,
-			Description: payload.Description,
+			Description: redactToken(payload.Description, token),
 			cause:       errContradictoryStatus,
 		}
 	}

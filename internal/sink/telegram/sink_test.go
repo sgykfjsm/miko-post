@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 	"unicode/utf8"
@@ -38,6 +39,25 @@ const chatID = "-1001234567890"
 
 // okBody is what Telegram answers when it accepted the message.
 const okBody = `{"ok":true,"result":{"message_id":8,"date":1757000000}}`
+
+// echoingRefusal is a Bot API envelope whose description quotes the request URL
+// the sender could not forward — bot token included.
+//
+// Telegram does not send this. The things that answer for Telegram do: the
+// proxy rewriting a status and the captive portal answering in its place that
+// response.go already models. It is built from sentinelToken rather than a
+// literal so the sweep is looking for the credential the sink was actually
+// configured with.
+//
+// ok is a parameter because the two values take different routes out of
+// APIError.Error() — rendered for the refusal, suppressed in favour of the
+// cause for the contradiction — and only the suppressed one ever leaked.
+func echoingRefusal(ok bool) string {
+	return fmt.Sprintf(
+		`{"ok":%t,"error_code":400,`+
+			`"description":"cannot proxy POST https://api.telegram.org/bot%s/sendMessage"}`,
+		ok, sentinelToken)
+}
 
 // baseSettings are enabled settings with no thread configured.
 //
@@ -166,6 +186,47 @@ func reply(status int, body string) http.HandlerFunc {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(status)
 		_, _ = io.WriteString(w, body)
+	}
+}
+
+// redirectTo answers with a 3xx naming target, carrying body.
+//
+// Location and WriteHeader by hand rather than http.Redirect, which writes an
+// HTML body for a GET and none for a POST. The redirect tests compare a 302
+// against a 307, and those differ by exactly the method net/http uses to
+// follow, so a helper whose body depended on the method would make the two
+// cases differ in a second way as well.
+//
+// The body is a parameter because it decides which arm a refused redirect fails
+// on: empty is the ordinary hop and fails as an unreadable reply, while one that
+// parses as ok:true fails as a contradiction.
+func redirectTo(status int, target string, body string) http.HandlerFunc {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Location", target)
+		w.WriteHeader(status)
+		_, _ = io.WriteString(w, body)
+	}
+}
+
+// redirectChain answers the first hops requests with a 3xx pointing back at
+// itself and then accepts, so a client that follows redirects produces several
+// wire requests rather than one.
+//
+// Relative Location, resolved by net/http against the request URL, so the
+// handler needs no reference to the server it is about to be installed in.
+func redirectChain(status int, hops int) http.HandlerFunc {
+	var seen atomic.Int32
+
+	return func(w http.ResponseWriter, _ *http.Request) {
+		if int(seen.Add(1)) <= hops {
+			w.Header().Set("Location", "/hop")
+			w.WriteHeader(status)
+
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, okBody)
 	}
 }
 
@@ -429,7 +490,7 @@ func TestSendDeliversTheMessageVerbatim(t *testing.T) {
 }
 
 // TestSendDoesNotSubstituteReplacementCharactersForInvalidUTF8 makes issue
-// #113's rejected option executable.
+// #113's rejected option executable (decision DEC-C1).
 //
 // A JSON body would have been the obvious choice and is the reason this test
 // exists: encoding/json replaces every byte sequence that is not valid UTF-8
@@ -528,8 +589,14 @@ func TestSendSucceedsOnAnAcceptedMessage(t *testing.T) {
 func TestSendFailsClosedOnEveryUntrustworthyResponse(t *testing.T) {
 	t.Parallel()
 
-	// Longer than the read cap, so the JSON arrives truncated and cannot be
-	// decoded.
+	// Longer than the read cap, so the reply is refused unread.
+	//
+	// This case says only "an obviously oversized body fails". What it cannot
+	// say is where the refusal starts, and for a while the cap was off by one
+	// byte in the direction that matters — see
+	// TestSendRefusesAReplyOneByteOverTheReadCap, which is the case that pins
+	// it. This one stays because it also asserts the shape of the resulting
+	// error alongside every other untrustworthy reply.
 	//
 	// The size is a literal, deliberately, and the guard below is why. Sizing
 	// it from telegram.MaxResponseBytes read better and was worthless: the body
@@ -654,6 +721,101 @@ func TestSendFailsClosedOnEveryUntrustworthyResponse(t *testing.T) {
 	}
 }
 
+// TestSendRefusesAReplyOneByteOverTheReadCap pins the read cap at the only
+// place a size check can be wrong.
+//
+// The oversized case above is not this assertion. It passes for a cap that
+// truncates as well as one that refuses, because its padding happens to be cut
+// mid-string and the fragment does not parse. Sized to end on a complete JSON
+// document instead, a truncating cap parses `{"ok":true,…}` under a 200 and
+// returns nil — a post reported delivered from a reply that was never finished,
+// which is the one outcome this package exists to prevent. Measured before the
+// fix: extra=1 and extra=4096 both returned nil.
+//
+// Both sides of the boundary are asserted, and that is what makes the case a
+// boundary rather than a bigger oversized body. extra=0 is a legitimate reply
+// of exactly the cap and must succeed, which fails a check that rejects at the
+// cap instead of past it; extra=1 must fail, which fails a reader that stops at
+// the cap and cannot tell there was more.
+func TestSendRefusesAReplyOneByteOverTheReadCap(t *testing.T) {
+	t.Parallel()
+
+	// A body whose JSON document ends at exactly the cap. The padding lives in
+	// a description rather than in whitespace so the document stays one Telegram
+	// would recognise, and the length is derived so the two subtests differ by
+	// the one byte under test and nothing else.
+	const prefix = `{"ok":true,"description":"`
+	const suffix = `"}`
+
+	exact := prefix + strings.Repeat("a", telegram.MaxResponseBytes-len(prefix)-len(suffix)) + suffix
+	if len(exact) != telegram.MaxResponseBytes {
+		t.Fatalf("the boundary body is %d bytes, want exactly the %d-byte cap",
+			len(exact), telegram.MaxResponseBytes)
+	}
+
+	tests := []struct {
+		name    string
+		extra   int
+		wantErr bool
+	}{
+		{name: "exactly the cap is a reply we read in full", extra: 0},
+		{name: "one byte past the cap is a reply we did not", extra: 1, wantErr: true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			server, rec := newRecordingServer(t,
+				reply(http.StatusOK, exact+strings.Repeat("Z", test.extra)))
+
+			err := telegram.NewWithBaseURL(baseSettings(), server.URL).
+				Send(context.Background(), mustMessage(t, "miko"))
+
+			rec.only(t)
+
+			if !test.wantErr {
+				if err != nil {
+					t.Fatalf("Send = %v, want nil for a %d-byte reply at the cap",
+						err, telegram.MaxResponseBytes)
+				}
+
+				return
+			}
+
+			if err == nil {
+				t.Fatal("Send returned nil for a reply past the cap: the truncated bytes " +
+					"parsed as ok and a post was reported delivered on a reply we did not read")
+			}
+
+			// The sentinel rather than "some error", because a reply refused
+			// for an unrelated reason would satisfy the wantErr side while
+			// leaving the cap itself unchecked.
+			if !errors.Is(err, telegram.ErrResponseTooLarge) {
+				t.Errorf("Send = %v, want it to wrap ErrResponseTooLarge", err)
+			}
+
+			// Still an *APIError: a response line arrived and its status is
+			// real, so contracts/log-events.md wants http_status on it.
+			var apiErr *telegram.APIError
+			if !errors.As(err, &apiErr) {
+				t.Fatalf("Send error = %v, want an *telegram.APIError carrying the status", err)
+			}
+
+			if apiErr.HTTPStatus != http.StatusOK {
+				t.Errorf("HTTPStatus = %d, want %d", apiErr.HTTPStatus, http.StatusOK)
+			}
+
+			// Nothing was decoded, so nothing decoded may be reported — a
+			// half-read body must not reach Batch 9's rescue predicate.
+			if apiErr.Code != 0 || apiErr.Description != "" {
+				t.Errorf("decoded fields = (%d, %q), want them empty for a reply we never read",
+					apiErr.Code, apiErr.Description)
+			}
+		})
+	}
+}
+
 // TestFormattingRejectionKeepsTheFieldsTheRescuePredicateNeeds is the hook
 // Batch 9 (T061) reads.
 //
@@ -695,6 +857,82 @@ func TestFormattingRejectionKeepsTheFieldsTheRescuePredicateNeeds(t *testing.T) 
 
 	if !strings.Contains(apiErr.Description, "can't parse entities") {
 		t.Errorf("Description = %q, want it to contain %q", apiErr.Description, "can't parse entities")
+	}
+
+	// The other half of the predicate, and the half nothing pinned before: T061
+	// is specified to exclude errors.Is(err, errContradictoryStatus), so a
+	// genuine refusal must not carry that sentinel. Only the contradiction was
+	// asserted to have it; attaching it here as well broke no test, and a change
+	// in that direction disables the rescue for every real formatting rejection
+	// — silently, and in Batch 9 rather than here, which is the class of
+	// breakage this test was written to catch.
+	if errors.Is(err, telegram.ErrContradictoryStatus) {
+		t.Errorf("Send: %v, want it NOT to wrap ErrContradictoryStatus: this is the genuine "+
+			"ok:false refusal, and T061 excludes that sentinel, so carrying it here would "+
+			"turn off the FR-035 rescue for the one reply it exists to rescue", err)
+	}
+}
+
+// TestAContradictoryReplyIsNotAFormattingRejection is the other half of that
+// hook, and the half APIError's exported fields cannot express.
+//
+// The body is what a proxy or a captive portal can put on the wire without
+// trying: a 400 carrying `ok: true` beside exactly the error_code and
+// description a real formatting rejection has. Through Code and Description
+// alone it is indistinguishable from the reply in the test above, so a T061
+// predicate built from the three exported fields would re-send the user's
+// message on the say-so of something that is not Telegram. R-008 requires this
+// reply to fail closed.
+//
+// `ok` survives decoding only as the absence of a cause, so that is what is
+// asserted: the returned *APIError unwraps to something. The sentinel itself,
+// errContradictoryStatus, is unexported and rescue.go will be in-package, so
+// T061 can name it; from out here non-nil is the entire observable difference —
+// and asserting it is what makes a later flattening of the refusal and
+// contradiction paths into one nil-cause error fail now rather than in Batch 9.
+func TestAContradictoryReplyIsNotAFormattingRejection(t *testing.T) {
+	t.Parallel()
+
+	const body = `{"ok":true,"error_code":400,` +
+		`"description":"Bad Request: can't parse entities: Character '.' is reserved"}`
+
+	server, rec := newRecordingServer(t, reply(http.StatusBadRequest, body))
+	sink := telegram.NewWithBaseURL(baseSettings(), server.URL)
+
+	err := sink.Send(context.Background(), mustMessage(t, "a reserved dot."))
+	if err == nil {
+		t.Fatal("Send returned nil for a 400 whose body claimed ok")
+	}
+
+	rec.only(t)
+
+	var apiErr *telegram.APIError
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("Send error = %v, want an *telegram.APIError", err)
+	}
+
+	// The premise, checked rather than assumed: read through the exported
+	// fields, this reply is a rescue candidate. If either of these stops
+	// holding, the case below has quietly stopped covering anything.
+	if apiErr.Code != 400 {
+		t.Errorf("Code = %d, want 400 — the premise is that this looks like a rescue candidate",
+			apiErr.Code)
+	}
+
+	if !strings.Contains(apiErr.Description, "can't parse entities") {
+		t.Errorf("Description = %q, want it to contain %q — the premise is that this looks "+
+			"like a rescue candidate", apiErr.Description, "can't parse entities")
+	}
+
+	// The difference, and the only one visible from outside the package. Asserted
+	// as the exact sentinel rather than "some cause is present": the mutant this
+	// case exists to kill flattens the two paths, but a mutant that swapped the
+	// cause for a different non-nil error would defeat a mere nil check while
+	// leaving T061's predicate just as wrong.
+	if !errors.Is(err, telegram.ErrContradictoryStatus) {
+		t.Errorf("Send: %v, want it to wrap ErrContradictoryStatus: without that cause nothing "+
+			"distinguishes this reply from a genuine ok:false refusal and T061 would rescue it",
+			err)
 	}
 }
 
@@ -747,6 +985,133 @@ func TestSendMakesExactlyOneAttempt(t *testing.T) {
 
 			if seen := rec.requests(); len(seen) != 1 {
 				t.Fatalf("requests sent = %d, want exactly 1 (FR-019, FR-041)", len(seen))
+			}
+		})
+	}
+}
+
+// TestSendDoesNotFollowARedirect is decision DEC-C4 (FR-041, FR-043).
+//
+// A nil CheckRedirect is Go's default policy, not the absence of one, and it
+// follows up to ten hops. Both statuses here were measured against this sink
+// before the policy existed and both were disqualifying, in opposite ways.
+//
+// The 302 is the severe one: net/http reissues it as a GET with no body, so the
+// user's message is never sent, and the redirect target's reply is then decoded
+// as Telegram's — Send returned nil. A post reported delivered with nothing
+// delivered is the one outcome this package is shaped around refusing, and it
+// needs no Telegram involvement, only something able to answer for the origin.
+// The 307 is the other direction: method and body are replayed, so one Send
+// became four wire requests each carrying the message in full, which is a
+// re-send FR-041 and FR-019 forbid and the sink never chose.
+//
+// Three assertions, and the third is the one that does the security work. That
+// the first server saw exactly one request, and that Send failed, would both be
+// satisfied by a client that hopped somewhere and then gave up. The second
+// server's count being zero is what makes the Referer leak impossible rather
+// than merely unobserved: net/http strips userinfo from a cross-origin Referer
+// but keeps the path, and the path carries the bot token, so a single request
+// arriving there is FR-043 broken on the wire where no error-value guard can
+// see it. Counting is the only way to assert that.
+func TestSendDoesNotFollowARedirect(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		status int
+		// hopBody is what the refused 3xx itself carries, which is what
+		// decides the arm it fails on.
+		hopBody string
+		// second is how the redirect target behaves if it is ever reached.
+		second http.HandlerFunc
+		// wantContradiction is whether the refusal wears
+		// errContradictoryStatus.
+		wantContradiction bool
+	}{
+		{
+			name:   "a 302, which net/http would reissue as a bodiless GET",
+			status: http.StatusFound,
+			second: reply(http.StatusOK, okBody),
+		},
+		{
+			name:   "a 307 chain, which net/http would replay the POST body along",
+			status: http.StatusTemporaryRedirect,
+			second: redirectChain(http.StatusTemporaryRedirect, 2),
+		},
+		{
+			// The arm the policy's comment used to name wrongly. A redirect
+			// whose own body parses as ok:true is a body claiming success
+			// under a non-success status, so it fails as a contradiction
+			// rather than as an unreadable reply — which T061 has to know,
+			// because it is told to exclude that sentinel.
+			name:              "a 302 whose own body claims ok",
+			status:            http.StatusFound,
+			hopBody:           `{"ok":true}`,
+			second:            reply(http.StatusOK, okBody),
+			wantContradiction: true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			second, secondRec := newRecordingServer(t, test.second)
+			first, firstRec := newRecordingServer(t,
+				redirectTo(test.status, second.URL+"/elsewhere", test.hopBody))
+
+			sink := telegram.NewWithBaseURL(baseSettings(), first.URL)
+
+			err := sink.Send(context.Background(), mustMessage(t, "miko"))
+
+			// The wire-level counts are checked first and with Errorf rather
+			// than Fatalf, so a client that started following redirects reports
+			// all of what it did instead of stopping at whichever assertion
+			// happens to come first.
+			if seen := secondRec.requests(); len(seen) != 0 {
+				t.Errorf("the redirect target received %d request(s), want 0: the first of them "+
+					"carried the bot token in its Referer, where FR-043 cannot be enforced by "+
+					"any guard on the error value", len(seen))
+			}
+
+			// One attempt. FR-041 counts wire requests, not calls to Send.
+			if seen := firstRec.requests(); len(seen) != 1 {
+				t.Errorf("requests to the api origin = %d, want exactly 1 (FR-019, FR-041)",
+					len(seen))
+			}
+
+			if err == nil {
+				t.Fatal("Send returned nil for a redirect: the hop's reply was read as Telegram " +
+					"accepting a message that was never sent to Telegram")
+			}
+
+			// contracts/log-events.md puts http_status on Telegram failures that
+			// had a response, and a 3xx is one. Asserting the status rather than
+			// just "some error" is what stops the policy being satisfied by a
+			// client that failed for an unrelated reason.
+			var apiErr *telegram.APIError
+			if !errors.As(err, &apiErr) {
+				t.Fatalf("Send error = %v, want an *telegram.APIError carrying the 3xx", err)
+			}
+
+			if apiErr.HTTPStatus != test.status {
+				t.Errorf("HTTPStatus = %d, want %d", apiErr.HTTPStatus, test.status)
+			}
+
+			// errContradictoryStatus means a body claimed ok under a non-2xx,
+			// and T061 is specified to exclude it — so which refused redirects
+			// wear it is T061's problem and has to be stated rather than
+			// assumed. It depends on the hop's own body, which is what
+			// refuseRedirect's comment says and what an earlier version of it
+			// got backwards: a bodiless hop fails as an unreadable reply, a hop
+			// claiming ok fails as the contradiction it is.
+			//
+			// Asserted in both directions. Checking only the negative would let
+			// the sentinel quietly disappear from the contradiction arm
+			// altogether, which is the shape CON-004 was about.
+			if got := errors.Is(err, telegram.ErrContradictoryStatus); got != test.wantContradiction {
+				t.Errorf("Send: %v; errors.Is(err, ErrContradictoryStatus) = %t, want %t",
+					err, got, test.wantContradiction)
 			}
 		})
 	}
@@ -916,7 +1281,7 @@ func TestSendHonoursTheOrchestratorsPerSinkDeadline(t *testing.T) {
 }
 
 // TestSendNeverLeaksTheBotTokenInAnyError is FR-043 at the only boundary that
-// can enforce it today.
+// can enforce it today (decision DEC-C2).
 //
 // The token is in the request URL — "/bot<token>/sendMessage" is the Bot API's
 // shape — so net/http's *url.Error carries it verbatim in both Error() and
@@ -930,6 +1295,18 @@ func TestSendHonoursTheOrchestratorsPerSinkDeadline(t *testing.T) {
 // the Error method and reflects over the fields, which is how a surviving
 // *url.Error would leak past a message-only guard — so the structural
 // assertion (no *url.Error anywhere in the chain) is here too.
+//
+// The request URL is not the only carrier, and for a while this sweep could not
+// have found the other one. Every reply body it sent was token-free, so the
+// %#v check had nothing to catch and passed for a reason unrelated to the
+// property it claims. The last two cases fix that: they put the credential in
+// the response body, which a proxy or captive portal quoting the request it
+// could not forward does without trying. Both `ok` values are sent, because
+// only one of them leaked — APIError.Error() renders Description on the
+// ok:false refusal, so the message-level guard always fired there, and
+// suppresses it on the ok:true contradiction, where the token therefore reached
+// %#v with nothing having fired at all. A sweep carrying only the safe half of
+// that pair is the same unfailable assertion as a token-free body.
 func TestSendNeverLeaksTheBotTokenInAnyError(t *testing.T) {
 	t.Parallel()
 
@@ -944,6 +1321,11 @@ func TestSendNeverLeaksTheBotTokenInAnyError(t *testing.T) {
 		name string
 		// send performs one failing Send and returns its error.
 		send func(t *testing.T) error
+		// wantAPIError records whether this case reaches Telegram far enough
+		// to produce one, so the *APIError half of the sweep cannot go
+		// vacuous. Without it, a chain that stopped carrying the type would
+		// silently skip the field checks and the sweep would still pass.
+		wantAPIError bool
 	}{
 		{
 			name: "the base url cannot be parsed",
@@ -989,7 +1371,8 @@ func TestSendNeverLeaksTheBotTokenInAnyError(t *testing.T) {
 			},
 		},
 		{
-			name: "telegram refuses the message",
+			wantAPIError: true,
+			name:         "telegram refuses the message",
 			send: func(t *testing.T) error {
 				t.Helper()
 
@@ -1001,11 +1384,38 @@ func TestSendNeverLeaksTheBotTokenInAnyError(t *testing.T) {
 			},
 		},
 		{
-			name: "the reply cannot be decoded",
+			wantAPIError: true,
+			name:         "the reply cannot be decoded",
 			send: func(t *testing.T) error {
 				t.Helper()
 
 				server, _ := newRecordingServer(t, reply(http.StatusBadGateway, "<html>nope</html>"))
+
+				return telegram.NewWithBaseURL(baseSettings(), server.URL).
+					Send(context.Background(), mustMessage(t, "miko"))
+			},
+		},
+		{
+			wantAPIError: true,
+			name:         "a refusal whose description quotes the request URL",
+			send: func(t *testing.T) error {
+				t.Helper()
+
+				server, _ := newRecordingServer(t,
+					reply(http.StatusBadRequest, echoingRefusal(false)))
+
+				return telegram.NewWithBaseURL(baseSettings(), server.URL).
+					Send(context.Background(), mustMessage(t, "miko"))
+			},
+		},
+		{
+			wantAPIError: true,
+			name:         "a contradictory reply whose description quotes the request URL",
+			send: func(t *testing.T) error {
+				t.Helper()
+
+				server, _ := newRecordingServer(t,
+					reply(http.StatusBadRequest, echoingRefusal(true)))
 
 				return telegram.NewWithBaseURL(baseSettings(), server.URL).
 					Send(context.Background(), mustMessage(t, "miko"))
@@ -1031,6 +1441,40 @@ func TestSendNeverLeaksTheBotTokenInAnyError(t *testing.T) {
 				"%#v":     fmt.Sprintf("%#v", err),
 			}
 
+			// The message-level checks cannot see a field reflection would
+			// reach, so the two typed carriers are walked out of the chain as
+			// well. The contract names both.
+			//
+			// *url.Error is removed rather than cleaned: its exported URL is
+			// the request URL and there is nothing left of it once the token is
+			// gone, so absence from the chain is the assertion.
+			var urlErr *url.Error
+			if errors.As(err, &urlErr) {
+				t.Errorf("a *url.Error survived in the chain, carrying %q", urlErr.URL)
+			}
+
+			// *APIError is the opposite: it must survive, because T040 reads
+			// HTTPStatus off it and errors.As is the mechanism it is told to
+			// use. So the same call T040 makes is made here, and its fields and
+			// its own renderings join the sweep. Wrapping it in a redactedError
+			// hides it from the verbs above but not from this, which is exactly
+			// the gap that made a redacted rendering over a leaking value look
+			// clean.
+			var apiErr *telegram.APIError
+
+			gotAPIError := errors.As(err, &apiErr)
+			if gotAPIError != test.wantAPIError {
+				t.Fatalf("errors.As(err, **telegram.APIError) = %t, want %t; the field-level "+
+					"half of the sweep is only meaningful when T040's own call succeeds",
+					gotAPIError, test.wantAPIError)
+			}
+
+			if gotAPIError {
+				renders["*APIError.Description"] = apiErr.Description
+				renders["%v of *APIError"] = fmt.Sprintf("%v", apiErr)
+				renders["%#v of *APIError"] = fmt.Sprintf("%#v", apiErr)
+			}
+
 			for verb, rendered := range renders {
 				if strings.Contains(rendered, sentinelToken) {
 					t.Errorf("%s rendered the bot token: %s", verb, rendered)
@@ -1040,19 +1484,12 @@ func TestSendNeverLeaksTheBotTokenInAnyError(t *testing.T) {
 					t.Errorf("%s rendered a fragment of the bot token: %s", verb, rendered)
 				}
 			}
-
-			// The message-level checks above cannot see a field reflection
-			// would reach, so the carrier itself must be gone from the chain.
-			var urlErr *url.Error
-			if errors.As(err, &urlErr) {
-				t.Errorf("a *url.Error survived in the chain, carrying %q", urlErr.URL)
-			}
 		})
 	}
 }
 
 // TestNewAppliesTheConfiguredRequestTimeoutToItsClient is FR-040 and issue
-// #109.
+// #114 (decision DEC-C3).
 //
 // Two halves that fail differently. RequestTimeout checks the arithmetic,
 // including the overflow residue no test can reach through a real request; the
@@ -1062,7 +1499,7 @@ func TestSendNeverLeaksTheBotTokenInAnyError(t *testing.T) {
 func TestNewAppliesTheConfiguredRequestTimeoutToItsClient(t *testing.T) {
 	t.Parallel()
 
-	// 18446744074 seconds is the value issue #109 names: multiplied out it
+	// 18446744074 seconds is the value issue #114 names: multiplied out it
 	// wraps int64 to a *positive* 290.448384ms, so it survives validation, a
 	// non-positive floor, and any near-MaxInt64 saturation check.
 	const residue = 290448384 * time.Nanosecond
@@ -1114,7 +1551,7 @@ func TestNewAppliesTheConfiguredRequestTimeoutToItsClient(t *testing.T) {
 	// Named separately because it is the specific defect, not a boundary: a
 	// user asking for ~584 years must not silently get a third of a second.
 	if got := telegram.RequestTimeout(int(overflow64)); got == residue {
-		t.Errorf("RequestTimeout(%d) = %s, which is issue #109's overflow residue", overflow64, got)
+		t.Errorf("RequestTimeout(%d) = %s, which is issue #114's overflow residue", overflow64, got)
 	}
 
 	// http.Client reads a zero Timeout as "no limit", so the floor is not
@@ -1257,7 +1694,7 @@ func TestOneSinkServesConcurrentPosts(t *testing.T) {
 }
 
 // TestWithoutRequestURLRemovesEveryCarrierOfTheToken covers the structural half
-// of the credential guard directly.
+// of the credential guard directly (decision DEC-C2).
 //
 // Two of these inputs cannot be produced by net/http and are the reason this is
 // exposed at all: a *url.Error nested inside another, which a redirect failure
@@ -1332,12 +1769,24 @@ func TestWithoutRequestURLRemovesEveryCarrierOfTheToken(t *testing.T) {
 }
 
 // TestSafeReplacesACredentialThatSurvived covers the textual half of the
-// credential guard.
+// credential guard (decision DEC-C2).
 //
 // It is unreachable through Send by design — WithoutRequestURL removes the only
 // shape that carries the token — so without this the guard's firing branch
 // would never be executed by anything, which is the same as not having checked
 // it.
+// reflectiveError is an error whose message is clean and whose exported field
+// is not — the shape that makes Sink.safe read two renderings instead of one.
+//
+// Written here rather than borrowed from net/url because *url.Error renders its
+// URL through Error() as well, so it leaks on the arm this fixture must leave
+// clean and would let the %#v scan be removed without a failure.
+type reflectiveError struct {
+	URL string
+}
+
+func (e *reflectiveError) Error() string { return "the request failed" }
+
 func TestSafeReplacesACredentialThatSurvived(t *testing.T) {
 	t.Parallel()
 
@@ -1389,6 +1838,37 @@ func TestSafeReplacesACredentialThatSurvived(t *testing.T) {
 		}
 	})
 
+	t.Run("an error that only leaks under reflection is rewritten", func(t *testing.T) {
+		t.Parallel()
+
+		// The reason safe reads two renderings, and now the only thing that
+		// exercises the second. It used to be covered incidentally by the
+		// contradiction case in the leak sweep, whose *APIError rendered clean
+		// through Error() and leaked the token through %#v — but that
+		// description is scrubbed at construction now, so nothing on the Send
+		// path reaches this arm any more. It is the arm for the error shapes
+		// nobody has enumerated, and it has to be checked directly or not at
+		// all.
+		leaky := &reflectiveError{URL: "/bot" + sentinelToken + "/sendMessage"}
+
+		if strings.Contains(leaky.Error(), sentinelToken) {
+			t.Fatalf("the fixture leaks through Error(): %v; it must leak only under %%#v "+
+				"or it tests the wrong arm", leaky)
+		}
+
+		got := telegram.Safe(sink, leaky)
+
+		if strings.Contains(fmt.Sprintf("%#v", got), sentinelToken) {
+			t.Errorf("%%#v rendered the token: %#v", got)
+		}
+
+		// The cause is kept, so a caller that asks deliberately still finds it.
+		// This is what makes the wrapping a redaction rather than a discard.
+		if !errors.Is(got, leaky) {
+			t.Errorf("Safe(...) lost its cause; errors.Is(%v, %v) is false", got, leaky)
+		}
+	})
+
 	t.Run("an empty credential does not turn every error into markers", func(t *testing.T) {
 		t.Parallel()
 
@@ -1414,7 +1894,7 @@ func TestDecodeResponseIsNotFooledByAPartialDecode(t *testing.T) {
 
 	const body = `{"ok":false,"error_code":"400","description":"Bad Request: can't parse entities"}`
 
-	err := telegram.DecodeResponse(http.StatusBadRequest, []byte(body))
+	err := telegram.DecodeResponse(http.StatusBadRequest, []byte(body), sentinelToken)
 	if err == nil {
 		t.Fatal("DecodeResponse returned nil for a body it could not decode")
 	}
@@ -1433,6 +1913,102 @@ func TestDecodeResponseIsNotFooledByAPartialDecode(t *testing.T) {
 	}
 }
 
+// TestDecodeResponseTakesTheTokenOutOfTheDescriptionAndLeavesTheRest is the
+// value half of FR-043, stated where the value is built.
+//
+// The leak sweep asserts absence, and absence is satisfied by blanking the
+// field. Blanking it would break Batch 9: T061's predicate reads Description
+// for "can't parse entities", so the credential has to come out of the
+// description rather than the description out of the error. The expectation is
+// therefore the whole string, not a Contains — a Contains on the marker passes
+// for a field that is nothing but the marker, and a Contains on the diagnostic
+// passes for one that still carries the token beside it.
+//
+// Both arms are covered because they are separate construction sites in
+// decodeResponse and a fix applied to one reads as complete.
+func TestDecodeResponseTakesTheTokenOutOfTheDescriptionAndLeavesTheRest(t *testing.T) {
+	t.Parallel()
+
+	// The description echoingRefusal builds, with the credential replaced and
+	// nothing else touched.
+	const wantScrubbed = "cannot proxy POST https://api.telegram.org/bot[redacted]/sendMessage"
+
+	// A real Telegram refusal, which contains no credential and must survive
+	// the scrubber unchanged — this is the string T061 matches on.
+	const rescuable = `{"ok":false,"error_code":400,` +
+		`"description":"Bad Request: can't parse entities: Character '.' is reserved"}`
+
+	tests := []struct {
+		name            string
+		status          int
+		body            string
+		wantDescription string
+		wantCause       error
+	}{
+		{
+			name:            "a refusal quoting the request",
+			status:          http.StatusBadRequest,
+			body:            echoingRefusal(false),
+			wantDescription: wantScrubbed,
+		},
+		{
+			name:            "a contradiction quoting the request",
+			status:          http.StatusBadRequest,
+			body:            echoingRefusal(true),
+			wantDescription: wantScrubbed,
+			wantCause:       telegram.ErrContradictoryStatus,
+		},
+		{
+			name:            "a refusal T061 has to keep reading",
+			status:          http.StatusBadRequest,
+			body:            rescuable,
+			wantDescription: "Bad Request: can't parse entities: Character '.' is reserved",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			err := telegram.DecodeResponse(test.status, []byte(test.body), sentinelToken)
+			if err == nil {
+				t.Fatalf("DecodeResponse returned nil for %q", test.body)
+			}
+
+			var apiErr *telegram.APIError
+			if !errors.As(err, &apiErr) {
+				t.Fatalf("DecodeResponse error = %v, want an *APIError", err)
+			}
+
+			if apiErr.Description != test.wantDescription {
+				t.Errorf("Description = %q, want %q", apiErr.Description, test.wantDescription)
+			}
+
+			if test.wantCause != nil && !errors.Is(err, test.wantCause) {
+				t.Errorf("DecodeResponse error = %v, want it to wrap %v", err, test.wantCause)
+			}
+		})
+	}
+
+	t.Run("an unconfigured sink leaves the description alone", func(t *testing.T) {
+		t.Parallel()
+
+		// The empty-token arm, which is the one that would turn every
+		// description into marker soup if it were ever dropped.
+		err := telegram.DecodeResponse(http.StatusBadRequest, []byte(rescuable), "")
+
+		var apiErr *telegram.APIError
+		if !errors.As(err, &apiErr) {
+			t.Fatalf("DecodeResponse error = %v, want an *APIError", err)
+		}
+
+		const want = "Bad Request: can't parse entities: Character '.' is reserved"
+		if apiErr.Description != want {
+			t.Errorf("Description = %q, want %q", apiErr.Description, want)
+		}
+	})
+}
+
 // TestSendMessageFormOmitsTheThreadKeyRatherThanEmptyingIt is the builder's own
 // unit, and it is here because the wire-level negative can be satisfied by a
 // builder that writes the key with an empty value on a server that then drops
@@ -1449,4 +2025,85 @@ func TestSendMessageFormOmitsTheThreadKeyRatherThanEmptyingIt(t *testing.T) {
 	if got := with.Get(telegram.FieldThreadID); got != "7" {
 		t.Errorf("%s = %q, want %q", telegram.FieldThreadID, got, "7")
 	}
+}
+
+// TestAMalformedTokenFailsClosedInsideTheAPIHost pins what url.JoinPath
+// actually does with a token, which is not what newSendRequest's comment used
+// to claim.
+//
+// config.Validate only checks that the bot token is non-empty, so anything a
+// user can type reaches JoinPath, and JoinPath treats each element as already
+// escaped rather than escaping it. Both inputs below are therefore reachable
+// from a settings file that validates. Neither has a security consequence —
+// which is the claim being pinned, not a behaviour being changed. A comment
+// asserting what the standard library does is worth no more than the test that
+// checks it, and the previous comment is why: it was wrong in the safe
+// direction for a year's worth of readers.
+func TestAMalformedTokenFailsClosedInsideTheAPIHost(t *testing.T) {
+	t.Parallel()
+
+	t.Run("an invalid escape fails before any request exists", func(t *testing.T) {
+		t.Parallel()
+
+		// The sentinel plus a bad escape, so the case also answers "and what
+		// does the resulting error say about the credential".
+		settings := baseSettings()
+		settings.BotToken = config.NewSecret(sentinelToken + "%zz")
+
+		server, rec := newRecordingServer(t, reply(http.StatusOK, okBody))
+
+		err := telegram.NewWithBaseURL(settings, server.URL).
+			Send(context.Background(), mustMessage(t, "miko"))
+		if err == nil {
+			t.Fatal("Send returned nil for a token JoinPath cannot parse")
+		}
+
+		// Fails closed means closed: nothing was built, so nothing was sent.
+		if seen := rec.requests(); len(seen) != 0 {
+			t.Errorf("requests sent = %d, want 0 — the failure is supposed to precede the request",
+				len(seen))
+		}
+
+		// The error names the offending escape and not the credential. This is
+		// the whole reason the finding is non-blocking, so it is asserted rather
+		// than asserted-in-prose.
+		rendered := err.Error()
+		if !strings.Contains(rendered, `"%zz"`) {
+			t.Errorf("Send error = %q, want it to name the invalid escape", rendered)
+		}
+
+		if strings.Contains(rendered, sentinelToken) || strings.Contains(rendered, "SENTINEL") {
+			t.Errorf("Send error rendered the bot token: %s", rendered)
+		}
+	})
+
+	t.Run("a traversal segment is resolved rather than sent", func(t *testing.T) {
+		t.Parallel()
+
+		settings := baseSettings()
+		settings.BotToken = config.NewSecret("../../X")
+
+		server, rec := newRecordingServer(t, reply(http.StatusNotFound,
+			`{"ok":false,"error_code":404,"description":"Not Found"}`))
+
+		err := telegram.NewWithBaseURL(settings, server.URL).
+			Send(context.Background(), mustMessage(t, "miko"))
+		if err == nil {
+			t.Fatal("Send returned nil for a path that does not exist")
+		}
+
+		// That the request arrived at this server at all is the host assertion,
+		// and the only one available: JoinPath edits the parsed base URL's path
+		// and never its host, so a token that could move the request would move
+		// it away from here and leave this recorder empty.
+		got := rec.only(t)
+
+		// "bot" + "../../X" resolves to "X", so the whole credential segment is
+		// eaten. Compared exactly: the failure mode worth catching is a future
+		// JoinPath that stops resolving and sends "/bot../../X/sendMessage",
+		// which a Contains check for "X" would not notice.
+		if want := "/X/sendMessage"; got.path != want {
+			t.Errorf("request path = %q, want %q", got.path, want)
+		}
+	})
 }

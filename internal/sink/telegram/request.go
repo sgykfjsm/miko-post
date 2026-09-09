@@ -27,7 +27,7 @@ const DefaultBaseURL = "https://api.telegram.org"
 const sendMessageMethod = "sendMessage"
 
 // formContentType is the encoding of the request body, and it is a decision
-// rather than a default. See newSendRequest.
+// rather than a default (decision DEC-C1). See newSendRequest.
 const formContentType = "application/x-www-form-urlencoded"
 
 // Wire field names, written once so a test can assert against the same strings
@@ -84,7 +84,7 @@ func sendMessageForm(settings config.TelegramSettings, text string) url.Values {
 
 // newSendRequest builds the POST that delivers one message.
 //
-// # Why the body is form-encoded and not JSON (issue #113)
+// # Why the body is form-encoded and not JSON (decision DEC-C1, issue #113)
 //
 // Telegram accepts either. Form encoding is chosen because JSON cannot carry
 // the user's bytes unchanged, and this sink is not allowed to change them
@@ -120,15 +120,38 @@ func sendMessageForm(settings config.TelegramSettings, text string) url.Values {
 //
 // The token goes in the path — "/bot<token>/sendMessage" is the Bot API's
 // shape, and it is the reason every error out of this package has to be
-// scrubbed (see Sink.Send). JoinPath escapes each segment and resolves any "."
-// or ".." inside it, so a malformed credential produces a wrong path at
-// Telegram rather than a request aimed somewhere else in the API. It also
+// scrubbed (see Sink.Send). JoinPath parses the base URL and then edits only
+// its path, so no token can move the request to another host; that is the
+// property worth having here and the one concatenation does not offer. It also
 // absorbs a trailing slash on the base URL, which httptest never has and a
 // hand-written settings value might.
 //
-// JoinPath's error comes from parsing the base URL, so it names the base URL
-// and not the token — but it is a *url.Error all the same, and it is scrubbed
-// with every other one rather than being trusted to stay that way.
+// What it does not do is escape the token. An earlier version of this comment
+// said it did, which is backwards: JoinPath treats each element as already
+// escaped and unescapes it. config.Validate only checks that the token is
+// non-empty, so both consequences are reachable from a settings file it
+// accepts, and on Go 1.27 they are:
+//
+//   - a token containing "%zz" makes JoinPath itself fail, before any request
+//     exists. The error is a url.EscapeError — not a *url.Error, so
+//     withoutRequestURL has nothing to strip — and it leaves Send as the
+//     fmt.Errorf wrapper, a *fmt.wrapError. That is the right outcome and the
+//     reason this is documented rather than defended against: it fails closed,
+//     and the text is `invalid URL escape "%zz"`, which names the offending
+//     escape and not the credential.
+//   - a token containing "%41" is unescaped to "A" for the path and travels as
+//     "%41", so Telegram is asked about a token the user did not configure and
+//     refuses it. Mangled, but only ever mangled into another refusal.
+//
+// The ".." resolution is real and is not the "wrong path at Telegram" the old
+// wording promised: a token of "../../X" is resolved away rather than sent, and
+// the path becomes "/X/sendMessage". There is no security consequence in any of
+// this. The host is fixed by the base URL, traversal stays inside it, and the
+// worst reachable outcome is a Bot API path that does not exist. It is recorded
+// because a reader who believed the escaping claim would size the validation
+// owed by internal/config wrongly, and because a comment that is wrong about
+// the standard library is worse than no comment. Pinned by
+// TestAMalformedTokenFailsClosedInsideTheAPIHost.
 func newSendRequest(
 	ctx context.Context,
 	baseURL string,
