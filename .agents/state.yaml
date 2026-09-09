@@ -106,15 +106,38 @@ completed:
         a vault on a synced or network mount would otherwise hold a post open indefinitely with its
         sibling's finished result unreachable.
 
-in_progress:
   - id: 6a
-    name: "Obsidian daily-note sink"
+    summary: >-
+      Obsidian daily-note sink - path resolution in local time from one clock reading, the
+      four-step entry transformation, and the append writer. Declares post.Targeter, which
+      issue #98 settled and which this batch is the first to have an implementer for.
     tasks: [T027, T030, T031, T032]
     issues: [28, 31, 32, 33]
+    advances: [98]
+    filed_from_this_work: [111]
+    commits: [95235d4, 59b876b]
+    squashed_as: 69e17e3
     pr: 112
-    branch: sgykfjsm/batch-6-us1-cli
-    state: open
+    state: merged
+    merged_at: 2026-09-09
+    review_verdict: passed-with-notes
+    review_cycles: 4
+    fix_passes: 4
     coverage: "100.0%"
+    review_run_state: "~/.agents/review-runs/sgykfjsm__miko-post/20260908T010910Z-15c151d6/"
+    note: >-
+      Verified the squashed tree is byte-identical to the reviewed tip 59b876b (both tree 604f510d).
+      Three silent-loss defects were caught by review and would otherwise have shipped: a FIFO at
+      the note path swallowing the entry and returning nil (found independently by the correctness
+      and adversarial stages), unterminated() returning an uninitialised byte on the io.EOF path,
+      and a descriptor leaked on the non-regular refusal. Statement coverage read 100% throughout
+      and flagged none of them - the third consecutive batch where that happened. The fix passes
+      exceeded the protocol's nominal three-cycle limit; continued because blockers went 4 -> 0 and
+      stayed there, i.e. the run was converging, which is what the limit exists to detect.
+      PR #112's body was NOT corrected before merge (the user authorised the merge but not the body
+      rewrite), so it still describes the first implementation as O_APPEND|O_WRONLY with no
+      read-back. The squash commit message 69e17e3 and contracts/obsidian-sink.md are the accurate
+      record; a corrected 150-line body draft exists if it is ever wanted.
     decision_numbering: >-
       Batch 6a numbers its decisions DEC-B*. The A series is batch 5's - DEC-A1 is the
       orchestrator-enforced timeout above, and 6a's code cites it twice for exactly that. An earlier
@@ -223,6 +246,8 @@ in_progress:
           itself still does not say it. Raised as CON-009 in the 6a contract review; amending
           spec.md was not authorised in that fix pass, and a spec amendment needs a consistency
           sweep across plan.md and tasks.md rather than a local edit.
+
+in_progress: []
 blockers: []
 
 time_sensitive:
