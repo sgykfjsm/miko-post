@@ -960,14 +960,6 @@ func TestOpenDegradesWhenTheLogCannotBeOpened(t *testing.T) {
 				return path
 			},
 		},
-		{
-			name: "no path was resolved",
-			build: func(t *testing.T, _ string) string {
-				t.Helper()
-
-				return ""
-			},
-		},
 	}
 
 	for _, test := range tests {
@@ -993,21 +985,7 @@ func TestOpenDegradesWhenTheLogCannotBeOpened(t *testing.T) {
 
 			warning := degraded.Warning()
 
-			// The no-path case gets its own expected wording rather than
-			// dropping the assertion. Guarding this check with `path != ""`
-			// made it disappear in exactly the case worth checking, and what
-			// it was hiding was "could not be written to : no log path was
-			// resolved" — a message with a hole where the path would be.
-			if path == "" {
-				const wantNoPath = "warning: diagnostics could not be written: "
-				if !strings.HasPrefix(warning, wantNoPath) {
-					t.Errorf("the no-path warning is %q, want it to start %q", warning, wantNoPath)
-				}
-
-				if strings.Contains(warning, "written to") {
-					t.Errorf("the warning still names a path it does not have: %q", warning)
-				}
-			} else if !strings.Contains(warning, path) {
+			if !strings.Contains(warning, path) {
 				t.Errorf("the warning does not name the log path: %q", warning)
 			}
 
@@ -1898,5 +1876,179 @@ func TestAPanickingWriterCannotTakeDownThePost(t *testing.T) {
 
 	if err := logger.Close(); err != nil {
 		t.Errorf("Close after a panicking writer: %v", err)
+	}
+}
+
+// TestOpenResolvesAnEmptyPathToTheDefaultStateFile is issue #107's regression.
+//
+// The value under test is the one a wired front door actually passes:
+// config.LoggingSettings.Path defaults to "" so that "unset" stays
+// distinguishable from "set to the default value", so `Path:
+// settings.Logging.Path` is the natural wiring and was, before this, the wiring
+// that silently wrote nothing on every default install.
+//
+// It asserts the file rather than the absence of a degradation, because
+// "Degraded() == nil" is satisfied by a logger that resolved a path and then
+// discarded every record; only a record read back off disk at the resolved
+// location proves both halves.
+func TestOpenResolvesAnEmptyPathToTheDefaultStateFile(t *testing.T) {
+	state := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", state)
+
+	want, err := config.DefaultLogPath()
+	if err != nil {
+		t.Fatalf("resolve the expected default: %v", err)
+	}
+
+	logger := logging.Open(logging.Options{Source: logging.SourceCLI})
+
+	if degraded := logger.Degraded(); degraded != nil {
+		t.Fatalf("an unset logging.path degraded: %s", degraded.Warning())
+	}
+
+	if got := logger.Path(); got != want {
+		t.Errorf("Path() = %q, want the resolved default %q", got, want)
+	}
+
+	logger.Post("resolved-default").Info(logging.EventMessageReceived)
+
+	if err := logger.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	raw, err := os.ReadFile(want)
+	if err != nil {
+		t.Fatalf("read the default state log: %v — an unset logging.path wrote nothing", err)
+	}
+
+	records := decodeRecords(t, raw)
+	if len(records) != 1 {
+		t.Fatalf("got %d records at %s, want 1", len(records), want)
+	}
+
+	if got := requireString(t, records[0], "message_id"); got != "resolved-default" {
+		t.Errorf("message_id = %q, want the one that was logged", got)
+	}
+}
+
+// TestOpenKeepsAnExplicitPathInsteadOfResolving pins the other direction of
+// #107's fix, so a resolution that ignored a configured value would fail here
+// rather than silently relocating every user's log.
+func TestOpenKeepsAnExplicitPathInsteadOfResolving(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+
+	want := filepath.Join(t.TempDir(), "chosen", "elsewhere.jsonl")
+
+	logger := logging.Open(logging.Options{Path: want, Source: logging.SourceCLI})
+
+	if degraded := logger.Degraded(); degraded != nil {
+		t.Fatalf("an explicit logging.path degraded: %s", degraded.Warning())
+	}
+
+	if got := logger.Path(); got != want {
+		t.Errorf("Path() = %q, want the configured %q", got, want)
+	}
+
+	logger.Post("explicit").Info(logging.EventMessageReceived)
+
+	if err := logger.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	if _, err := os.Stat(want); err != nil {
+		t.Fatalf("stat the configured log: %v", err)
+	}
+
+	// The default was resolvable throughout, so a mutant that resolved
+	// unconditionally would have written there instead and this is what catches
+	// it.
+	fallback, err := config.DefaultLogPath()
+	if err != nil {
+		t.Fatalf("resolve the default: %v", err)
+	}
+
+	if _, err := os.Stat(fallback); err == nil {
+		t.Errorf("a configured logging.path still wrote to the default %s", fallback)
+	}
+}
+
+// TestOpenDegradesWhenTheDefaultPathCannotBeResolved covers the arm #107's
+// chosen fix creates: resolution failing is a Degradation and not an error
+// return, so the no-error signature survives and FR-076 still holds.
+//
+// Not parallel and not table-driven with the shapes above, because it is the
+// only case that needs the process environment rather than a filesystem shape.
+func TestOpenDegradesWhenTheDefaultPathCannotBeResolved(t *testing.T) {
+	// Both the variable and the fallback have to be removed: DefaultLogPath
+	// falls back to $HOME/.local/state, so unsetting only XDG_STATE_HOME
+	// resolves perfectly well.
+	t.Setenv("XDG_STATE_HOME", "")
+	t.Setenv("HOME", "")
+
+	if _, err := config.DefaultLogPath(); err == nil {
+		t.Skip("this platform resolves a default state path with no HOME; the arm is unreachable here")
+	}
+
+	logger := logging.Open(logging.Options{Source: logging.SourceCLI})
+
+	degraded := logger.Degraded()
+	if degraded == nil {
+		t.Fatal("an unresolvable default log path did not degrade")
+	}
+
+	if degraded.Path != "" {
+		t.Errorf("degradation names path %q, but no path was resolved", degraded.Path)
+	}
+
+	if got := logger.Path(); got != "" {
+		t.Errorf("Path() = %q, want empty when nothing resolved", got)
+	}
+
+	const wantPrefix = "warning: diagnostics could not be written: "
+	if warning := degraded.Warning(); !strings.HasPrefix(warning, wantPrefix) {
+		t.Errorf("warning = %q, want it to start %q", warning, wantPrefix)
+	}
+
+	// FR-076: the post still runs.
+	logger.Post("id").Info(logging.EventMessageReceived)
+
+	if err := logger.Close(); err != nil {
+		t.Errorf("Close on a degraded logger: %v", err)
+	}
+}
+
+// TestOpenWithAWriterNeitherResolvesNorOpensAPath pins the exemption #107's fix
+// had to carve out. A supplied writer owns its destination, so resolving would
+// invent a path this package never touches and then name it in a degradation
+// about a write that failed somewhere else entirely.
+func TestOpenWithAWriterNeitherResolvesNorOpensAPath(t *testing.T) {
+	state := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", state)
+
+	var buf bytes.Buffer
+
+	logger := logging.Open(logging.Options{Writer: &buf, Source: logging.SourceCLI})
+
+	if got := logger.Path(); got != "" {
+		t.Errorf("Path() = %q, want empty — a supplied writer resolves nothing", got)
+	}
+
+	logger.Post("writer").Info(logging.EventMessageReceived)
+
+	if err := logger.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	if buf.Len() == 0 {
+		t.Fatal("the supplied writer received nothing")
+	}
+
+	entries, err := os.ReadDir(state)
+	if err != nil {
+		t.Fatalf("read the state dir: %v", err)
+	}
+
+	if len(entries) != 0 {
+		t.Errorf("the writer seam still touched the state directory: %v", entries)
 	}
 }

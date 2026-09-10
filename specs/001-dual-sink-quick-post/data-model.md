@@ -22,6 +22,32 @@ sent**; it exists only as an intermediate in the validation predicate. This is t
 easily broken rule in the feature (FR-011 vs. FR-009), so validation returns only a `bool`/`error`
 and never a string, making it structurally impossible to send the trimmed form by accident.
 
+**Validation, second rule** (FR-009a, decision DEC-D4, issue #104): a message carrying bytes that
+are not a valid UTF-8 encoding is invalid. The reading of FR-050 this rests on, and the evidence
+behind it, are recorded in `spec.md` beside FR-009a; the short form is that no destination keeps
+those bytes — the chat service refuses them, the JSON Lines log substitutes U+FFFD, and the note is
+re-serialised as UTF-8 at the user's next save — so accepting them produced a half-delivered post
+rather than the verbatim delivery FR-012 promises.
+
+Two sentinels, not one: `ErrEmptyMessage` and `ErrInvalidUTF8`, both matched by both front doors
+with `errors.Is`. They are distinct values because the two reasons have different fixes and a shared
+"invalid message" would tell a user with a mis-encoded terminal to try typing something.
+
+The two rules cannot both fire, and that is a property of trimming rather than of their order:
+`strings.TrimSpace` removes only runes for which `unicode.IsSpace` holds, and a byte that is not
+valid UTF-8 decodes to `utf8.RuneError` with a width of one and is not a space — so it survives
+trimming and the trimmed result is never empty. The blank check is written first because FR-009 is
+the rule the spec states.
+
+The check is `utf8.ValidString` and deliberately not a range loop over the string: a range loop
+yields `utf8.RuneError` both for an invalid byte and for a correctly encoded U+FFFD, so the loop
+form would refuse text the user is entitled to send.
+
+Note the scope: this is a rule about what a **front door accepts**. `Sink.Send` takes a `Message`
+and a `Message` is a struct literal any caller can build, so the sinks do not assume validation ran
+— `contracts/telegram-sink.md` records that the byte-preserving form encoding is kept as defence in
+depth for exactly that reason.
+
 **Derived, for diagnostics only** (R-010, FR-068): rune count and byte length.
 
 ---

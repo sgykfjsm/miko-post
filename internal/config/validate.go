@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"math"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -62,6 +63,36 @@ var layoutProbeTime = time.Date(2026, 9, 3, 21, 47, 53, 123456789, time.UTC)
 // both everywhere makes the accepted set the intersection, which is the only
 // set that means the same thing wherever the document is opened.
 const pathSeparators = `/\`
+
+// MaxTimeoutSeconds is the largest whole second any timeout key may hold: the
+// largest that still converts to a time.Duration without wrapping, about 292
+// years.
+//
+// It exists because bounding a timeout only from below is not a bound (issues
+// #109 and #114). Every consumer of these keys has to evaluate
+// `time.Duration(seconds) * time.Second`, and that multiplication overflows
+// int64 in silence. The dangerous residue is not the obvious one:
+//
+//	9223372037  -> -2562047h47m…   negative, and any floor catches it
+//	1 << 62     -> 0s              zero, and any floor catches it
+//	18446744074 -> 290.448384ms    positive, small, and nothing downstream can tell
+//	18446744075 -> 1.290448384s    the same
+//
+// The third and fourth rows are why this is a validation rule rather than a
+// clamp at each conversion. A user who wrote 18446744074 asked for ~584 years
+// and would have received a deadline three times tighter than the default they
+// were trying to raise, with every post then failing for a reason their own
+// settings file appears to contradict. Rejecting at load time is the only place
+// the user can still be told.
+//
+// Exported because the number is user-facing — it appears in the problem
+// message and in contracts/config-schema.md — and because a test that recomputed
+// it would be asserting its own arithmetic rather than the code's.
+//
+// On a platform where int is 32 bits the conversion cannot overflow at all, so
+// the upper check simply never fires; the constant is still correct there, it is
+// merely unreachable.
+const MaxTimeoutSeconds = int64(math.MaxInt64 / int64(time.Second))
 
 // ValidationError reports every problem found in one settings document.
 //
@@ -198,9 +229,36 @@ func (t TelegramSettings) validate(found *problems) {
 			strings.Join(acceptedParseModes, ", "), t.ParseMode)
 	}
 
-	if t.HTTPTimeoutSeconds <= 0 {
-		found.addf("sink.telegram.http_timeout_seconds must be greater than 0 (got %d)",
-			t.HTTPTimeoutSeconds)
+	validateTimeoutSeconds(found, "sink.telegram.http_timeout_seconds", t.HTTPTimeoutSeconds)
+}
+
+// validateTimeoutSeconds is the shared bound for every settings key holding a
+// number of seconds that a consumer converts to a time.Duration.
+//
+// One function rather than two copies because #109 and #114 are one defect
+// found twice, in posting.sink_timeout_seconds and in
+// sink.telegram.http_timeout_seconds, and the way that happened is that the
+// lower bound was written twice and the upper bound was forgotten in both. A
+// third timeout key added later gets the whole rule by calling this, or it gets
+// neither half and the omission is visible in the diff.
+//
+// The two arms are separate problems with separate messages on purpose. "Too
+// small" and "too large" need different corrections, and FR-055's accumulating
+// validation is only useful if what it accumulates is actionable.
+//
+// The upper message names the mechanism rather than only the limit. A bound of
+// 9223372036 looks arbitrary next to a value the user chose deliberately, and a
+// user told merely "must be at most 9223372036" would reasonably conclude the
+// program has an opinion about long timeouts; told that a larger value silently
+// becomes a fraction of a second, they can see it is arithmetic and not policy.
+func validateTimeoutSeconds(found *problems, key string, seconds int) {
+	switch {
+	case seconds <= 0:
+		found.addf("%s must be greater than 0 (got %d)", key, seconds)
+	case int64(seconds) > MaxTimeoutSeconds:
+		found.addf("%s must be at most %d (got %d); a larger value overflows the internal "+
+			"duration and would silently become a fraction of a second rather than the long "+
+			"timeout it reads as", key, MaxTimeoutSeconds, seconds)
 	}
 }
 
@@ -237,10 +295,7 @@ func (o ObsidianSettings) validate(found *problems, now time.Time) {
 }
 
 func (p PostingSettings) validate(found *problems) {
-	if p.SinkTimeoutSeconds <= 0 {
-		found.addf("posting.sink_timeout_seconds must be greater than 0 (got %d)",
-			p.SinkTimeoutSeconds)
-	}
+	validateTimeoutSeconds(found, "posting.sink_timeout_seconds", p.SinkTimeoutSeconds)
 }
 
 func (g GUISettings) validate(found *problems) {

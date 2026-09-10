@@ -33,7 +33,7 @@ rather than a silent no-op.
 | `thread_id` | int | *absent* | Optional. **Absence**, not a sentinel, means "post to the chat directly" (FR-032, A-006). |
 | `parse_mode` | string | `"MarkdownV2"` | Accepted and validated, **inert in v0.1** (FR-034) |
 | `fallback_to_plain_text` | bool | `true` | Accepted and validated, **inert in v0.1** (FR-034) |
-| `http_timeout_seconds` | int | `30` | > 0 (FR-040) |
+| `http_timeout_seconds` | int | `30` | > 0 and <= `9223372036` (FR-040). See **Timeout bounds** below. |
 
 **Credential precedence** (FR-042): `MIKO_POST_TELEGRAM_BOT_TOKEN` wins over `bot_token`. It is
 the only setting with an environment override in v0.1.
@@ -78,7 +78,27 @@ document cannot inflate the FR-058 message or the FR-064 log line.
 
 | Key | Type | Default | Validation |
 |---|---|---|---|
-| `sink_timeout_seconds` | int | `60` | > 0. Applied **independently** to each sink (FR-015). |
+| `sink_timeout_seconds` | int | `60` | > 0 and <= `9223372036`. Applied **independently** to each sink (FR-015). See **Timeout bounds** below. |
+
+#### Timeout bounds
+
+Both timeout keys are bounded **above** as well as below, at `9223372036` seconds (about 292
+years) — the largest whole second that survives conversion to the internal duration type.
+
+The upper bound is not a policy about how long a timeout may be. It is arithmetic. A consumer has
+to convert the configured seconds into a duration, and a value beyond the bound wraps:
+
+| Configured | Converted | Bounded from below alone? |
+|---|---|---|
+| `9223372037` | `-2562047h47m…` | caught — negative |
+| `4611686018427387904` | `0s` | caught — zero |
+| **`18446744074`** | **`290.448384ms`** | **not caught — positive and small** |
+| **`18446744075`** | **`1.290448384s`** | **not caught** |
+
+The last two rows are why the bound exists: they are accepted by any "> 0" rule, and a user who
+asked for ~584 years would silently get a deadline tighter than the default they were raising.
+Recorded from issues #109 (`posting`) and #114 (`sink.telegram`); both keys are checked by one
+shared rule in `internal/config/validate.go` so a third timeout key cannot acquire only half of it.
 
 ### `[gui]`
 

@@ -1,6 +1,29 @@
 <!--
 Sync Impact Report
 ==================
+Version change: 1.0.0 → 1.0.1
+Bump rationale: PATCH. Principle VI gains one clarifying sentence stating the scope of its
+UTF-8 requirement. No principle changes meaning and nothing previously permitted becomes
+forbidden by the clarification itself — it records which of two available readings of an
+already-present sentence governs, so that the reading is written down rather than re-derived.
+
+Modified principles:
+  VI. Data Preservation — clarified: "Written text MUST be UTF-8 with LF line endings"
+      governs what the application accepts and emits, not only the encoding of the file it
+      writes. A message that is not valid UTF-8 is therefore refused before any destination
+      is contacted. The clause's data-preservation half is unchanged and is expressly not
+      engaged by a refusal, since nothing is opened and nothing is written.
+
+Added sections: none
+Removed sections: none
+Deferred TODOs: none
+
+Origin: issue #104, decision DEC-D4, taken by the maintainer on 2026-09-09 and implemented in
+Batch 6c-1. FR-050 in specs/001-dual-sink-quick-post/spec.md carries the same sentence and the
+same ambiguity; the reading is recorded there beside FR-009a, with the evidence, the accepted
+cost, and the one observation that would reopen it.
+
+-----------------------------------------------------------------------------
 Version change: (uninitialized template) → 1.0.0
 Bump rationale: Initial ratification. All placeholder tokens replaced with concrete,
 project-specific governance derived from the approved MVP design document
@@ -97,12 +120,22 @@ same tool. Keeping the algorithm out of the config file keeps the semantics one 
 ### VI. Data Preservation
 
 Appends to a user's notes MUST open the target in append mode and MUST NEVER rewrite, truncate,
-or reorder existing content. Written text MUST be UTF-8 with LF line endings. Rotated logs MUST
+or reorder existing content. Written text MUST be UTF-8 with LF line endings. **That encoding
+requirement governs what the application accepts as well as what it writes: input that is not
+valid UTF-8 MUST be refused before any sink is invoked, rather than delivered to whichever sinks
+happen to tolerate it or silently rewritten into replacement characters.** Rotated logs MUST
 be retained; the application MUST NOT automatically delete or expire any user data or log file.
 Destructive behavior MUST NOT be introduced without an explicit amendment to this constitution.
 
 Rationale: This tool writes into a personal knowledge vault that the user did not ask it to
 manage. Its write privilege is strictly additive.
+
+The clarifying sentence is a scope statement, not a new rule, and refusing input is not deletion:
+nothing has been opened and nothing written, so the preservation clause is not engaged. It is
+recorded because the alternative reading was reachable and worse — under it a message reached one
+destination of two, in a form that decays to replacement characters at the user's next save, with
+no recoverable copy anywhere, which is the loss this principle exists to forbid arriving by a route
+its wording did not name.
 
 ## Additional Constraints
 
@@ -150,4 +183,4 @@ expanded guidance; PATCH for clarifications, wording, and non-semantic refinemen
 principles before merge. Added complexity MUST be justified against the principle it serves.
 Unresolved ambiguity MUST be surfaced explicitly rather than resolved by silent assumption.
 
-**Version**: 1.0.0 | **Ratified**: 2026-09-01 | **Last Amended**: 2026-09-01
+**Version**: 1.0.1 | **Ratified**: 2026-09-01 | **Last Amended**: 2026-09-09

@@ -371,11 +371,222 @@ completed:
           obligation, not a type invariant. data-model.md has been corrected in this batch;
           secret.go's comment still says "exactly one place".
 
-in_progress: []
+in_progress:
+  - id: 6c-1
+    name: "US1 front door and wiring"
+    tasks: [T029, T036, T037, T038, T039]
+    issues: [30, 37, 38, 39, 40]
+    also_discharges: [107, 109, 114]
+    branch: sgykfjsm/batch-6c-us1-front-door
+    state: implemented-not-reviewed
+    commit: PENDING
+    coverage: "internal/app 100.0%, internal/cli 100.0%, internal/post 100.0%, internal/config 99.0%, internal/logging 99.5%, cmd/mp 0.0% (its tests drive a child process)"
+    split_from: 6c
+    split_reason: >-
+      Two review lenses, not one: does the binary do the right thing (argv -> exit status ->
+      rendered output), and does it say the right thing (event names, field shapes, redaction,
+      per-post path). Six tasks plus six inherited issues plus three structural decisions, where
+      6a was four tasks and needed four review cycles and 6b four tasks and three. The risky half
+      is separable and should be reviewed alone.
+    known_oddity_between_the_two_prs: >-
+      Between 6c-1 and 6c-2 the binary writes an empty log file whose path it prints on failure.
+      Odd-looking but not wrong, and better than one six-task PR nobody can review in a pass.
+    decisions:
+      - id: DEC-D1
+        decision: >-
+          Sink construction, logger construction, the seconds-to-Duration conversion and the
+          Recorder adapter all live in a new internal/app package - the composition root. T036's
+          recorded path internal/post/build.go is abandoned. cmd/mp stays what plan.md says it is:
+          parse argv via internal/cli, call app.*, dispatch, one os.Exit.
+        why: >-
+          internal/post/build.go cannot compile - the sinks import internal/post to implement
+          post.Sink, so internal/post constructing them is a cycle. cmd/mp was the obvious
+          alternative and is wrong for a specific reason: internal/gui cannot import package main,
+          and #111's cheapest fix puts sink construction on the GUI's submit path rather than its
+          constructor, so betting on "the GUI never builds a sink" bets against a fix this batch
+          should make. internal/sink (the empty parent package) was the closest runner-up and was
+          rejected because it can host T036 and nothing else, leaving wiring in two places. One
+          composition root beats two.
+        costs: >-
+          plan.md's Source Code layout does not list internal/app - a planning amendment is owed.
+          T036's and T039's recorded file paths become wrong and must be corrected in tasks.md and
+          issue #37 in the same change. internal/app must import no front door or the cycle returns
+          from the other side; worth an import-graph assertion in make check, since this repo already
+          treats the compiler as the enforcement mechanism for principle II.
+      - id: DEC-D2
+        decision: >-
+          internal/post keeps its invariant of importing no other internal package. T040 emits
+          through a domain-shaped post.Recorder interface declared in internal/post; the mapping
+          onto logging.Event lives in internal/app. New(sinks, timeout, rec) is nil-tolerant, so a
+          nil Recording is a no-op and every batch-5 test stays valid unchanged.
+        why: >-
+          The invariant is load-bearing, and the evidence is not that three PR bodies call it a
+          guarantee. service.go:79-82 cites it as the reason for a shipped design choice - Service
+          takes a time.Duration rather than config.Settings precisely so the settings tree does not
+          sit behind the posting core. And go list -deps shows internal/logging imports
+          internal/config, so post -> logging reintroduces post -> config transitively: the exact
+          dependency service.go refuses, arriving by the back door. plan.md's Structure Decision
+          says package boundaries are how constitution principle II is enforced by the compiler
+          rather than by review.
+        counter_argument_considered: >-
+          internal/post already imports log/slog, and a concrete *logging.PostLogger would give
+          higher-fidelity tests - real JSON bytes - which matters given this project's defect
+          history. Right about fidelity, wrong about where to buy it: the interface keeps the
+          boundary and the fidelity is bought back by testing the ADAPTER against a real
+          logging.Logger{Writer: buf}. Every trap on #41's acceptance list (duration_ms in
+          nanoseconds, the seven reserved keys, Redact omitted) is a record-shape bug, not an
+          orchestrator bug.
+        costs: >-
+          One indirection the logging package's source-scan test cannot see: it scans
+          internal/logging's own source and cannot tell that the adapter never produces a given
+          event name. 6c-2 MUST include an adapter test asserting the set of names the adapter can
+          produce equals the orchestrator-reachable subset of logging.AllEvents(), so an unmapped
+          name fails rather than silently never firing. Also a public interface in a package whose
+          minimalism is a documented value, and two suites instead of one.
+      - id: DEC-D3
+        decision: >-
+          The orchestrator installs a per-call target reporter on the context; the obsidian sink
+          calls it the instant it resolves the note path, before any I/O, and the orchestrator emits
+          obsidian_append_started with the real path at that call. post.Targeter is deprecated.
+        why: >-
+          Issue #98's acceptance box 1 requires path on all three obsidian_append_* events, and it
+          is NOT achievable as specified: setTarget runs at sink.go:190, inside Send, while the
+          orchestrator emits _started before Send is entered - so Target() holds the previous post's
+          value or "". #98 was written before an implementer existed and did not notice. Of the
+          three ways out, only this one closes #98 box 1 and #111 at the same time and by
+          construction: the value never leaves the goroutine, so it is per-post rather than
+          per-Sink. It also keeps post.Sink at two methods, which #98's own acceptance requires.
+          #111's own text already points here.
+        costs: >-
+          It edits merged Batch 6a code and deprecates an interface shipped one batch ago. The
+          alternatives were cheaper and both worse: emitting _started without path needs a contract
+          amendment and leaves #111 open, and building sinks per post closes #111 but does not fix
+          _started at all and costs the Telegram sink its keep-alive.
+        decided_by: user
+      - id: DEC-D4
+        decision: >-
+          post.Message.Validate rejects a message containing invalid UTF-8, with its own sentinel
+          ErrInvalidUTF8 alongside ErrEmptyMessage. FR-010's correction prompt fires, no destination
+          is contacted, and the exit status is a failure. Decided by the user on 2026-09-09, before
+          6c-1 was implemented, so the guard lands with the front door rather than being retrofitted.
+        why: >-
+          Not because the spec requires it - the spec is silent and its two relevant clauses
+          contradict. Because the alternative's central promise is false: no destination keeps the
+          bytes. Telegram appears to refuse them outright (tdlib's clean_input_string starts with
+          check_utf8 and returns 400 "Strings must be encoded in UTF-8", whose description does not
+          match the rescue predicate, so the sink fails closed); slog's JSON handler substitutes
+          U+FFFD silently, measured, which makes SC-008 and FR-068 unsatisfiable for exactly these
+          messages; and Obsidian is UTF-8-only, so the note's copy becomes U+FFFD at the user's next
+          save. The real status-quo behaviour is therefore obsidian succeeds, telegram fails, exit 1
+          - a half-delivered post, which is the outcome the two-sink design exists to prevent. Under
+          both options the user has to retry; this one tells them while their text is still in front
+          of them.
+        accepted_cost: >-
+          A user whose terminal reliably produces non-UTF-8 bytes - a legacy Shift_JIS or EUC-JP
+          locale is the realistic case - cannot use the CLI front door until they fix their locale.
+          Not a regression in outcome, since today they get a half-delivered post every time with no
+          recoverable record, but it is a real change for them. If such a user turns up, option C
+          (accept, plus a base64 copy in the failure record) is the humane answer.
+        decisive_unknown: >-
+          Whether Telegram refuses or accepts-and-substitutes was NOT confirmed against the live API
+          - no token here, and the constitution keeps live-service calls out of the test suite. The
+          evidence is the Bot API documentation plus tdlib source. If it is ever checked and Telegram
+          accepts %FF, the failure becomes cosmetic rather than partial and option C becomes better.
+          One sendMessage with text=a%FFb against a throwaway bot settles it; the result belongs in
+          issue #104.
+        decided_by: user
+        owed_beyond_code: >-
+          spec.md and data-model.md must record the reading, and constitution principle VI needs a
+          clarifying sentence with a PATCH bump and a Sync Impact Report entry, because FR-050 and
+          principle VI carry the same ambiguous sentence. contracts/cli-interface.md and
+          gui-interface.md gain the second rejection reason. contracts/telegram-sink.md's DEC-C1
+          section must say deliberately whether form encoding is kept as defence in depth or removed
+          as redundant - recommendation: keep it, because a Message can be constructed without
+          passing a front door, so the sink should not assume validation ran.
+    implementation_notes:
+      landed:
+        - "T036 in internal/app/app.go (NOT internal/post/build.go - see DEC-D1). Asserted by Name() across all four enabled/disabled combinations."
+        - "T037 in internal/cli/cli.go: Parse -> Invocation{Mode, Message, ConfigPath}. --config dropped for the window path so FR-005 is structural."
+        - "T038 in internal/cli/render.go: Render(out, errOut, Report{Results, LogPath, Warning})."
+        - "T039 split across cmd/mp/main.go (dispatch + the single os.Exit), internal/app/app.go (construction) and internal/cli/run.go (the CLI run sequence)."
+        - "T029 in internal/cli/cli_test.go, plus cmd/mp/main_test.go which builds the real binary and asserts real process exit statuses."
+        - "DEC-D4: post.ErrInvalidUTF8 alongside ErrEmptyMessage; utf8.ValidString in Message.Validate."
+        - "#107: logging.Open resolves an empty Path itself; a resolution failure is an ordinary Degradation, so the no-error signature survives. Logger.Path() added, because after the fix the caller no longer knows the resolved path and FR-063 requires printing it."
+        - "#109 + #114: one shared validateTimeoutSeconds guard bounding both keys by config.MaxTimeoutSeconds; recorded in contracts/config-schema.md."
+        - "internal/sink/obsidian gained the byte-exactness test it lacked (owed whichever way #104 went)."
+      layering_assertion: >-
+        internal/app/layering_test.go walks the module's import graph from source and enforces both
+        DEC-D1's "internal/app imports no front door" and DEC-D2's "internal/post imports no other
+        internal package". Verified by two real mutants: a blank import of internal/gui in
+        internal/app, and of internal/logging in internal/post - both compile, both are caught.
+        Also carries positive edge assertions, so a walker that dropped every edge cannot make the
+        rules vacuous.
+      deliberate_gaps:
+        - "FR-006 (T079): mp -c x.toml with no message opens the window on the DEFAULT settings. FR-005 holds; FR-006 does not. T079 needs to know the flag was supplied and will have to add a field to Invocation."
+        - "FR-007 (T080): --help is recognised and refused with cli.ErrHelpNotAvailable, exit 1 where the contract requires 0. The sentinel exists to be deleted by T080."
+        - "FR-002 (batch 7): no arguments prints that the window is unimplemented and exits 1."
+        - "FR-018 (T081): both destinations disabled reports 'No destination is enabled, so nothing was posted.' after the fact and exits 1, rather than refusing beforehand."
+        - "All four are recorded in contracts/cli-interface.md under 'Not yet implemented', and each has a test pinning today's behaviour so the fix is a deliberate change and not a discovery."
+      mutation_run:
+        built: 46
+        killed: 44
+        did_not_compile: 2
+        survivors_at_the_end: 0
+        one_survivor_found_and_fixed: >-
+          Duplicating the ErrEmptyMessage case in correctionPrompt survived. The invalid-UTF-8 row
+          fell through to the default arm, which repeats the sentinel's own text - and that text
+          contains "UTF-8", which was what the assertion matched. Both the CLI and the process tests
+          now match a phrase only the written prompt supplies ("Type a message and try again.",
+          "switch it to UTF-8 and try again.") and additionally assert the other prompt is absent.
+          Same class as the previous four batches: a perfectly written assertion that could not fail.
+      process_test_evidence:
+        - "os.Exit hard-coded to 1: the whole of ./internal/... stays green; only cmd/mp fails."
+        - "stdout wrapped in a defer-flushed bufio.Writer: the whole of ./internal/... stays green; three cmd/mp tests fail with empty stdout."
+        - "Partial failure is reachable offline via bot_token = \"%zz\", which makes url.JoinPath fail while the request URL is assembled - the sink fails before any socket is opened."
+      spec_artifacts_touched:
+        - "spec.md: FR-009a added, with the reading of FR-050 it rests on, the evidence, the accepted cost and the unverified observation. New Edge Case for invalid UTF-8."
+        - "data-model.md: Message gains the second validation rule, the two sentinels, the mutual-exclusion argument and the utf8.ValidString-not-range-loop note."
+        - "contracts/cli-interface.md: Message rejection section, the exactly-one-warning clause, and a Not yet implemented table."
+        - "contracts/gui-interface.md: Message rejection section (it did not previously enumerate any)."
+        - "contracts/config-schema.md: upper bound on both timeout keys plus a Timeout bounds subsection with the wrap table."
+        - "contracts/telegram-sink.md: DEC-C1's form encoding KEPT as documented defence in depth; DEC-C3's clamp KEPT as the second of two independent guards. Both settled deliberately, with reasons."
+        - "plan.md: internal/app added to the Source Code layout, with the rejected alternatives and the layering assertion."
+        - ".specify/memory/constitution.md: 1.0.0 -> 1.0.1, principle VI clarifying sentence, Sync Impact Report entry."
+      spec_amendments_owed: []
+      still_owed_by_104: >-
+        Two acceptance boxes are not this batch's to close. #113 must be closed as a duplicate of
+        #104, and #104 itself must record that Telegram's response to a percent-encoded invalid byte
+        was NOT verified against the live service - the decision was taken on the Bot API
+        documentation plus tdlib's source. Both are issue admin, not code.
+      issue_body_correction_owed: >-
+        Issue #37's body still says internal/post/build.go. tasks.md has been corrected; the issue
+        has not. Flagged for the maintainer rather than edited, since this run was not authorised to
+        push or to modify issues.
+    blocked_on: []
+    discharges_decision_issue: 104
+    also_owed_by_this_batch:
+      - "DONE: the byte-exactness test internal/sink/obsidian lacked. TestTheMessageBodyIsWrittenByteForByte, fourteen rows, killed by two mutants (a TrimSpace and a ToValidUTF8 in Entry). Its invalid-UTF-8 rows construct their Message directly, deliberately, for the same reason DEC-C1's form encoding is kept."
+  - id: 6c-2
+    name: "Event emission"
+    tasks: [T040]
+    issues: [41]
+    also_discharges: [98, 110, 111]
+    state: blocked-on-6c-1
+    note: >-
+      T040 plus the Recorder seam and the adapter. Carries #41's four acceptance riders, #98 boxes
+      1-3, #110 (nameOf can hand the recovered panic value to the Recorder - about ten lines, and
+      deferring to T073 ships a known-invisible failure for four more batches), and #111 via DEC-D3.
+    open_question: >-
+      error_type is T056 (batch 8) and does not exist yet; SinkResult.Reason is two constants today.
+      6c-2 must decide whether to emit error_type from those constants now or omit it until T056 -
+      and say which. Similarly FR-068's message-on-error body is T071 (batch 10): recommend emitting
+      no message field at all, only message_len, and stating that FR-068 is knowingly unmet until
+      then rather than letting it read as an oversight.
 blockers: []
 
 time_sensitive:
   - issue: 114
+    resolved_in: 6c-1
     note: >-
       config.Validate bounds sink.telegram.http_timeout_seconds only from below, exactly as it
       does sink_timeout_seconds, and 18446744074 wraps to a positive 290ms HTTP deadline that
@@ -384,6 +595,7 @@ time_sensitive:
       behave sanely but silently; the user-visible rejection belongs in internal/config.
     deadline: now - T035 has shipped the conversion
   - issue: 109
+    resolved_in: 6c-1
     note: >-
       config.Validate bounds sink_timeout_seconds only from below, and 18446744074 wraps to a
       positive 290ms deadline that defeats both guards batch 5 added. Owned by whichever task
@@ -395,6 +607,7 @@ time_sensitive:
       T073 could use it, so closing this needs a change in nameOf itself.
     deadline: with or before T073
   - issue: 107
+    resolved_in: 6c-1
     note: >-
       logging.Open does not apply ResolvePath, so a Logger built from settings with logging.path
       unset - the default - silently writes nothing. Owned by T039, which wires settings, logging
@@ -419,19 +632,22 @@ time_sensitive:
     deadline: before tagging v0.1.0
 
 next_best_action: >-
-  Run run-batch-cycle for Batch 6c - the US1 front door and wiring. Both sinks are merged, so its
-  prerequisites are met.
+  Review the Batch 6c-1 branch (sgykfjsm/batch-6c-us1-front-door), then implement 6c-2 (T040, issue
+  #41, plus #98 boxes 1-3, #110 and #111 via DEC-D3).
 
-  SETTLE THE BLOCKER FIRST, it is a decision and not code: T036 places build.go in internal/post,
-  which cannot compile, because the sink packages import internal/post to implement post.Sink.
-  Decide the placement - cmd/mp, or a small wiring package - before implementation starts. See
-  batch_6_split.6c_blocker.
+  6c-1 is committed but NOT pushed and has no PR; the run was authorised to commit only. Its
+  proposed PR title and body are in the batch report.
 
-  6c also inherits five obligations earlier batches correctly declined: #107 (logging.Open ignores
-  ResolvePath, so a default install writes no diagnostics), #41 (T040's event emission, which is
-  also what makes Options.Redact non-inert), #98 boxes 1-3, #110, #111. T040 must reach
-  *telegram.APIError via errors.As for http_status, and must exclude errContradictoryStatus when
-  Batch 9 writes the rescue predicate.
+  Three things 6c-2 inherits from 6c-1 rather than from the original plan. The composition root is
+  internal/app, so the Recorder adapter goes there and not in cmd/mp. internal/app/layering_test.go
+  now fails the build if internal/post acquires any internal import, so DEC-D2 is enforced rather
+  than remembered. And internal/cli/run.go is where a front door's run sequence lives, so whatever
+  T040 needs the front door to pass in has one place to be added.
+
+  Two issue-admin items #104's acceptance still owes and 6c-1 could not close: #113 must be closed
+  as a duplicate of #104, and #104 must record that Telegram's handling of a percent-encoded
+  invalid byte was never verified against the live service. Also: issue #37's body still names
+  internal/post/build.go.
 
 review_followups_filed:
   filed_at: 2026-09-07
@@ -507,7 +723,8 @@ batch_6_split:
   parts:
     - {id: 6a, name: "Obsidian daily-note sink", tasks: [T027, T030, T031, T032], issues: [28, 31, 32, 33], package: internal/sink/obsidian, surface: filesystem, pr: 112, state: merged, squashed_as: 69e17e3}
     - {id: 6b, name: "Telegram sink", tasks: [T028, T033, T034, T035], issues: [29, 34, 35, 36], package: internal/sink/telegram, surface: HTTP, pr: 116, state: merged, squashed_as: 13705e0}
-    - {id: 6c, name: "US1 front door and wiring", tasks: [T029, T036, T037, T038, T039, T040], issues: [30, 37, 38, 39, 40, 41], packages: [internal/cli, cmd/mp, internal/post], surface: "process, exit status", state: ready, requires: [6a, 6b], requires_met: true, branch: sgykfjsm/batch-6c-us1-front-door}
+    - {id: 6c-1, name: "US1 front door and wiring", tasks: [T029, T036, T037, T038, T039], issues: [30, 37, 38, 39, 40], also_discharges: [104, 107, 109, 114], packages: [internal/app, internal/cli, cmd/mp], surface: "process, exit status", state: implemented-not-reviewed, requires: [6a, 6b], requires_met: true, branch: sgykfjsm/batch-6c-us1-front-door}
+    - {id: 6c-2, name: "Event emission", tasks: [T040], issues: [41], also_discharges: [98, 110, 111], packages: [internal/post, internal/app], surface: "log records", state: blocked-on-6c-1, requires: [6c-1]}
   6c_owns: [107, 41, 98, 109, 110, 111]
   6c_blocker: >-
     T036 places build.go in internal/post, which cannot compile: the sink packages import
@@ -548,6 +765,27 @@ touched_files:
   - internal/logging/export_test.go
   - internal/post/service.go
   - internal/post/service_test.go
+  - internal/post/message.go
+  - internal/post/message_test.go
+  - internal/app/doc.go
+  - internal/app/app.go
+  - internal/app/app_test.go
+  - internal/app/layering_test.go
+  - internal/cli/cli.go
+  - internal/cli/render.go
+  - internal/cli/run.go
+  - internal/cli/export_test.go
+  - internal/cli/cli_test.go
+  - cmd/mp/main.go
+  - cmd/mp/main_test.go
+  - internal/logging/logger_test.go
+  - internal/sink/obsidian/sink_test.go
+  - internal/sink/telegram/sink_test.go
+  - specs/001-dual-sink-quick-post/spec.md
+  - specs/001-dual-sink-quick-post/contracts/cli-interface.md
+  - specs/001-dual-sink-quick-post/contracts/gui-interface.md
+  - specs/001-dual-sink-quick-post/contracts/telegram-sink.md
+  - .specify/memory/constitution.md
 
 assumptions:
   - >-

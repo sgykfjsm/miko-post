@@ -37,9 +37,48 @@ accident, through a library's silent substitution, is the failure this encoding 
 not part of this claim**. The claim is narrower, and is the only one a sink can honour: we do not
 rewrite the user's bytes on the way out.
 
-#113 is still open and is a `Message`-layer question. If it is answered by rejecting invalid UTF-8
-in `Message.Validate`, this section stays true and stops mattering; if it is answered the other way,
-this is the encoding that keeps the two sinks agreeing.
+#### Settled in Batch 6c-1: the form encoding is **kept**, as documented defence in depth
+
+Issue #104 (of which #113 is the duplicate) has been answered, and it was answered the way this
+section anticipated: `Message.Validate` now rejects invalid UTF-8 (decision DEC-D4), so no front
+door delivers those bytes to this sink any more.
+
+The encoding stays, deliberately rather than by omission, and the reason is not sentiment about the
+work already done. `Send` takes a `post.Message`, and a `post.Message` is a struct literal that any
+caller can build; nothing in the type system says a value reaching this sink has been through
+`Validate`. A sink that assumed validation had run would be trusting a caller it cannot see, and the
+cost of not trusting is zero — form encoding is not slower, not longer, and not harder to read than
+a JSON body. Removing it would buy nothing and would put the U+FFFD substitution back one refactor
+away, in a package whose worst outcome class is "reported delivered, arrived different".
+
+It is also the guard that is already in place if DEC-D4 is ever reversed. #104 records exactly what
+would reverse it — chiefly, confirmation that the Bot API accepts `%FF` rather than answering `400`,
+which was never checked against the live service.
+
+The byte-exactness assertions for invalid sequences are kept alongside it, in
+`internal/sink/telegram/sink_test.go`, and construct their `Message` through a helper that asserts
+`Validate` really would refuse the bytes — so a row that stopped being a bypass fails rather than
+quietly becoming a duplicate of the ordinary case.
+
+### Request timeout — the in-package clamp is **kept** (DEC-C3, issue #114)
+
+`sink.telegram.http_timeout_seconds` is now bounded above as well as below by
+`config.Validate` (see `contracts/config-schema.md`, **Timeout bounds**), so a settings document
+carrying `18446744074` is refused at load time with a message the user can act on. That is #114's
+real fix and it has landed.
+
+`requestTimeout`'s clamp inside this package is **kept**, and #114's acceptance requires that choice
+to be made deliberately. The reasoning is the same as for the form encoding above and rests on the
+same fact: `New` is exported and does not require validated settings — this package's own tests
+construct a `config.TelegramSettings` directly, and so may any future caller. The floor is the part
+that would actually be missed: `http.Client` reads `Timeout: 0` as *unbounded*, so a zero-valued
+settings struct without the floor produces a request with no limit at all rather than FR-040's 30
+seconds, which is a worse failure than the one the ceiling prevents.
+
+What changed is the clamp's status, and the comment on `maxRequestTimeoutSeconds` says so: it is no
+longer an interim measure standing in for a validation fix that had not been written. It is the
+second of two independent guards, and the validation layer is the one that talks to the user.
+Neither guard's test may be deleted on the grounds that the other exists.
 
 ## Verbatim rule (FR-033)
 

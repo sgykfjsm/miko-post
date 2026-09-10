@@ -454,3 +454,53 @@ decision.
 cannot live in `internal/post`. T040 must reach `*telegram.APIError` via `errors.As` for
 `http_status`, and must exclude `errContradictoryStatus`, which now also covers refused redirects
 whose body parses.
+
+## Batch 6c-1 — the US1 front door (branch `sgykfjsm/batch-6c-us1-front-door`, 2026-09-10)
+
+T029, T036, T037, T038, T039 (#30, #37, #38, #39, #40), plus #107, #109, #114 and the #104
+decision. `mp "hello world"` now posts to both sinks and exits on the aggregate. Awaiting review.
+
+**Three structural decisions were settled and written down before a line was implemented** — the
+first time in this project that happened in that order. `DEC-D1` puts the composition root in a new
+`internal/app`, because T036's recorded `internal/post/build.go` cannot compile: the sinks import
+`internal/post` to implement `post.Sink`. `cmd/mp` was the obvious alternative and is wrong for a
+specific reason — `internal/gui` cannot import `package main`, and #111's cheapest fix puts sink
+construction on the GUI's *submit* path. `DEC-D2` keeps `internal/post` importing nothing internal,
+which is load-bearing rather than stylistic: `service.go:79-82` cites it as the reason `Service`
+takes a `time.Duration` instead of `config.Settings`, and `internal/logging` imports
+`internal/config`, so `post → logging` would reintroduce exactly that dependency transitively.
+`DEC-D3` replaces `Targeter` with a context-installed target reporter, which is 6c-2's to build.
+
+**The invariant is now enforced by a test rather than by habit.** `internal/app/layering_test.go`
+parses the source and fails if `internal/post` acquires an internal import or if `internal/app`
+acquires a front door. Every review since Batch 5 has verified that property by hand; now the suite
+does.
+
+**`DEC-D4` — invalid UTF-8 is rejected at validation.** The decision (#104) turned on three things
+none of which were known when #104 and #113 were filed, and the framing it arrived with was wrong.
+It is not "reject versus store verbatim": the log substitutes U+FFFD silently (measured, so SC-008
+and FR-068 are unsatisfiable for exactly these messages), Telegram appears to refuse rather than
+substitute (tdlib's `check_utf8`, so the sink fails closed and the post half-delivers), and Obsidian
+rewrites the note at the user's next save. **No destination keeps the bytes.** The real choice was
+between refusing, and accepting a post that reaches one destination of two and cannot be
+reconstructed from its own failure log. The accepted cost is recorded honestly: a user on a legacy
+Shift_JIS locale loses the CLI until they fix it, and Option C is the humane answer if such a user
+appears. Whether Telegram truly refuses is unverified without a live token and is recorded as the
+decisive unknown.
+
+**One thing this batch caught that is worth generalising.** A stray `internal/app/2026-09-09.md`
+was found in the working tree — an Obsidian daily note, mode 0600, written *into the source
+package*. It was residue from a mutation run, not the passing suite: the mutant swaps the sinks'
+settings, so the obsidian sink gets an empty `DailyNoteDir` and `filepath.Join("", …)` resolves
+relative to the package directory. The mutant proved itself by leaving evidence on disk. Confirmed
+by deleting it and re-running the suite clean. **A mutation harness that copies the tree is not
+enough when the code under test writes to the filesystem — the mutant can escape the copy through
+a relative path.** Worth checking `git status` after every mutation run, not just the exit code.
+
+**What 6c-2 owes.** T040, the `Recorder` seam and the adapter, #41's four riders, #98 boxes 1–3,
+#110, and #111 via DEC-D3. `DEC-D2` carries a mandatory obligation: the logging package's
+source-scan test cannot see the adapter, so 6c-2 must assert that the set of event names the
+adapter can produce equals the orchestrator-reachable subset of `AllEvents()` — otherwise an
+unmapped event silently never fires. Two open questions to answer rather than default: whether
+`error_type` is emitted from today's two `Reason` constants or omitted until T056, and whether the
+`message` field is omitted entirely until T071 with only `message_len` recorded.
