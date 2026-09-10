@@ -24,7 +24,7 @@ func enabledSettings(t *testing.T) config.Settings {
 
 	settings := config.Defaults()
 	settings.Sink.Telegram.Enabled = true
-	settings.Sink.Telegram.BotToken = config.NewSecret("token")
+	settings.Sink.Telegram.BotToken = config.NewSecret("1234567890:AA-a-realistic-length-token")
 	settings.Sink.Telegram.ChatID = "-100123"
 	settings.Sink.Obsidian.Enabled = true
 	settings.Sink.Obsidian.DailyNoteDir = t.TempDir()
@@ -1082,5 +1082,89 @@ func TestTheTimeoutBoundIsTheOneThatCannotOverflow(t *testing.T) {
 	if past > 0 {
 		t.Errorf("one second past the bound converts to %s, which is still positive — "+
 			"the bound is lower than it needs to be, or the wrap point moved", past)
+	}
+}
+
+// TestValidateBoundsBotTokenLength is issue #117, and the case that matters is
+// the disabled one.
+//
+// The token is handed to internal/logging as a redaction pattern whether or not
+// the chat destination is enabled — deliberately, so a token left behind by a
+// user who switched the sink off still stays out of the diagnostics. The scrub
+// is an unanchored substring replacement, so a short value does not redact the
+// credential, it rewrites every field it appears inside. A rule that only
+// applied when the sink was enabled would leave that path open, which is the
+// state that was measured: with bot_token = "a", one record came back with
+// event, sink and message_id all corrupted.
+//
+// Absence is not shortness. An absent token arms no pattern at all, so the
+// bound must not fire on it — whether absence is allowed is the separate
+// required-when-enabled question, and the two must not be confused. The
+// "absent, sink disabled" row is what pins that.
+func TestValidateBoundsBotTokenLength(t *testing.T) {
+	t.Parallel()
+
+	atBound := strings.Repeat("x", config.MinBotTokenLength)
+	oneShort := strings.Repeat("x", config.MinBotTokenLength-1)
+
+	cases := []struct {
+		name     string
+		token    string
+		absent   bool
+		enabled  bool
+		accepted bool
+	}{
+		{name: "a realistic token, enabled", token: "1234567890:AA-a-realistic-length-token", enabled: true, accepted: true},
+		{name: "a realistic token, disabled", token: "1234567890:AA-a-realistic-length-token", accepted: true},
+		{name: "exactly at the bound, enabled", token: atBound, enabled: true, accepted: true},
+		{name: "exactly at the bound, disabled", token: atBound, accepted: true},
+		{name: "one character short, enabled", token: oneShort, enabled: true},
+		{name: "one character short, disabled", token: oneShort},
+		{name: "a single character, enabled", token: "a", enabled: true},
+		{name: "a single character, disabled", token: "a"},
+		{name: "absent, sink disabled", absent: true, accepted: true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			settings := enabledSettings(t)
+			settings.Sink.Telegram.Enabled = tc.enabled
+
+			if tc.absent {
+				settings.Sink.Telegram.BotToken = config.NewSecret("")
+			} else {
+				settings.Sink.Telegram.BotToken = config.NewSecret(tc.token)
+			}
+
+			err := settings.Validate()
+
+			if tc.accepted {
+				if err != nil {
+					t.Fatalf("Validate() rejected a %d-character token with enabled=%t: %v",
+						len(tc.token), tc.enabled, err)
+				}
+
+				return
+			}
+
+			if err == nil {
+				t.Fatalf("Validate() accepted a %d-character token with enabled=%t",
+					len(tc.token), tc.enabled)
+			}
+
+			// Asserted against the rule's own clause rather than against the key
+			// name: "bot_token" alone is satisfied by the required-when-enabled
+			// problem, which fires on a different input for a different reason, so
+			// a test keyed off the name would pass with this rule deleted.
+			if !strings.Contains(err.Error(), "must be at least") {
+				t.Errorf("Validate() = %v, want the length rule's own problem", err)
+			}
+
+			if !strings.Contains(err.Error(), "bot_token") {
+				t.Errorf("Validate() = %v, want it to name the key", err)
+			}
+		})
 	}
 }

@@ -100,14 +100,34 @@ func TestTheLayeringRulesHold(t *testing.T) {
 	// cannot make every rule below vacuously pass. A package count alone does
 	// not catch that: a walk that recorded every directory and dropped every
 	// import produces the same length and answers "reaches nothing" to
-	// everything. The transitive pair is the one DEC-D2 is actually about.
+	// everything.
+	//
+	// The last row is the one that exercises reachable() past its first step,
+	// and it has to be checked against the real graph rather than assumed. The
+	// row below it used to be labelled transitive and is not: internal/cli
+	// imports internal/config directly, at run.go, so it is satisfied at depth
+	// one — and with every row satisfied at depth one, a reachable() that
+	// dropped the queue extension and returned direct edges only passed this
+	// whole test. Only the synthetic graph in TestTheLayeringRulesCanFail
+	// caught it, which means the walk over the real tree was asserting less
+	// than it looked like.
+	//
+	// cmd/mp -> internal/sink/telegram is three hops in the real graph
+	// (cmd/mp -> internal/cli -> internal/app -> internal/sink/telegram) and is
+	// the shape the rules are about rather than an arbitrary long pair: the
+	// program's entry point reaches a destination only through a front door and
+	// the composition root, so it cannot become a one-hop edge without one of
+	// those layers being bypassed — which is a layering change, and would be
+	// noticed here.
 	mustReach := []struct{ from, to string }{
 		{from: "internal/app", to: "internal/config"},
 		{from: "internal/app", to: "internal/sink/telegram"},
 		{from: "internal/logging", to: "internal/config"},
 		{from: "internal/app", to: "internal/post"},
-		// Transitive, through internal/logging.
+		// Direct, at run.go. Kept because the edge is real and worth pinning,
+		// relabelled because it is not the transitive one.
 		{from: "internal/cli", to: "internal/config"},
+		{from: "cmd/mp", to: "internal/sink/telegram"},
 	}
 
 	for _, edge := range mustReach {

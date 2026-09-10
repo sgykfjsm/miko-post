@@ -451,6 +451,30 @@ func revealed(secrets []config.Secret) []string {
 			continue
 		}
 
+		// A pattern shorter than the bound is skipped rather than used, and the
+		// choice is deliberate in both directions.
+		//
+		// redactAll is an unanchored substring replacement, so a two-character
+		// secret rewrites every field it appears inside: event names, sink names
+		// and message_id, the identifier the whole log is correlated by. Measured
+		// with "a" as the token, one record came back as
+		// "mess[redacted]ge_received" with a mangled message_id — the record is
+		// destroyed rather than redacted.
+		//
+		// Skipping means such a value is not replaced. That is the safer half of
+		// the trade rather than a hole: config.Validate rejects a token this short
+		// at load time, so anything reaching here below the bound was built
+		// without passing validation, and a string that short cannot be a working
+		// Bot API credential in the first place. The alternative — honouring it —
+		// trades a non-credential for every diagnostic record on the run.
+		//
+		// The threshold is config's because config is the lower package and owns
+		// the user-facing rule; sharing the constant is what keeps the guard and
+		// the validation from drifting apart.
+		if secret.Len() < config.MinBotTokenLength {
+			continue
+		}
+
 		values = append(values, secret.Reveal())
 	}
 

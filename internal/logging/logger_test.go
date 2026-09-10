@@ -2052,3 +2052,90 @@ func TestOpenWithAWriterNeitherResolvesNorOpensAPath(t *testing.T) {
 		t.Errorf("the writer seam still touched the state directory: %v", entries)
 	}
 }
+
+// TestAShortSecretIsSkippedRatherThanUsedAsAPattern is the second half of issue
+// #117's guard, and it exists because the first half can be bypassed.
+//
+// config.Validate refuses a bot_token below config.MinBotTokenLength, so a
+// document that went through Load cannot reach this. A Settings can be built
+// without Load, though — internal/sink/telegram keeps its own timeout clamp for
+// exactly that reason (DEC-C3) — so the scrub carries the same floor.
+//
+// The behaviour being pinned is that such a value is *skipped*, not honoured.
+// Honouring it is what was measured as destructive: redactAll is an unanchored
+// substring replacement, so a one-character secret rewrites every field it
+// appears inside, including message_id, which is the identifier every record is
+// correlated by. Skipping means the short value is not replaced — the safer half
+// of the trade, because a string that short cannot be a working credential,
+// whereas the corruption is total.
+//
+// The assertions are deliberately two-sided. Asserting only that the record
+// survives would pass if redaction were removed altogether, and asserting only
+// that a long secret is still scrubbed would pass if the floor were dropped.
+func TestAShortSecretIsSkippedRatherThanUsedAsAPattern(t *testing.T) {
+	t.Parallel()
+
+	// One character, and one that occurs in this package's own event vocabulary
+	// and in the message_id below — so a scrub that honoured it would visibly
+	// shred both.
+	const short = "e"
+
+	logger, buffer := newBufferLogger(t, logging.Options{
+		Redact: []config.Secret{config.NewSecret(short)},
+	})
+
+	logger.Post("message-one").Info(logging.EventMessageReceived)
+
+	written := buffer.String()
+
+	if strings.Contains(written, "[redacted]") {
+		t.Fatalf("a one-character secret was used as a redaction pattern:\n%s", written)
+	}
+
+	records := decodeRecords(t, buffer.Bytes())
+	if len(records) != 1 {
+		t.Fatalf("got %d records, want 1", len(records))
+	}
+
+	// The two fields the measured corruption destroyed. Named explicitly rather
+	// than checked as "the record still parses", because the corrupted record in
+	// the original measurement was still valid JSON — it was the field *values*
+	// that were rewritten.
+	if got := records[0]["event"]; got != string(logging.EventMessageReceived) {
+		t.Errorf("event = %v, want %s; the scrub rewrote the event vocabulary",
+			got, logging.EventMessageReceived)
+	}
+
+	if got := records[0]["message_id"]; got != "message-one" {
+		t.Errorf("message_id = %v, want message-one; the scrub rewrote the correlation identifier",
+			got)
+	}
+}
+
+// TestASecretAtTheFloorIsStillScrubbed is the other side of the floor.
+//
+// Without this, a fix for the short-secret corruption that simply disabled
+// redaction — or set the floor absurdly high — would pass every assertion in
+// the test above.
+func TestASecretAtTheFloorIsStillScrubbed(t *testing.T) {
+	t.Parallel()
+
+	atFloor := strings.Repeat("s", config.MinBotTokenLength)
+
+	logger, buffer := newBufferLogger(t, logging.Options{
+		Redact: []config.Secret{config.NewSecret(atFloor)},
+	})
+
+	logger.Post("message-one").Error(logging.EventTelegramSendFailed,
+		slog.String("detail", "the token "+atFloor+" was rejected"))
+
+	written := buffer.String()
+
+	if strings.Contains(written, atFloor) {
+		t.Fatalf("a secret exactly at the floor was not scrubbed:\n%s", written)
+	}
+
+	if !strings.Contains(written, "[redacted]") {
+		t.Errorf("nothing was marked as redacted; the value may have been dropped:\n%s", written)
+	}
+}

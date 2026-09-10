@@ -185,8 +185,15 @@ const telegramDisabled = "[sink.telegram]\nenabled = false"
 // If this ever starts contacting the network, the run will slow down and the
 // failure reason will change — both visible — rather than quietly becoming a
 // live-service test.
+//
+// The token is long enough to clear config.MinBotTokenLength, which validation
+// now enforces on every present token whether or not the sink is enabled (issue
+// #117). It still carries the "%zz" that breaks url.JoinPath, so what this
+// fixture tests is unchanged; a three-character token would now be refused at
+// load time and the run would never reach a sink.
 const telegramThatFailsBeforeTheNetwork = "[sink.telegram]\nenabled = true\n" +
-	"bot_token = \"%zz\"\nchat_id = \"-100123\"\nhttp_timeout_seconds = 1"
+	"bot_token = \"1234567890:AA-invalid-escape-%zz\"\nchat_id = \"-100123\"\n" +
+	"http_timeout_seconds = 1"
 
 // notes lists what the vault holds.
 func (w world) notes(t *testing.T) []string {

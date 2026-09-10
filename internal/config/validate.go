@@ -94,6 +94,35 @@ const pathSeparators = `/\`
 // merely unreachable.
 const MaxTimeoutSeconds = int64(math.MaxInt64 / int64(time.Second))
 
+// MinBotTokenLength is the shortest sink.telegram.bot_token this program will
+// accept, and the reason is not credential strength.
+//
+// The token is handed to internal/logging as a redaction pattern, and the scrub
+// is a plain substring replacement: every occurrence of the secret in every
+// rendered field becomes a marker. That is correct for a real token, which is
+// about 45 characters of digits, a colon and random base64, and cannot occur in
+// log text by accident. It is destructive for a short one. Measured with
+// bot_token = "a", a single record comes out as
+//
+//	{"event":"mess[redacted]ge_received","message_id":"[redacted]bc","sink":"obsidi[redacted]n"}
+//
+// event, sink and message_id are all corrupted, and message_id is the field the
+// whole log is correlated by — the one internal/logging protects explicitly
+// because two posts sharing an id interleave into one apparent post.
+//
+// Sixteen characters is the bound because the failure is a collision, not a
+// guess: a shorter pattern has to appear inside ordinary field names and event
+// vocabulary, and sixteen consecutive bytes of a credential do not. It is
+// deliberately not the real `<digits>:<35 chars>` shape, which would give a
+// better message at the cost of encoding a third party's credential format as
+// a validation rule — a larger promise than this needs, and one that breaks the
+// moment Telegram changes it.
+//
+// Exported because the number appears in the problem message and in
+// contracts/config-schema.md, and because a test that recomputed it would be
+// asserting its own arithmetic rather than the code's.
+const MinBotTokenLength = 16
+
 // ValidationError reports every problem found in one settings document.
 //
 // It exists as a type rather than a joined string so a front door can tell a
@@ -211,6 +240,26 @@ func (t TelegramSettings) validate(found *problems) {
 		if strings.TrimSpace(t.ChatID) == "" {
 			found.addf("sink.telegram.chat_id is required when the sink is enabled")
 		}
+	}
+
+	// Checked outside the Enabled block, and that placement is the whole point.
+	// internal/app arms the credential scrub with this token whether or not the
+	// chat destination is enabled — deliberately, so a token left in the file by
+	// a user who switched the sink off is still kept out of the diagnostics. A
+	// length rule that only applied when enabled would therefore leave the
+	// disabled-sink path free to corrupt every record, which is the state that
+	// was actually measured.
+	//
+	// Empty is not short: an absent token arms no pattern, and whether absence is
+	// allowed is the Enabled question answered above.
+	// Secret.Len rather than len(Reveal()): the number of routes to the real
+	// value is a review obligation in this project, and this rule needs the
+	// token's length, not the token.
+	if !t.BotToken.IsEmpty() && t.BotToken.Len() < MinBotTokenLength {
+		found.addf("sink.telegram.bot_token must be at least %d characters (got %d); "+
+			"a shorter value is used as a redaction pattern and would replace ordinary "+
+			"text in every diagnostic record, including the identifier each post is "+
+			"correlated by", MinBotTokenLength, t.BotToken.Len())
 	}
 
 	// An explicit thread_id = 0 is rejected rather than passed through. The

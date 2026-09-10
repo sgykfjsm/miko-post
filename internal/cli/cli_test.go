@@ -492,6 +492,76 @@ func TestRenderEmitsExactlyOneDegradationWarning(t *testing.T) {
 	}
 }
 
+// TestRenderDoesNotNameALogThatCouldNotBeWritten is COR-003/ADV-003.
+//
+// logging.Logger.Path reports the path it resolved whether or not the open
+// succeeded, so a failing sink plus an unopenable log produced "See log for
+// details: <path>" directly above the warning saying that path could not be
+// written — an instruction, then the reason it cannot be followed. Render's own
+// rule already covered the narrower case where nothing resolved; this is the
+// same rule applied to a named file that does not exist.
+//
+// Both directions are asserted, because only the pair pins the guard: a Render
+// that dropped the line unconditionally would satisfy the suppression half on
+// its own, and that would lose FR-063 on every ordinary failure.
+//
+// stdout is asserted byte for byte rather than by absence of a substring. A
+// Contains check for "See log" passing tells us nothing about what was printed
+// instead.
+func TestRenderDoesNotNameALogThatCouldNotBeWritten(t *testing.T) {
+	t.Parallel()
+
+	const (
+		logPath = "/state/miko-post/app.jsonl"
+		warning = "warning: diagnostics could not be written to " + logPath + ": permission denied"
+	)
+
+	results := []post.SinkResult{
+		{Name: "obsidian", Reason: "delivery failed"},
+		{Name: "telegram", Reason: "delivery failed"},
+	}
+
+	t.Run("with a degradation the log line is suppressed", func(t *testing.T) {
+		t.Parallel()
+
+		var out, errOut bytes.Buffer
+
+		cli.Render(&out, &errOut, cli.Report{Results: results, LogPath: logPath, Warning: warning})
+
+		const want = "Obsidian: failed — delivery failed\nTelegram: failed — delivery failed\n"
+
+		if got := out.String(); got != want {
+			t.Errorf("report is\n%q\nwant\n%q", got, want)
+		}
+
+		// The path still reaches the user, which is why suppressing the line
+		// loses nothing: the warning names it and says why it is unreadable.
+		if !strings.Contains(errOut.String(), logPath) {
+			t.Errorf("the path reached the user nowhere at all: stdout %q, stderr %q",
+				out.String(), errOut.String())
+		}
+	})
+
+	t.Run("without one it is printed", func(t *testing.T) {
+		t.Parallel()
+
+		var out, errOut bytes.Buffer
+
+		cli.Render(&out, &errOut, cli.Report{Results: results, LogPath: logPath})
+
+		want := "Obsidian: failed — delivery failed\nTelegram: failed — delivery failed\n" +
+			"See log for details: " + logPath + "\n"
+
+		if got := out.String(); got != want {
+			t.Errorf("report is\n%q\nwant\n%q", got, want)
+		}
+
+		if errOut.Len() != 0 {
+			t.Errorf("a report with no degradation wrote to stderr: %q", errOut.String())
+		}
+	})
+}
+
 // TestDisplayNamePassesThroughWhatItCannotCapitalise covers the arms Render
 // cannot reach, since the only names it ever sees come from the two sinks.
 func TestDisplayNamePassesThroughWhatItCannotCapitalise(t *testing.T) {
@@ -957,6 +1027,66 @@ func TestDegradedDiagnosticsChangeNeitherTheOutcomeNorTheStatus(t *testing.T) {
 
 	if !strings.Contains(errOut.String(), v.logPath) {
 		t.Errorf("the warning does not name the log path: %q", errOut.String())
+	}
+}
+
+// TestASinkFailureWithAnUnopenableLogNamesNoLog is COR-003/ADV-003 through the
+// whole front door.
+//
+// It is the intersection of the two tests above — a failing sink, and a log
+// that cannot be opened — and the intersection is where the defect lived:
+// each of the two on its own behaves correctly, and neither could see that
+// together they printed "See log for details: <path>" above a warning saying
+// that path could not be written.
+//
+// Both halves of the fixture are arranged the way the tests above arrange
+// them, so what this adds is only the combination.
+func TestASinkFailureWithAnUnopenableLogNamesNoLog(t *testing.T) {
+	v := newVault(t)
+
+	// The sink fails: no vault directory to write the note into.
+	if err := os.Remove(v.noteDir); err != nil {
+		t.Fatalf("remove the vault: %v", err)
+	}
+
+	// And the log cannot be opened: a directory where the file should be.
+	if err := os.MkdirAll(v.logPath, 0o700); err != nil {
+		t.Fatalf("put a directory at the log path: %v", err)
+	}
+
+	invocation, err := cli.Parse([]string{"-c", v.configPath, "nowhere to report from"})
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+
+	var out, errOut bytes.Buffer
+
+	// FR-060 still: the sink failed, so the status comes from the sink and not
+	// from the diagnostics (FR-076).
+	if status := cli.Run(invocation, &out, &errOut); status != cli.ExitFailure {
+		t.Fatalf("status = %d, want %d\nstdout: %s\nstderr: %s",
+			status, cli.ExitFailure, out.String(), errOut.String())
+	}
+
+	report := out.String()
+
+	if !strings.Contains(report, "Obsidian: failed") {
+		t.Errorf("the report does not name the failed destination: %q", report)
+	}
+
+	if strings.Contains(report, "See log for details") {
+		t.Errorf("the report sends the user to a log that could not be written: %q", report)
+	}
+
+	// Suppressing the line must not cost the path: the warning is where it is
+	// named on this run, and there must still be exactly one of those.
+	if !strings.Contains(errOut.String(), v.logPath) {
+		t.Errorf("the log path reached the user nowhere: stdout %q, stderr %q",
+			report, errOut.String())
+	}
+
+	if got := strings.Count(errOut.String(), "warning:"); got != 1 {
+		t.Errorf("got %d warnings, want exactly 1:\n%s", got, errOut.String())
 	}
 }
 

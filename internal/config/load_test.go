@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -428,7 +429,10 @@ func TestLoadWithOnlyTheEnvironmentCredential(t *testing.T) {
 // that is sitting there.
 //
 // A directory is used rather than a chmod-ed file because the latter is not a
-// failure when the tests run as root, which is a normal way for CI to run.
+// failure when the tests run as root, which is a normal way for CI to run. It
+// is also the one non-regular kind every platform can produce, so it is where
+// the refusal's wording is asserted; the kinds that hang or never end are in
+// load_unix_test.go.
 func TestLoadUnreadableFile(t *testing.T) {
 	unsetToken(t)
 
@@ -441,6 +445,155 @@ func TestLoadUnreadableFile(t *testing.T) {
 
 	if errors.Is(err, fs.ErrNotExist) {
 		t.Errorf("an unreadable path should not be reported as missing: %v", err)
+	}
+
+	if !strings.Contains(err.Error(), path) {
+		t.Errorf("error should name the path %q, got: %v", path, err)
+	}
+
+	// The kind, by name, in the refusal's own sentence and not in EISDIR's.
+	//
+	// "a directory" alone is unfailable here and was: os.ReadFile's own message
+	// is "read <path>: is a directory", so an assertion on that substring
+	// passes whether the path was refused before the read or relayed after it.
+	// A mutant that disabled the refusal entirely survived exactly that way.
+	// The phrase below is written by refuseUnreadable and by nothing else.
+	if !strings.Contains(err.Error(), "is a directory, which cannot be read") {
+		t.Errorf("error should refuse the path by naming what is at it, got: %v", err)
+	}
+}
+
+// TestLoadRefusesADocumentTooLargeToBeSettings is the size half of the read
+// guard (ADV-001).
+//
+// The regular-file check does not bound the read: a 500 MB regular document
+// decodes nothing and peaks at about 1.5 GB of resident memory finding that
+// out. Both sides of the limit are asserted, because only the pair pins the
+// comparison — a guard written with >= instead of > refuses a document that is
+// exactly the limit, and a test that only oversized would not notice.
+//
+// The documents are pure comment, which is valid TOML that decodes to the
+// defaults, so the accepted case fails only if the size guard refused it and
+// not because of anything about its content.
+func TestLoadRefusesADocumentTooLargeToBeSettings(t *testing.T) {
+	unsetToken(t)
+
+	// "# " plus padding, sized to the byte.
+	document := func(size int) []byte {
+		return []byte("# " + strings.Repeat("x", size-2))
+	}
+
+	dir := t.TempDir()
+
+	atLimit := filepath.Join(dir, "at-limit.toml")
+	if err := os.WriteFile(atLimit, document(config.MaxSettingsFileBytes), 0o600); err != nil {
+		t.Fatalf("write the document at the limit: %v", err)
+	}
+
+	if _, err := config.Load(atLimit); err != nil {
+		t.Errorf("a document of exactly %d bytes was refused: %v",
+			config.MaxSettingsFileBytes, err)
+	}
+
+	overLimit := filepath.Join(dir, "over-limit.toml")
+	if err := os.WriteFile(overLimit, document(config.MaxSettingsFileBytes+1), 0o600); err != nil {
+		t.Fatalf("write the oversized document: %v", err)
+	}
+
+	_, err := config.Load(overLimit)
+	if err == nil {
+		t.Fatalf("a document of %d bytes was accepted", config.MaxSettingsFileBytes+1)
+	}
+
+	if !strings.Contains(err.Error(), overLimit) {
+		t.Errorf("error should name the path %q, got: %v", overLimit, err)
+	}
+
+	// The limit itself, so the user can tell a size refusal from a parse
+	// failure without reading the source.
+	if !strings.Contains(err.Error(), strconv.Itoa(config.MaxSettingsFileBytes)) {
+		t.Errorf("error should name the %d-byte limit, got: %v",
+			config.MaxSettingsFileBytes, err)
+	}
+}
+
+// TestFileKindNamesEveryRefusedType covers the phrases the settings refusal
+// uses when something that is not a regular file sits at the -c path.
+//
+// The point of naming the type is that "the settings path is a named pipe" is
+// immediately actionable where a relayed errno is not, so each branch has to
+// actually produce its phrase. Driven by mode rather than by real files: see
+// export_test.go. Mirrors TestFileKindNamesEveryRejectedType in
+// internal/logging, which owns the same table for the log path.
+func TestFileKindNamesEveryRefusedType(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		mode os.FileMode
+		want string
+	}{
+		{name: "directory", mode: os.ModeDir | 0o755, want: "a directory"},
+		{name: "named pipe", mode: os.ModeNamedPipe | 0o600, want: "a named pipe"},
+		{name: "socket", mode: os.ModeSocket | 0o600, want: "a socket"},
+		// A device is refused here where internal/logging allows one, so this
+		// row is the one that is not a copy: /dev/null is a way to silence a
+		// log and not a way to configure anything.
+		{name: "character device", mode: os.ModeDevice | os.ModeCharDevice | 0o666, want: "a device file"},
+		// Not a symlink: os.Stat follows links, so a symlink mode never
+		// reaches fileKind. This is the fallback arm, driven by the one mode
+		// that names no specific kind.
+		{name: "an irregular file", mode: os.ModeIrregular | 0o600, want: "unsupported type"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := config.FileKind(test.mode)
+			if !strings.Contains(got, test.want) {
+				t.Errorf("FileKind(%s) = %q, want it to mention %q", test.mode, got, test.want)
+			}
+		})
+	}
+}
+
+// TestLoadRefusesARegularFileItCannotRead keeps the "there and unreadable"
+// branch reachable.
+//
+// It used to be reached by the directory in TestLoadUnreadableFile, which the
+// non-regular refusal now stops before the read — so without this the branch
+// that distinguishes a permission failure from a missing file would be one no
+// test had executed, in the code whose whole job is telling those two apart.
+//
+// A mode-0 regular file is the only trigger left, and it is not one when the
+// tests run as root, which is a normal way for CI to run. Skipped there rather
+// than asserted, following internal/logging and internal/sink/obsidian.
+func TestLoadRefusesARegularFileItCannotRead(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("running as root: an unreadable file is still readable")
+	}
+
+	unsetToken(t)
+
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(path, []byte("# nothing to see\n"), 0o000); err != nil {
+		t.Fatalf("write the unreadable document: %v", err)
+	}
+
+	_, err := config.Load(path)
+	if err == nil {
+		t.Fatal("expected an error for a file that cannot be read")
+	}
+
+	// Not "missing". The file is sitting there and telling the user it does not
+	// exist sends them to create one that already exists.
+	if errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("an unreadable file was reported as missing: %v", err)
+	}
+
+	if !strings.Contains(err.Error(), "read settings file") {
+		t.Errorf("error should say the file could not be read, got: %v", err)
 	}
 
 	if !strings.Contains(err.Error(), path) {

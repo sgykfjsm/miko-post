@@ -27,6 +27,11 @@ type Report struct {
 	// LogPath is the diagnostic log FR-063 requires failure output to name, or
 	// "" when none could be resolved — in which case Warning explains why and
 	// there is no path worth printing.
+	//
+	// A non-empty value is a path that resolved, which is not the same as a log
+	// that can be read: logging.Logger.Path reports the resolved path whether or
+	// not the open succeeded. Render therefore also suppresses the line when
+	// Warning is set; see there.
 	LogPath string
 
 	// Warning is FR-076's single degradation warning, or "" when diagnostics
@@ -91,10 +96,33 @@ func Render(out, errOut io.Writer, report Report) {
 
 	// FR-063: failure output names the log. Keyed off the same predicate that
 	// decides the exit status, so the line cannot appear on a run that exits 0
-	// or go missing on one that exits 1. Suppressed when nothing resolved,
-	// because "See log for details: " with nothing after it is an instruction
-	// the user cannot follow; Warning says why in that case.
-	if !post.AllSucceeded(report.Results) && report.LogPath != "" {
+	// or go missing on one that exits 1.
+	//
+	// Suppressed when there is no log the user can go and read, which is two
+	// situations and not one:
+	//
+	//   - Nothing resolved, because "See log for details: " with nothing after
+	//     it is an instruction the user cannot follow.
+	//   - The run carries a degradation warning, because the same reasoning
+	//     covers a named file that cannot be read. Measured on a run where both
+	//     sinks failed and the log could not be opened: "See log for details:
+	//     /…/nolog.jsonl" printed immediately above "warning: diagnostics could
+	//     not be written to /…/nolog.jsonl: permission denied" — the
+	//     unfollowable instruction with its own refutation underneath it.
+	//
+	// Nothing is lost by suppressing the line, and that is what decides it
+	// rather than the reading. Degradation.Warning names the same path and says
+	// why it cannot be read, so the path still reaches the user and FR-063's
+	// requirement that failure output name the log is met by the sentence that
+	// is true instead of by two that disagree.
+	//
+	// This deliberately covers the two degradations where the file does exist —
+	// a write that failed after a successful open, and a failed Close — even
+	// though partial records may be readable in them. Telling those apart would
+	// mean internal/logging publishing which of its three conditions fired, and
+	// in all three the log is incomplete for exactly the run being reported on,
+	// which is the run the user was being sent to read about.
+	if !post.AllSucceeded(report.Results) && report.LogPath != "" && report.Warning == "" {
 		rendered.WriteString(logPathPrefix)
 		rendered.WriteString(report.LogPath)
 		rendered.WriteString("\n")

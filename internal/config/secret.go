@@ -78,6 +78,21 @@ func (s Secret) Reveal() string {
 	return *s.value
 }
 
+// Len reports the length of the secret in bytes without exposing it.
+//
+// It exists so a validation rule about the credential's *shape* does not have to
+// become another Reveal() call site. The count of routes to the real value is a
+// review obligation in this project (see data-model.md), and "is this token long
+// enough to be safe as a redaction pattern?" is a question that can be answered
+// without answering "what is the token?".
+func (s Secret) Len() int {
+	if s.value == nil {
+		return 0
+	}
+
+	return len(*s.value)
+}
+
 // IsEmpty reports whether any credential is held.
 //
 // Validation needs to know whether the token is present without looking at it,
