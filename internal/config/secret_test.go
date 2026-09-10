@@ -164,7 +164,29 @@ func TestSecretReveal(t *testing.T) {
 			if got := secret.IsEmpty(); got != test.isEmpty {
 				t.Errorf("IsEmpty() = %t, want %t", got, test.isEmpty)
 			}
+
+			// Len is what the bot_token length rule reads, so that the rule does
+			// not have to become another Reveal() call site. Asserted against
+			// len(value) rather than a literal, so a multi-byte credential is
+			// measured in the same units the rule compares.
+			if got := secret.Len(); got != len(test.value) {
+				t.Errorf("Len() = %d, want %d", got, len(test.value))
+			}
 		})
+	}
+}
+
+// TestSecretZeroValueHasNoLength covers Len's nil arm, which is the state a
+// Settings is in before any document is decoded — the same state
+// TestSecretZeroValueIsEmpty pins for IsEmpty. Without it, the bot_token length
+// rule would be reading a method whose zero-value behaviour nothing asserts.
+func TestSecretZeroValueHasNoLength(t *testing.T) {
+	t.Parallel()
+
+	var secret config.Secret
+
+	if got := secret.Len(); got != 0 {
+		t.Errorf("Len() = %d on the zero value, want 0", got)
 	}
 }
 

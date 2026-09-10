@@ -33,29 +33,33 @@ const defaultRequestTimeout = 30 * time.Second
 // maxRequestTimeoutSeconds is the largest whole second a time.Duration can
 // hold, about 292 years.
 //
-// This constant exists because of issue #114, which owns
-// sink.telegram.http_timeout_seconds: internal/config/validate.go bounds it
-// only from below. #114 is the sibling of #109, which says the same thing about
-// posting.sink_timeout_seconds — one gap, two keys, and #114 is the one scoped
-// to this one. T035 is the first code in the repository to convert a settings
-// seconds value into a time.Duration, so it is the first place the gap is
-// reachable, and #114 names T035 as that converter.
+// This constant is the second of two independent guards on
+// sink.telegram.http_timeout_seconds, and the validation layer is the one that
+// talks to the user. internal/config/validate.go bounds the key from above as
+// well as from below — one shared rule at config.MaxTimeoutSeconds, covering
+// this key and posting.sink_timeout_seconds together — so a settings document
+// carrying 18446744074 is now refused at load time with a message naming the
+// key and the mechanism. That is issue #114's real fix, and #109's; it has
+// landed, and #114 is the one scoped to this key.
 //
-// The residue is not the obvious overflow. A value that wraps negative or to
-// zero is caught by any sane floor. `18446744074` wraps to a *positive*
-// 290.448384ms — it passes validation, passes the floor, and gives a user who
-// asked for ~584 years a request that times out in under a third of a second,
-// tighter than the default they were trying to raise.
+// The residue it guards is not the obvious overflow. A value that wraps
+// negative or to zero is caught by any sane floor. `18446744074` wraps to a
+// *positive* 290.448384ms — so before the validation bound existed it passed
+// validation, passed the floor, and gave a user who asked for ~584 years a
+// request that timed out in under a third of a second, tighter than the default
+// they were trying to raise.
 //
-// Clamped here rather than fixed in internal/config, which keeps this batch to
-// its own package (decision DEC-C3) and is what lets the batch claim that
-// package is byte-unchanged. #114 records this clamp as interim and owns the
-// real fix — rejecting the value at load time, where the user can be told —
-// because saturating here means the misconfiguration behaves sanely but
-// silently. #114's acceptance carries an obligation back to this constant: when
-// that fix lands, the clamp must be settled deliberately rather than left to
-// rot, either kept as documented defence in depth for the callers that build
-// settings without going through Load, or removed as redundant.
+// The clamp is kept, deliberately, which is #114's remaining obligation
+// discharged rather than left to rot (decision DEC-C3, and
+// contracts/telegram-sink.md records the same choice). New is exported and does
+// not require validated settings — this package's own tests construct a
+// config.TelegramSettings directly, and so may any future caller — so the
+// conversion needs its own floor and ceiling whatever validation does. The
+// floor is the part that would actually be missed: http.Client reads
+// Timeout: 0 as *unbounded*, so a zero-valued settings struct without it
+// produces a request with no limit at all rather than FR-040's default, which
+// is a worse failure than the one the ceiling prevents. Neither guard's test
+// may be deleted on the grounds that the other exists.
 const maxRequestTimeoutSeconds = int64(math.MaxInt64 / time.Second)
 
 // credentialMarker stands in for the bot token wherever one is removed.
@@ -279,21 +283,24 @@ func (s *Sink) Send(ctx context.Context, message post.Message) error {
 // requestTimeout converts the configured seconds into FR-040's per-request
 // bound, saturating rather than overflowing (issue #114, decision DEC-C3).
 //
-// Both arms are reachable from a settings file config.Validate accepts today,
-// which is the whole reason this is a function and not an expression:
+// Both arms are reachable from settings this package can be handed, which is
+// the whole reason this is a function and not an expression:
 //
-//   - seconds <= 0 is rejected by validation, but New does not require
+//   - seconds <= 0 is refused by config.Validate, but New does not require
 //     validated settings, and http.Client reads Timeout == 0 as "unbounded".
 //     The floor turns a zero-value settings struct into FR-040's default rather
 //     than into no limit at all.
-//   - seconds > maxRequestTimeoutSeconds passes validation and wraps. See the
-//     constant: 18446744074 becomes 290ms.
+//   - seconds > maxRequestTimeoutSeconds is refused by config.Validate too, and
+//     wraps if it arrives anyway. See the constant: 18446744074 becomes 290ms.
 //
-// Saturating is the right answer for the upper arm only because the value is
-// absurd either way — nobody who wrote 18446744074 wanted 292 years any more
-// than they wanted 290 milliseconds. The honest fix is to reject it at load
-// time with a message, which is #114's, not this batch's; #109 is the same gap
-// on posting.sink_timeout_seconds and does not scope this key.
+// Neither arm is reachable through config.Load any more. Rejecting the value at
+// load time with a message is the honest fix and it is the one that landed
+// (#114, #109) — in internal/config, where the user can be told. What is left
+// for this function is the unvalidated caller, and saturating is the right
+// answer for it because the value is absurd either way: nobody who wrote
+// 18446744074 wanted 292 years any more than they wanted 290 milliseconds. See
+// maxRequestTimeoutSeconds for why the clamp is kept rather than removed as
+// redundant.
 func requestTimeout(seconds int) time.Duration {
 	switch {
 	case seconds <= 0:
@@ -386,9 +393,12 @@ func withoutRequestURL(err error) error {
 // The match is unanchored, which is safe for the value this looks for and
 // would not be for an arbitrary one: a one- or two-character token would shred
 // every diagnostic into "telegr[redacted]m", and no Bot API token is anything
-// like that short. A minimum-length rule belongs with issue #114 in the
-// validation layer, where the user can be told, rather than as a second guess
-// here. The substitution itself is literal — strings.ReplaceAll interprets
+// like that short. That rule now exists where it belongs, in the validation
+// layer where the user can be told: config.Validate rejects a bot_token below
+// config.MinBotTokenLength (issue #117), and internal/logging skips any pattern
+// shorter than that bound as a second guard for callers that build settings
+// without going through Load. Neither guard lives here, because a sink is the
+// wrong place to have an opinion about the shape of a credential it was handed. The substitution itself is literal — strings.ReplaceAll interprets
 // neither the needle nor the replacement — so a token containing %s, $1 or a
 // backslash, or one that happens to contain the marker, behaves like any other.
 func (s *Sink) safe(err error) error {

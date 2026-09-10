@@ -246,6 +246,14 @@ it, while a subsequently launched window still used the default.
   full-width spaces, only tabs, only line breaks, or any mixture is rejected before any destination
   is contacted. Trimming is used *only* to decide validity — a message that passes is delivered
   exactly as typed, untrimmed.
+- **Input that is not valid UTF-8**: on macOS a command-line argument is a byte string, so a
+  terminal in a legacy encoding, a paste from a mis-decoded source, or `mp "$(cat somebinary)"` can
+  deliver bytes that are not valid UTF-8. Such a message is rejected before any destination is
+  contacted, with a correction prompt naming the encoding and distinct from the whitespace one
+  (FR-009a). It is *not* delivered to one destination and refused by the other, which is what
+  happened before the rule existed. Valid but unusual UTF-8 — emoji, combining marks,
+  right-to-left overrides, an encoded U+FFFD the user genuinely typed — is ordinary text and is
+  delivered unchanged.
 - **Ordinary punctuation in an ordinary message**: because messages are sent verbatim under the
   rich-formatting mode with no escaping, everyday characters the formatting mode reserves (such as
   `.`, `-`, `!`, `(`) will routinely cause the first attempt to be rejected and the unformatted
@@ -308,10 +316,50 @@ it, while a subsequently launched window still used the default.
 - **FR-009**: Before any destination is contacted, the message MUST be validated by trimming
   leading and trailing Unicode whitespace — including ASCII spaces, full-width spaces, tabs, and
   line breaks — and rejecting the message if the trimmed result is empty.
+- **FR-009a**: The message MUST also be rejected when it carries bytes that are not a valid UTF-8
+  encoding. This is a **second, distinct** rejection reason: it MUST produce its own correction
+  prompt naming the encoding, and neither rejection reason may be reported for the other.
 - **FR-010**: A rejected message MUST result in no destination being contacted, a correction prompt
   shown to the user, and a failure exit.
 - **FR-011**: Trimming MUST be used for validation only; every destination MUST receive the
   original, untrimmed message.
+
+> **The reading of FR-050 that FR-009a rests on** (issue #104, decision DEC-D4, taken 2026-09-09).
+>
+> FR-050 — "Written content MUST use UTF-8 encoding and line-feed line endings" — and its identical
+> sentence in constitution principle VI are read as a requirement on **what this application accepts
+> and emits**, not only on the byte-level encoding of the note file. Under that reading a message
+> that is not valid UTF-8 cannot be carried, and FR-009a follows.
+>
+> This is a decision and not a derivation. The spec was silent, and its clauses conflict: FR-011 and
+> FR-012 promise every destination the original message, while FR-050 and principle VI require
+> UTF-8. It was settled by observing that the permissive reading's central promise is not true —
+> **no destination keeps the bytes**. The chat service's documented contract is UTF-8 only and it
+> answers `400 Strings must be encoded in UTF-8`, whose text does not match the formatting-rescue
+> predicate, so that destination fails closed. FR-064's JSON Lines log cannot hold the bytes at all,
+> since JSON is UTF-8 by definition and the handler substitutes U+FFFD silently — so **SC-008 and
+> FR-068 are unsatisfiable for exactly these messages**. Obsidian re-serialises a note as UTF-8 at
+> the user's next save of it. The behaviour before FR-009a was therefore *note succeeds, chat fails,
+> exit 1*: a half-delivered post, which is the outcome the two-destination design exists to prevent.
+>
+> Refusing at validation does not engage principle VI's data-preservation clause: nothing is opened
+> and nothing is written, and that principle's scope is appends to notes and content already there.
+> Silently substituting U+FFFD before dispatch was considered and rejected — it is the only option
+> that produces a stored artefact the user did not write.
+>
+> **Accepted cost**: a terminal that reliably produces non-UTF-8 bytes — a legacy Shift_JIS or
+> EUC-JP locale is the realistic case — cannot use the command-line front door until its locale is
+> fixed. Under the permissive reading that same user gets a half-delivered post every time instead,
+> with no recoverable record; the correction prompt names the locale so the fix is actionable.
+>
+> **Unverified at the time of the decision**: whether the chat service refuses these bytes or
+> accepts and substitutes them server-side. The evidence is the Bot API documentation and tdlib's
+> source; no live call was made, because the constitution keeps live external services out of the
+> test suite. If it accepts them, the failure is cosmetic rather than partial and the decision
+> should be revisited. Recorded in issue #104.
+>
+> Reversible in both directions at any time: the rule is one guard, and notes already on disk are
+> unaffected either way. What is not reversible is each individual post made without it.
 
 **Posting orchestration**
 

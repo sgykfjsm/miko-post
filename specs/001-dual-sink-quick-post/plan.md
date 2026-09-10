@@ -111,6 +111,7 @@ cmd/
     └── main.go                     # Entry point: flag parsing, dispatch, single os.Exit
 
 internal/
+├── app/                            # Composition root: enabled sinks, service, logger (DEC-D1)
 ├── cli/                            # Thin CLI front door: parse, render, exit code
 ├── gui/                            # Thin Fyne front door
 │   ├── window.go                   #   main window, auto-close, result panel
@@ -140,6 +141,23 @@ remain separate responsibilities") is enforced by the compiler rather than by re
 also prevents any of this becoming an accidental public API, which matters because
 `docs/design.md` §6 explicitly marks its `SinkResult` sketch as illustrative rather than a
 required Go API.
+
+`internal/app` is not in this feature's original layout and was added during Batch 6c-1
+(decision DEC-D1). tasks.md placed sink construction in `internal/post/build.go`, which cannot
+compile: both sink packages import `internal/post` in order to implement `post.Sink`, so
+`internal/post` constructing them is an import cycle. `cmd/mp` was the next candidate and fails for
+a different reason — `internal/gui` cannot import package `main`, so the GUI would need a second
+copy of the wiring, and issue #111's cheapest fix puts sink construction on the GUI's submit path.
+`internal/sink`, the empty parent package, could host sink construction and nothing else, leaving
+the wiring in two places. One composition root beats two.
+
+The package earns its keep the same way the boundaries above do: it may import anything under
+`internal/`, nothing may import it but a front door and `cmd/mp`, and it must never import a front
+door — which would be the same cycle from the other side. That rule and `internal/post`'s
+"imports no other internal package" (DEC-D2) are the two boundaries the compiler does **not**
+enforce on its own, so `internal/app/layering_test.go` walks the module's import graph and fails on
+either violation. It is the mechanism this Structure Decision claims for the rest of the tree, made
+real for the two edges that were relying on review.
 
 The two files that look like over-decomposition earn their place: `gui/entry.go` isolates the
 extended-widget workaround that FR-021 and FR-022 jointly force (R-003), and

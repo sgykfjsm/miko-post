@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"math"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -62,6 +63,65 @@ var layoutProbeTime = time.Date(2026, 9, 3, 21, 47, 53, 123456789, time.UTC)
 // both everywhere makes the accepted set the intersection, which is the only
 // set that means the same thing wherever the document is opened.
 const pathSeparators = `/\`
+
+// MaxTimeoutSeconds is the largest whole second any timeout key may hold: the
+// largest that still converts to a time.Duration without wrapping, about 292
+// years.
+//
+// It exists because bounding a timeout only from below is not a bound (issues
+// #109 and #114). Every consumer of these keys has to evaluate
+// `time.Duration(seconds) * time.Second`, and that multiplication overflows
+// int64 in silence. The dangerous residue is not the obvious one:
+//
+//	9223372037  -> -2562047h47m…   negative, and any floor catches it
+//	1 << 62     -> 0s              zero, and any floor catches it
+//	18446744074 -> 290.448384ms    positive, small, and nothing downstream can tell
+//	18446744075 -> 1.290448384s    the same
+//
+// The third and fourth rows are why this is a validation rule rather than a
+// clamp at each conversion. A user who wrote 18446744074 asked for ~584 years
+// and would have received a deadline three times tighter than the default they
+// were trying to raise, with every post then failing for a reason their own
+// settings file appears to contradict. Rejecting at load time is the only place
+// the user can still be told.
+//
+// Exported because the number is user-facing — it appears in the problem
+// message and in contracts/config-schema.md — and because a test that recomputed
+// it would be asserting its own arithmetic rather than the code's.
+//
+// On a platform where int is 32 bits the conversion cannot overflow at all, so
+// the upper check simply never fires; the constant is still correct there, it is
+// merely unreachable.
+const MaxTimeoutSeconds = int64(math.MaxInt64 / int64(time.Second))
+
+// MinBotTokenLength is the shortest sink.telegram.bot_token this program will
+// accept, and the reason is not credential strength.
+//
+// The token is handed to internal/logging as a redaction pattern, and the scrub
+// is a plain substring replacement: every occurrence of the secret in every
+// rendered field becomes a marker. That is correct for a real token, which is
+// about 45 characters of digits, a colon and random base64, and cannot occur in
+// log text by accident. It is destructive for a short one. Measured with
+// bot_token = "a", a single record comes out as
+//
+//	{"event":"mess[redacted]ge_received","message_id":"[redacted]bc","sink":"obsidi[redacted]n"}
+//
+// event, sink and message_id are all corrupted, and message_id is the field the
+// whole log is correlated by — the one internal/logging protects explicitly
+// because two posts sharing an id interleave into one apparent post.
+//
+// Sixteen characters is the bound because the failure is a collision, not a
+// guess: a shorter pattern has to appear inside ordinary field names and event
+// vocabulary, and sixteen consecutive bytes of a credential do not. It is
+// deliberately not the real `<digits>:<35 chars>` shape, which would give a
+// better message at the cost of encoding a third party's credential format as
+// a validation rule — a larger promise than this needs, and one that breaks the
+// moment Telegram changes it.
+//
+// Exported because the number appears in the problem message and in
+// contracts/config-schema.md, and because a test that recomputed it would be
+// asserting its own arithmetic rather than the code's.
+const MinBotTokenLength = 16
 
 // ValidationError reports every problem found in one settings document.
 //
@@ -182,6 +242,26 @@ func (t TelegramSettings) validate(found *problems) {
 		}
 	}
 
+	// Checked outside the Enabled block, and that placement is the whole point.
+	// internal/app arms the credential scrub with this token whether or not the
+	// chat destination is enabled — deliberately, so a token left in the file by
+	// a user who switched the sink off is still kept out of the diagnostics. A
+	// length rule that only applied when enabled would therefore leave the
+	// disabled-sink path free to corrupt every record, which is the state that
+	// was actually measured.
+	//
+	// Empty is not short: an absent token arms no pattern, and whether absence is
+	// allowed is the Enabled question answered above.
+	// Secret.Len rather than len(Reveal()): the number of routes to the real
+	// value is a review obligation in this project, and this rule needs the
+	// token's length, not the token.
+	if !t.BotToken.IsEmpty() && t.BotToken.Len() < MinBotTokenLength {
+		found.addf("sink.telegram.bot_token must be at least %d characters (got %d); "+
+			"a shorter value is used as a redaction pattern and would replace ordinary "+
+			"text in every diagnostic record, including the identifier each post is "+
+			"correlated by", MinBotTokenLength, t.BotToken.Len())
+	}
+
 	// An explicit thread_id = 0 is rejected rather than passed through. The
 	// contract makes absence, not a sentinel, the way to post to the chat
 	// directly, so 0 is a user reaching for a sentinel that does not exist;
@@ -198,9 +278,36 @@ func (t TelegramSettings) validate(found *problems) {
 			strings.Join(acceptedParseModes, ", "), t.ParseMode)
 	}
 
-	if t.HTTPTimeoutSeconds <= 0 {
-		found.addf("sink.telegram.http_timeout_seconds must be greater than 0 (got %d)",
-			t.HTTPTimeoutSeconds)
+	validateTimeoutSeconds(found, "sink.telegram.http_timeout_seconds", t.HTTPTimeoutSeconds)
+}
+
+// validateTimeoutSeconds is the shared bound for every settings key holding a
+// number of seconds that a consumer converts to a time.Duration.
+//
+// One function rather than two copies because #109 and #114 are one defect
+// found twice, in posting.sink_timeout_seconds and in
+// sink.telegram.http_timeout_seconds, and the way that happened is that the
+// lower bound was written twice and the upper bound was forgotten in both. A
+// third timeout key added later gets the whole rule by calling this, or it gets
+// neither half and the omission is visible in the diff.
+//
+// The two arms are separate problems with separate messages on purpose. "Too
+// small" and "too large" need different corrections, and FR-055's accumulating
+// validation is only useful if what it accumulates is actionable.
+//
+// The upper message names the mechanism rather than only the limit. A bound of
+// 9223372036 looks arbitrary next to a value the user chose deliberately, and a
+// user told merely "must be at most 9223372036" would reasonably conclude the
+// program has an opinion about long timeouts; told that a larger value silently
+// becomes a fraction of a second, they can see it is arithmetic and not policy.
+func validateTimeoutSeconds(found *problems, key string, seconds int) {
+	switch {
+	case seconds <= 0:
+		found.addf("%s must be greater than 0 (got %d)", key, seconds)
+	case int64(seconds) > MaxTimeoutSeconds:
+		found.addf("%s must be at most %d (got %d); a larger value overflows the internal "+
+			"duration and would silently become a fraction of a second rather than the long "+
+			"timeout it reads as", key, MaxTimeoutSeconds, seconds)
 	}
 }
 
@@ -237,10 +344,7 @@ func (o ObsidianSettings) validate(found *problems, now time.Time) {
 }
 
 func (p PostingSettings) validate(found *problems) {
-	if p.SinkTimeoutSeconds <= 0 {
-		found.addf("posting.sink_timeout_seconds must be greater than 0 (got %d)",
-			p.SinkTimeoutSeconds)
-	}
+	validateTimeoutSeconds(found, "posting.sink_timeout_seconds", p.SinkTimeoutSeconds)
 }
 
 func (g GUISettings) validate(found *problems) {

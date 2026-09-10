@@ -24,7 +24,7 @@ func enabledSettings(t *testing.T) config.Settings {
 
 	settings := config.Defaults()
 	settings.Sink.Telegram.Enabled = true
-	settings.Sink.Telegram.BotToken = config.NewSecret("token")
+	settings.Sink.Telegram.BotToken = config.NewSecret("1234567890:AA-a-realistic-length-token")
 	settings.Sink.Telegram.ChatID = "-100123"
 	settings.Sink.Obsidian.Enabled = true
 	settings.Sink.Obsidian.DailyNoteDir = t.TempDir()
@@ -951,4 +951,220 @@ func TestValidationErrorSingularForm(t *testing.T) {
 
 func pointerTo[T any](value T) *T {
 	return &value
+}
+
+// TestValidateBoundsTimeoutSecondsFromAbove is issues #109 and #114.
+//
+// Both keys were bounded only from below, and the residue that leaves is not the
+// obvious overflow. A value that wraps negative or to zero is caught by any
+// floor downstream — post.New has one, telegram.requestTimeout has one — but
+// 18446744074 wraps to a *positive* 290.448384ms: it passed validation, passed
+// both floors, and handed a user who asked for ~584 years a deadline three times
+// tighter than the default they were trying to raise, with nothing anywhere
+// saying so.
+//
+// The table pins the exact value each issue names, plus the one above it, plus
+// the two rows that were already caught so a fix that only moved the floor is
+// visible. The boundary pair is the part that fails a bound written with the
+// wrong comparison: MaxTimeoutSeconds itself must be accepted and one more
+// refused.
+func TestValidateBoundsTimeoutSecondsFromAbove(t *testing.T) {
+	t.Parallel()
+
+	// Both keys, so a fix applied to one of them fails here rather than leaving
+	// its sibling open — which is exactly how #109 and #114 came to be two
+	// issues describing one defect.
+	keys := []struct {
+		key string
+		set func(*config.Settings, int)
+	}{
+		{
+			key: "posting.sink_timeout_seconds",
+			set: func(s *config.Settings, v int) { s.Posting.SinkTimeoutSeconds = v },
+		},
+		{
+			key: "sink.telegram.http_timeout_seconds",
+			set: func(s *config.Settings, v int) { s.Sink.Telegram.HTTPTimeoutSeconds = v },
+		},
+	}
+
+	cases := []struct {
+		name     string
+		seconds  int
+		accepted bool
+	}{
+		{name: "the default-shaped value", seconds: 60, accepted: true},
+		{name: "one second", seconds: 1, accepted: true},
+		{name: "zero", seconds: 0},
+		{name: "negative", seconds: -1},
+		{name: "the largest whole second a duration holds", seconds: int(config.MaxTimeoutSeconds), accepted: true},
+		{name: "one past the largest", seconds: int(config.MaxTimeoutSeconds) + 1},
+		{name: "the value that wraps negative", seconds: 9223372037},
+		{name: "the value that wraps to 290ms", seconds: 18446744074},
+		{name: "the value that wraps to 1.29s", seconds: 18446744075},
+	}
+
+	for _, key := range keys {
+		for _, tc := range cases {
+			t.Run(key.key+"/"+tc.name, func(t *testing.T) {
+				t.Parallel()
+
+				settings := enabledSettings(t)
+				key.set(&settings, tc.seconds)
+
+				err := settings.Validate()
+
+				if tc.accepted {
+					if err != nil {
+						t.Fatalf("Validate() rejected %s = %d: %v", key.key, tc.seconds, err)
+					}
+
+					return
+				}
+
+				if err == nil {
+					t.Fatalf("Validate() accepted %s = %d, which converts to %s",
+						key.key, tc.seconds, time.Duration(tc.seconds)*time.Second)
+				}
+
+				// The problem must name the key, or an accumulated report of
+				// several problems tells the user to fix the wrong line.
+				if !strings.Contains(err.Error(), key.key) {
+					t.Errorf("the problem does not name %s: %v", key.key, err)
+				}
+
+				// And it must not name the other key, which is what a shared
+				// guard called with the wrong label would do.
+				for _, other := range keys {
+					if other.key != key.key && strings.Contains(err.Error(), other.key) {
+						t.Errorf("the problem for %s also names %s: %v", key.key, other.key, err)
+					}
+				}
+			})
+		}
+	}
+}
+
+// TestTheTimeoutBoundIsTheOneThatCannotOverflow pins what MaxTimeoutSeconds is,
+// rather than trusting that whatever it happens to be is right.
+//
+// A bound is only a bound if it is below the wrap point. This asserts that the
+// largest accepted value still converts to a positive duration of the size it
+// reads as, and that one more second does not — which is the arithmetic the
+// whole rule exists for, and the thing a hand-typed constant gets wrong by one.
+func TestTheTimeoutBoundIsTheOneThatCannotOverflow(t *testing.T) {
+	t.Parallel()
+
+	// Every conversion here routes the seconds through a variable rather than
+	// using config.MaxTimeoutSeconds directly. It is a typed constant, so the
+	// direct form is a constant expression the compiler evaluates — and a
+	// mutant that raised the bound past the wrap point would then fail to
+	// compile this file instead of failing this test, which is a red suite for
+	// the wrong reason and tells the next reader nothing about the bound.
+	bound := config.MaxTimeoutSeconds
+
+	atBound := time.Duration(bound) * time.Second
+	if atBound <= 0 {
+		t.Fatalf("MaxTimeoutSeconds = %d converts to %s, which is not a usable timeout",
+			config.MaxTimeoutSeconds, atBound)
+	}
+
+	if want := int64(atBound / time.Second); want != config.MaxTimeoutSeconds {
+		t.Errorf("converting MaxTimeoutSeconds and back gives %d, want %d",
+			want, config.MaxTimeoutSeconds)
+	}
+
+	// One second more must wrap. Routed through a variable so the overflow is
+	// the runtime's: as a constant expression the compiler refuses to build it,
+	// which is the same fact stated at compile time and no use as an assertion.
+	beyond := bound + 1
+	past := time.Duration(beyond) * time.Second
+	if past > 0 {
+		t.Errorf("one second past the bound converts to %s, which is still positive — "+
+			"the bound is lower than it needs to be, or the wrap point moved", past)
+	}
+}
+
+// TestValidateBoundsBotTokenLength is issue #117, and the case that matters is
+// the disabled one.
+//
+// The token is handed to internal/logging as a redaction pattern whether or not
+// the chat destination is enabled — deliberately, so a token left behind by a
+// user who switched the sink off still stays out of the diagnostics. The scrub
+// is an unanchored substring replacement, so a short value does not redact the
+// credential, it rewrites every field it appears inside. A rule that only
+// applied when the sink was enabled would leave that path open, which is the
+// state that was measured: with bot_token = "a", one record came back with
+// event, sink and message_id all corrupted.
+//
+// Absence is not shortness. An absent token arms no pattern at all, so the
+// bound must not fire on it — whether absence is allowed is the separate
+// required-when-enabled question, and the two must not be confused. The
+// "absent, sink disabled" row is what pins that.
+func TestValidateBoundsBotTokenLength(t *testing.T) {
+	t.Parallel()
+
+	atBound := strings.Repeat("x", config.MinBotTokenLength)
+	oneShort := strings.Repeat("x", config.MinBotTokenLength-1)
+
+	cases := []struct {
+		name     string
+		token    string
+		absent   bool
+		enabled  bool
+		accepted bool
+	}{
+		{name: "a realistic token, enabled", token: "1234567890:AA-a-realistic-length-token", enabled: true, accepted: true},
+		{name: "a realistic token, disabled", token: "1234567890:AA-a-realistic-length-token", accepted: true},
+		{name: "exactly at the bound, enabled", token: atBound, enabled: true, accepted: true},
+		{name: "exactly at the bound, disabled", token: atBound, accepted: true},
+		{name: "one character short, enabled", token: oneShort, enabled: true},
+		{name: "one character short, disabled", token: oneShort},
+		{name: "a single character, enabled", token: "a", enabled: true},
+		{name: "a single character, disabled", token: "a"},
+		{name: "absent, sink disabled", absent: true, accepted: true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			settings := enabledSettings(t)
+			settings.Sink.Telegram.Enabled = tc.enabled
+
+			if tc.absent {
+				settings.Sink.Telegram.BotToken = config.NewSecret("")
+			} else {
+				settings.Sink.Telegram.BotToken = config.NewSecret(tc.token)
+			}
+
+			err := settings.Validate()
+
+			if tc.accepted {
+				if err != nil {
+					t.Fatalf("Validate() rejected a %d-character token with enabled=%t: %v",
+						len(tc.token), tc.enabled, err)
+				}
+
+				return
+			}
+
+			if err == nil {
+				t.Fatalf("Validate() accepted a %d-character token with enabled=%t",
+					len(tc.token), tc.enabled)
+			}
+
+			// Asserted against the rule's own clause rather than against the key
+			// name: "bot_token" alone is satisfied by the required-when-enabled
+			// problem, which fires on a different input for a different reason, so
+			// a test keyed off the name would pass with this rule deleted.
+			if !strings.Contains(err.Error(), "must be at least") {
+				t.Errorf("Validate() = %v, want the length rule's own problem", err)
+			}
+
+			if !strings.Contains(err.Error(), "bot_token") {
+				t.Errorf("Validate() = %v, want it to name the key", err)
+			}
+		})
+	}
 }

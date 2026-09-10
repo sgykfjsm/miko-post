@@ -32,6 +32,21 @@ for `Cmd+Enter` or `Esc`. See research R-003.
 - The window waits for **every** enabled sink to finish, then shows a compact per-sink result
   (FR-025).
 
+## Message rejection (FR-009, FR-010)
+
+The window shares the CLI's rejection rules, because both front doors call one
+`post.Message.Validate` (constitution principle II). There are **two** reasons — empty or
+whitespace-only (`post.ErrEmptyMessage`), and bytes that are not valid UTF-8 (`post.ErrInvalidUTF8`,
+decision DEC-D4, issue #104) — each matched with `errors.Is` and each shown as its own correction
+prompt in the result area. Neither reason may be reported for the other, no destination is
+contacted, and the process exits `1`.
+
+The UTF-8 rejection is far less likely to fire here than on the command line: Fyne and
+`NSPasteboard` both produce valid UTF-8 Go strings, so the realistic source is the CLI's byte-exact
+argv. It is enumerated anyway, because the rule lives in the shared core and a front door that
+handled only one reason would show a user nothing at all for the other. See
+`contracts/cli-interface.md` for the reasoning behind the second reason.
+
 ## Result display (FR-029)
 
 Every failed sink is named with a short human-readable reason. Detailed errors and stack traces

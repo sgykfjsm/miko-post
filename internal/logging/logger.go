@@ -89,12 +89,15 @@ const (
 
 // Options configures Open.
 type Options struct {
-	// Path is the resolved log file path. Use ResolvePath to apply the
-	// "empty means the default" rule before filling this in.
+	// Path is the log file path. Empty means the default resolved state path
+	// (FR-056, FR-065): Open applies ResolvePath itself, so a caller passing
+	// config.LoggingSettings.Path straight through gets the documented rule
+	// rather than a silently discarding logger. See Open.
 	//
-	// When Writer is set nothing here is opened, but the value is still
-	// recorded as the path a Degradation names — so a rotating writer's write
-	// failure can still say which file it was.
+	// When Writer is set nothing here is opened and nothing is resolved, but
+	// whatever the caller put here is still recorded as the path a Degradation
+	// names — so a rotating writer's write failure can still say which file it
+	// was.
 	Path string
 
 	// Source is the front door opening the logger.
@@ -248,6 +251,25 @@ type Logger struct {
 // The directory is created first (FR-075). When either the directory or the
 // file cannot be opened, the returned Logger writes to nothing and Degraded
 // names the path and the reason for the caller's single warning.
+//
+// An empty Options.Path is resolved here rather than by the caller (issue
+// #107). config.LoggingSettings.Path deliberately defaults to "" so that
+// "unset" stays distinguishable from "set to the default value", which made the
+// natural wiring — Path: settings.Logging.Path — degrade to discarding on every
+// default install, reporting sink outcomes normally and writing no diagnostics
+// at all. The rule was documented on Options.Path and left to the caller's
+// memory, and a comment is the weakest enforcement available: this package's
+// other invariants do better, since Logger.Post cannot be called without a
+// message_id and Open has no error return so a caller cannot hold a nil
+// *Logger. This was the one rule left to discipline, and there were about to be
+// two front doors to remember it.
+//
+// A resolution failure becomes an ordinary Degradation rather than an error
+// return. Keeping the no-error signature is the point — see above for why it
+// has none — and a machine with no $HOME and no XDG_STATE_HOME is exactly the
+// FR-075/FR-076 situation the discarding logger exists for: one warning, and
+// the post runs. Degradation.Warning already has a sentence for the case where
+// there is no path to name.
 func Open(opts Options) *Logger {
 	source := opts.Source
 	if source != SourceCLI && source != SourceGUI {
@@ -272,12 +294,26 @@ func Open(opts Options) *Logger {
 	switch {
 	case opts.Writer != nil:
 		// A supplied writer owns its own destination, so no directory is
-		// created and no file is opened. logger.path keeps whatever the caller
-		// resolved so a write failure can still name it — the path is not this
-		// package's to open here, which is not the same as being unknown.
+		// created, no file is opened, and nothing is resolved: resolving here
+		// would invent a path this package is not going to touch and then name
+		// it in a degradation about a write that failed somewhere else.
+		// logger.path keeps whatever the caller put there so a write failure can
+		// still name it — the path is not this package's to open here, which is
+		// not the same as being unknown.
 		target = opts.Writer
 	default:
-		file, err := openLogFile(opts.Path)
+		path, err := ResolvePath(opts.Path)
+		if err != nil {
+			// The resolved path is unknown, so logger.path stays as the caller
+			// gave it — empty — and Warning renders its no-path sentence.
+			logger.openErr = fmt.Errorf("resolve the default log path: %w", err)
+
+			break
+		}
+
+		logger.path = path
+
+		file, err := openLogFile(path)
 		if err != nil {
 			// target stays nil: safeWriter discards, and every method below
 			// keeps working.
@@ -415,6 +451,30 @@ func revealed(secrets []config.Secret) []string {
 			continue
 		}
 
+		// A pattern shorter than the bound is skipped rather than used, and the
+		// choice is deliberate in both directions.
+		//
+		// redactAll is an unanchored substring replacement, so a two-character
+		// secret rewrites every field it appears inside: event names, sink names
+		// and message_id, the identifier the whole log is correlated by. Measured
+		// with "a" as the token, one record came back as
+		// "mess[redacted]ge_received" with a mangled message_id — the record is
+		// destroyed rather than redacted.
+		//
+		// Skipping means such a value is not replaced. That is the safer half of
+		// the trade rather than a hole: config.Validate rejects a token this short
+		// at load time, so anything reaching here below the bound was built
+		// without passing validation, and a string that short cannot be a working
+		// Bot API credential in the first place. The alternative — honouring it —
+		// trades a non-credential for every diagnostic record on the run.
+		//
+		// The threshold is config's because config is the lower package and owns
+		// the user-facing rule; sharing the constant is what keeps the guard and
+		// the validation from drifting apart.
+		if secret.Len() < config.MinBotTokenLength {
+			continue
+		}
+
 		values = append(values, secret.Reveal())
 	}
 
@@ -493,6 +553,21 @@ func (l *Logger) Degraded() *Degradation {
 
 	return nil
 }
+
+// Path reports the log file this Logger resolved, which is what FR-063 requires
+// user-facing failure output to name.
+//
+// It is the resolved path and not Options.Path, so a front door prints the file
+// a reader can actually open rather than the empty string that means "the
+// default". That is the whole reason this accessor exists rather than the front
+// door keeping its own copy of what it passed in: after issue #107 the caller no
+// longer performs the resolution, so the caller no longer knows the answer.
+//
+// Empty only when no path could be resolved at all, in which case Degraded is
+// non-nil and its warning carries the explanation instead. A front door must
+// therefore treat an empty result as "there is no log line to print", not as a
+// path.
+func (l *Logger) Path() string { return l.path }
 
 // Close releases the log file.
 //

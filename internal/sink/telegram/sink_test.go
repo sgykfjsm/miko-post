@@ -94,6 +94,32 @@ func mustMessage(t *testing.T, text string) post.Message {
 	return message
 }
 
+// unvalidatedMessage builds a Message that Validate would refuse.
+//
+// It exists because decision DEC-D4 made invalid UTF-8 a rejection reason, so
+// no front door delivers those bytes any more — and this package's byte-exactness
+// assertions for them are kept anyway, deliberately. DEC-C1's form encoding is
+// retained as documented defence in depth rather than removed as redundant: Send
+// takes a post.Message, a Message is a struct literal anyone can construct, and a
+// sink that assumed validation had run would be trusting a caller it cannot see.
+// The two rows using this are also the guard that would already be in place if
+// #104 were ever reversed.
+//
+// It asserts that Validate really does refuse the text, so a row that stops
+// being a bypass — because the rule changed, or because the bytes were edited
+// into valid ones — fails here instead of silently becoming a duplicate of the
+// ordinary case.
+func unvalidatedMessage(t *testing.T, text string) post.Message {
+	t.Helper()
+
+	message := post.Message{Original: text}
+	if err := message.Validate(); err == nil {
+		t.Fatalf("post.Message{%q} validates, so this row is no longer a bypass", text)
+	}
+
+	return message
+}
+
 // captured is everything the server saw of one request.
 //
 // The body is kept raw as well as parsed. The parsed form answers "what did the
@@ -447,6 +473,10 @@ func TestSendDeliversTheMessageVerbatim(t *testing.T) {
 	tests := []struct {
 		name string
 		text string
+		// unvalidated marks a row whose bytes post.Message.Validate now
+		// refuses (decision DEC-D4). See unvalidatedMessage for why those rows
+		// are kept.
+		unvalidated bool
 	}{
 		{
 			name: "every character MarkdownV2 reserves",
@@ -459,9 +489,10 @@ func TestSendDeliversTheMessageVerbatim(t *testing.T) {
 		{name: "a carriage return and line feed", text: "first\r\nsecond"},
 		{name: "an ideographic space", text: "美琴　可愛い"},
 		// Issue #113: bytes a command-line argument may carry on Unix and the
-		// obsidian sink writes verbatim.
-		{name: "a byte that is not valid utf-8", text: "a\xffb"},
-		{name: "a truncated utf-8 sequence", text: "a\xe3\x81b"},
+		// obsidian sink writes verbatim. Refused by the front doors since
+		// DEC-D4; still delivered verbatim by this sink if one arrives.
+		{name: "a byte that is not valid utf-8", text: "a\xffb", unvalidated: true},
+		{name: "a truncated utf-8 sequence", text: "a\xe3\x81b", unvalidated: true},
 	}
 
 	for _, test := range tests {
@@ -471,7 +502,14 @@ func TestSendDeliversTheMessageVerbatim(t *testing.T) {
 			server, rec := newRecordingServer(t, reply(http.StatusOK, okBody))
 			sink := telegram.NewWithBaseURL(baseSettings(), server.URL)
 
-			if err := sink.Send(context.Background(), mustMessage(t, test.text)); err != nil {
+			message := post.Message{}
+			if test.unvalidated {
+				message = unvalidatedMessage(t, test.text)
+			} else {
+				message = mustMessage(t, test.text)
+			}
+
+			if err := sink.Send(context.Background(), message); err != nil {
 				t.Fatalf("Send: %v", err)
 			}
 
@@ -523,7 +561,7 @@ func TestSendDoesNotSubstituteReplacementCharactersForInvalidUTF8(t *testing.T) 
 	server, rec := newRecordingServer(t, reply(http.StatusOK, okBody))
 	sink := telegram.NewWithBaseURL(baseSettings(), server.URL)
 
-	if err := sink.Send(context.Background(), mustMessage(t, raw)); err != nil {
+	if err := sink.Send(context.Background(), unvalidatedMessage(t, raw)); err != nil {
 		t.Fatalf("Send: %v", err)
 	}
 

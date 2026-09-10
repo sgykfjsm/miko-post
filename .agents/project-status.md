@@ -1,6 +1,6 @@
 # Project status — miko-post
 
-_Last updated: 2026-09-07_
+_Last updated: 2026-09-09_
 
 ## Objective
 
@@ -36,22 +36,28 @@ per PR, driven by the `run-batch-cycle` skill.
   oklog/ulid/v2@v2.1.2. PR #108, merged to `main` as `35d24e2` on 2026-09-08; review verdict
   passed-with-notes after three fix cycles, 100% statement coverage. **Completes Phase 2.**
 
+- **Batch 6a** — Obsidian daily-note sink (T027, T030–T032). PR #112, merged as `69e17e3`.
+- **Batch 6b** — Telegram chat sink (T028, T033–T035). PR #116, merged as `13705e0`.
+- **Batch 6c-1** — the US1 front door and wiring: the `internal/app` composition root, CLI parsing
+  and rendering, and `cmd/mp` with one `os.Exit` (T029, T036–T039; issues #30, #37–#40). Also
+  discharges #104 (the invalid-UTF-8 decision), #107, #109 and #114. **Committed on
+  `sgykfjsm/batch-6c-us1-front-door`, not pushed, no PR.**
+
 ## In progress
 
-**Batch 6b — the Telegram sink.** Branch `sgykfjsm/batch-6b-telegram-sink`, cut from merged `main`
-and carrying the Batch 6a merge record. T028, T033, T034, T035 (issues #29, #34, #35, #36 — confirm
-against triage). HTTP surface, `internal/sink/telegram`.
+**Batch 6c-2 — event emission.** T040 and issue #41, plus #98 boxes 1–3, #110 and #111 via DEC-D3.
+Blocked on 6c-1 being reviewed and merged. Under DEC-D2 the orchestrator emits through a
+domain-shaped `post.Recorder` declared in `internal/post`, with the mapping onto `logging.Event` in
+`internal/app`, so `internal/post` keeps importing no other internal package —
+`internal/app/layering_test.go` now fails the build if it acquires one.
 
-Batch 6 as recorded was fourteen tasks (T027–T040) across four packages and two unrelated external
-surfaces, so triage split it into 6a (merged as `69e17e3`), 6b (this branch) and 6c (the CLI and
-wiring). The split is recorded in `state.yaml` under `batch_6_split`. **Do not re-derive Batch 6 as
-one unit.**
+**Between 6c-1 and 6c-2 the binary creates its log file and leaves it empty**, while printing that
+path on failure. Deliberate and recorded: the path is real and the file exists; only the records are
+owed.
 
-**6c still carries its recorded blocker.** T036 places `build.go` in `internal/post`, which cannot
-compile: the sink packages must import `internal/post` to implement `post.Sink`, so constructing
-them from there is a cycle. It also breaks the property Batch 5 established, that `internal/post`
-imports no other internal package. Decide the placement — `cmd/mp`, or a small wiring package —
-before 6c starts.
+Batch 6 as recorded was fourteen tasks across four packages and two unrelated external surfaces, so
+triage split it into 6a (`69e17e3`), 6b (`13705e0`), 6c-1 (this branch) and 6c-2.
+**Do not re-derive Batch 6 as one unit.**
 
 ## Review follow-ups
 
@@ -68,35 +74,36 @@ construct the logger with `Options.Redact`, and the `slog.Duration` nanosecond t
 
 ## Blockers
 
-None blocking. Two items are time-sensitive rather than blocking:
+None blocking. Time-sensitive rather than blocking:
 
-- Issue #98's decision is honoured in T025 and T030; T040 still owes the `path` field on the obsidian events and chat events carrying none.
+- Issue #98's decision is honoured in T025 and T030; T040 still owes the `path` field on the
+  obsidian events and chat events carrying none.
 - Issue #94 (`git_commit` reads `unknown` on tagged installs) must be resolved before `v0.1.0` is
   tagged. Still an open maintainer decision.
+- Two of issue #104's acceptance boxes are issue admin that Batch 6c-1 could not close: #113 must
+  be closed as a duplicate of #104, and #104 must record that Telegram's response to a
+  percent-encoded invalid byte was **never verified against the live service** — the decision rests
+  on the Bot API documentation plus tdlib's source.
+- Issue #37's body still names `internal/post/build.go`. `tasks.md` has been corrected; the issue
+  has not.
 
 ## Next best action
 
-Merge PR #112 (Batch 6a), then run `run-batch-cycle` for **Batch 6b — the Telegram sink** (T028,
-T033–T035; issues #29, #34, #35, #36).
+Review the Batch 6c-1 branch `sgykfjsm/batch-6c-us1-front-door` (committed, not pushed, no PR),
+then run `run-batch-cycle` for **Batch 6c-2 — event emission** (T040, issue #41).
 
-**Batch 6c** — the CLI and wiring (T029, T036–T040) — comes last and owns every obligation the
-earlier batches correctly declined:
+What 6c-2 inherits from 6c-1 rather than from the original plan:
 
-- **#107** — `logging.Open` does not apply `ResolvePath`, so a default install writes no
-  diagnostics at all (T039).
-- **#41** — T040 must pass `Options.Redact` or the bot-token scrub is inert.
-- **#98** — the `path` field on the three obsidian events, and chat events carrying none (T040).
-  Batch 6a discharged the `Sink`-stays-two-methods box and the midnight property at the sink.
-- **#109** — an upper bound on `sink_timeout_seconds`, at whichever task converts seconds to a
-  `time.Duration` (T036).
-- **#110** — a `Name()` panic leaves no trace for FR-071, if that is to be recorded.
-- **#111** — `Targeter` reports the last *started* post's path, not the calling post's, when two
-  posts overlap (T040).
+- The composition root is `internal/app`, so the `Recorder` adapter goes there and not in `cmd/mp`.
+- `internal/app/layering_test.go` fails the build if `internal/post` acquires any internal import,
+  so DEC-D2 is enforced rather than remembered.
+- `internal/cli/run.go` is where a front door's run sequence lives, so whatever T040 needs a front
+  door to pass in has one place to be added.
 
-6c also carries a known blocker: T036 places `build.go` in `internal/post`, which cannot compile —
-the sink packages import `internal/post` to implement `post.Sink`, so `internal/post` constructing
-them is an import cycle. Reproduced during the 6a contract review. It has to live in `cmd/mp` or a
-small wiring package.
+Still open from 6c-1's own scope, all recorded in `contracts/cli-interface.md` under
+**Not yet implemented**: FR-002 (the window, batch 7), FR-006 (T079), FR-007 (T080) and FR-018
+(T081). Each has a test pinning today's behaviour, so closing them is a deliberate change rather
+than a discovery.
 
 ## Important decisions
 
@@ -117,6 +124,12 @@ small wiring package.
 | 13 | The bot-token scrub is a chokepoint in `internal/logging`, not call-site discipline. The contract requires an `error` field on failures and its only natural source is `SinkResult.Err` — a `*url.Error` whose URL carries the token, which no value type can defend because an error has no `LogValue` and slog hands it to `json.Marshal`. `Options.Redact` takes `config.Secret`s and `ReplaceAttr` removes them at every depth. Exact-substring, so it cannot mangle legitimate text. **T040/T063 must pass the resolved token.** | `internal/logging/logger.go`, PR #106 |
 | 14 | The emission path `recover()`s and latches a panic as a degradation. `Options.Writer` is where rotation's rename/reopen logic will live, and a panic there would unwind into the sink's goroutine — diagnostics changing the post's outcome, which is the one thing FR-076 forbids. | `internal/logging/logger.go`, PR #106 |
 | 15 | The orchestrator enforces the per-sink timeout rather than trusting each sink to honour its context. `os.OpenFile`/`os.File.Write` take no context, so T031's obsidian sink on a synced or network mount would otherwise hold a post open indefinitely with its sibling's finished result unreachable. Delivery runs on a buffered channel and `run` stops waiting at timeout + a 250 ms grace, abandoning the goroutine. The context stays primary; the grace makes a cooperative sink's own error win deterministically. Accepted: an abandoned goroutine (~4.9 KiB, uncapped, reclaimed on unblock) and a possible phantom write. | `internal/post/service.go`, PR #108 |
+| 17 | The composition root is a new `internal/app` package (DEC-D1). T036's recorded `internal/post/build.go` cannot compile — both sinks import `internal/post` to implement `post.Sink` — and `cmd/mp` is wrong because `internal/gui` cannot import package `main`, so the GUI would need a second copy of the wiring. `internal/app` may import anything under `internal/`, and must never import a front door. | `internal/app/`, `plan.md`, Batch 6c-1 |
+| 18 | The two layering rules the compiler does **not** enforce — `internal/post` imports no other internal package (DEC-D2), and `internal/app` imports no front door (DEC-D1) — are asserted by a test that walks the module's import graph from source. Verified with two real mutants that compile. A rule only a reviewer enforces is a convention. | `internal/app/layering_test.go`, Batch 6c-1 |
+| 19 | `Message.Validate` rejects invalid UTF-8, with its own `ErrInvalidUTF8` (DEC-D4, issue #104). Not because the spec requires it — the spec is silent and its clauses conflict — but because the alternative's central promise is false: the chat service refuses those bytes, the JSON Lines log substitutes U+FFFD, and Obsidian re-serialises the note at the next save. The real status quo was a half-delivered post. Accepted cost: a legacy Shift_JIS or EUC-JP terminal cannot use the CLI until its locale is fixed. | `internal/post/message.go`, `spec.md` FR-009a, constitution 1.0.1 |
+| 20 | `logging.Open` resolves an empty `Path` itself (#107), and a resolution failure becomes an ordinary `Degradation` so the no-error signature survives. Resolving in the caller was rejected: it leaves the trap in place for the second front door, and `Options.Path`'s doc comment had already proved that a comment is the weakest enforcement available. | `internal/logging/logger.go`, Batch 6c-1 |
+| 21 | Both timeout keys are bounded **above** by one shared rule in `config.Validate` (#109, #114), at the largest whole second a `time.Duration` holds. The dangerous value is not the obvious overflow: `18446744074` wraps to a *positive* 290 ms, so it passes every floor downstream. The in-package clamps in `internal/sink/telegram` are **kept** as the second of two independent guards, deliberately — `New` is exported and does not require validated settings, and `http.Client` reads `Timeout: 0` as unbounded. | `internal/config/validate.go`, `contracts/config-schema.md`, `contracts/telegram-sink.md` |
+| 22 | `cmd/mp`'s tests build the real binary and run it. A test reading the `int` that `cli.Run` returns proves nothing about `os.Exit` being reached with that value, and `os.Exit` skips deferred flushes so a buffered writer would lose the report invisibly. Both were confirmed by mutants under which the whole of `./internal/...` stays green. | `cmd/mp/main_test.go`, Batch 6c-1 |
 | 16 | Both of a `Sink`'s methods are sink code and both run inside the bound. `Name()` was outside it twice — first outside the panic guard, then outside the timer — and each time reproduced the same class of failure the other method's guard existed to prevent. The name is published on a buffered channel so abandonment still attributes the result. | `internal/post/service.go`, PR #108 |
 
 ## Touched files

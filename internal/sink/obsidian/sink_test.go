@@ -1660,3 +1660,69 @@ func TestACreatedNoteIsPrivateToTheUser(t *testing.T) {
 		}
 	})
 }
+
+// TestTheMessageBodyIsWrittenByteForByte is the byte-exactness assertion this
+// package lacked (issue #104, "whichever option wins").
+//
+// Every other test here reads the note through a substring or a prefix check,
+// which is the right shape for what those tests are about and cannot see a body
+// that was normalised, re-encoded, or run through a formatter on its way to
+// disk. FR-011 and FR-012 make non-transformation of the body load-bearing, and
+// until now it was pinned only in internal/sink/telegram — so the two sinks
+// could have diverged on exactly the property the two-sink design exists to
+// guarantee, with nothing failing.
+//
+// The comparison is against a line this test assembles from the message's own
+// bytes, so it fails on any change to them rather than on a re-derivation that
+// would change with the code. FR-047's CR and LF handling is a separate rule
+// with its own test, so no case here contains a line break; what is asserted is
+// that everything else survives.
+//
+// The invalid-UTF-8 rows are deliberate under decision DEC-D4. Message.Validate
+// now refuses those bytes, so no front door can deliver them — but Send takes a
+// post.Message and a Message can be constructed without passing a front door, so
+// the sink must not start assuming validation ran. If DEC-D4 is ever reversed
+// (issue #104 records what would change the decision), these rows are already
+// the guard.
+func TestTheMessageBodyIsWrittenByteForByte(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+	}{
+		{name: "plain ASCII", body: "hello world"},
+		{name: "japanese", body: "日本語のメモ"},
+		{name: "emoji with a variation selector", body: "\U0001F363️ sushi"},
+		{name: "a combining mark", body: "éclair"},
+		{name: "an encoded replacement character", body: "already � mangled"},
+		{name: "markdown that must not be escaped", body: "*bold* _under_ `code` [x](y)"},
+		{name: "a literal br tag the user typed", body: "not a newline: <br>"},
+		{name: "an existing bullet prefix", body: "- 09:15 looks like an entry"},
+		{name: "leading and trailing spaces", body: "  padded  "},
+		{name: "an ideographic space", body: "a　b"},
+		{name: "a tab", body: "a\tb"},
+		{name: "a NUL", body: "a\x00b"},
+		{name: "a lone 0xFF", body: "a\xffb"},
+		{name: "shift_jis bytes", body: "\x93\xfa\x96\x7b\x8c\xea"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+
+			// Not mustMessage: half these bodies are exactly what
+			// Message.Validate refuses, and the point of the row is that the
+			// sink does not depend on that.
+			sink := obsidian.NewWithClock(settingsFor(dir), fixedClock(noon))
+
+			if err := sink.Send(t.Context(), post.Message{Original: tt.body}); err != nil {
+				t.Fatalf("Send: %v", err)
+			}
+
+			want := "- " + noon.Format("15:04") + " " + tt.body + "\n"
+
+			if got := readNote(t, notePath(dir, noon)); got != want {
+				t.Errorf("the note holds\n  %q\nwant\n  %q", got, want)
+			}
+		})
+	}
+}
