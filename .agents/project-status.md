@@ -1,6 +1,6 @@
 # Project status — miko-post
 
-_Last updated: 2026-09-09_
+_Last updated: 2026-09-10_
 
 ## Objective
 
@@ -15,7 +15,8 @@ per PR, driven by the `run-batch-cycle` skill.
 
 - Phase 1 Setup — complete (Batch 1, `0a00212`, PR #93)
 - Phase 2 Foundational — **complete** (posting core contracts, settings, diagnostics, orchestrator)
-- Phases 3-9 (six user stories, polish) — not started; Batch 6 is the first end-to-end slice
+- Phase 3 US1 (the CLI slice) — **complete** with Batch 6c-2, pending review
+- Phases 4-9 (five user stories, polish) — not started; Batch 7 is US2, the Fyne GUI
 
 ## Completed
 
@@ -40,30 +41,45 @@ per PR, driven by the `run-batch-cycle` skill.
 - **Batch 6b** — Telegram chat sink (T028, T033–T035). PR #116, merged as `13705e0`.
 - **Batch 6c-1** — the US1 front door and wiring: the `internal/app` composition root, CLI parsing
   and rendering, and `cmd/mp` with one `os.Exit` (T029, T036–T039; issues #30, #37–#40). Also
-  discharges #104 (the invalid-UTF-8 decision), #107, #109 and #114. **Committed on
-  `sgykfjsm/batch-6c-us1-front-door`, not pushed, no PR.**
+  discharged #104 (the invalid-UTF-8 decision), #107, #109 and #114. PR #120, merged as `f757707`.
 
 ## In progress
 
-**Batch 6c-2 — event emission.** Branch `sgykfjsm/batch-6c2-event-emission`, cut from merged `main`
-and carrying the Batch 6c-1 merge record. T040 and issue #41, plus #98 boxes 1–3, #110 and #111.
-Prerequisites met: both sinks and the front door are merged.
+**Batch 6c-2 — event emission.** Branch `sgykfjsm/batch-6c2-event-emission`. **Implemented and
+validated; not reviewed, not committed.** T040 and issue #41, plus #98, #110 and #111. `make check`
+clean; 100.0% statement coverage in `internal/post` and `internal/app`, 99.5% in `internal/logging`
+(unchanged). Thirty-two mutants built, one surviving by design.
 
 Under **DEC-D2** the orchestrator emits through a domain-shaped `post.Recorder` declared in
-`internal/post`, with the mapping onto `logging.Event` in `internal/app`, so `internal/post` keeps
-importing no other internal package — `internal/app/layering_test.go` fails the build if it acquires
-one. Under **DEC-D3** the orchestrator installs a per-call target reporter on the context, which
-closes #98 box 1 and #111 together and deprecates `post.Targeter`.
+`internal/post`, with the mapping onto `logging.Event` in `internal/app/recorder.go`, so
+`internal/post` still imports no other internal package — `internal/app/layering_test.go` fails the
+build if it acquires one. Under **DEC-D3** `post.ReportTarget` carries the resolved note per call on
+the context, which closes #98 and #111 together; `post.Targeter` is deleted, and the obsidian sink
+lost its target field and mutex with it.
 
-**Four review obligations are inherited**, recorded in `state.yaml` under
-`in_progress[0].inherited_review_obligations`. The load-bearing one: `internal/logging`'s event-name
-test scans its own package and cannot see the adapter, so 6c-2 **must** assert that the adapter's
-producible event-name set equals the orchestrator-reachable subset of `AllEvents()` — otherwise an
-unmapped event silently never fires.
+**Three decisions this batch took, recorded as DEC-E1 to DEC-E3 in `state.yaml`.** `TargetReporting`
+is a declaration interface with one empty method, because the orchestrator has to know *before*
+`Send` whether to hold a sink's start event, and no method can return a per-post value.
+`error_type` is emitted now with two values from the same predicate that picks the display reason,
+so T056 widens the vocabulary rather than changing it. #110's recovered `Name` panic goes on the
+post's terminal record, because a panicking `Name` resolves to a sentinel the sink-keyed event
+vocabulary cannot cover — which also means an unmappable sink name would otherwise have produced no
+records and said nothing.
 
-Two open questions to answer rather than default: whether `error_type` is emitted from today's two
-`Reason` constants or omitted until T056 (batch 8), and whether the `message` field is omitted
-entirely until T071 (batch 10) with only `message_len` recorded.
+**All four inherited review obligations are discharged**, including the load-bearing one:
+`TestTheAdapterProducesEveryOrchestratorReachableEvent` compares the adapter's producible set
+against `logging.AllEvents()` in both directions, with the three formatting-fallback names listed as
+deferred to T063. Killed by a mutant that removes the telegram lifecycle from the adapter's table.
+
+**Both open questions answered rather than defaulted.** `error_type`: emitted (DEC-E2). `message`:
+not emitted anywhere, with FR-068 recorded as knowingly unmet until T071 in `tasks.md` and in a new
+section of `contracts/log-events.md`.
+
+**One fix reaches outside the batch.** `internal/logging` emitted `level` as `"INFO"`/`"ERROR"` for
+every logger with `Options.Redact` armed — so every real run since 6c-1 — because the credential
+scrub consumed the level attribute before the rename could see it. T040's records cannot satisfy
+`contracts/log-events.md` without it. Three lines, plus the test that arms `Redact` and would have
+caught it; the package's own lowercase test passed throughout because it configures no credential.
 
 ## Review follow-ups
 
@@ -82,73 +98,32 @@ construct the logger with `Options.Redact`, and the `slog.Duration` nanosecond t
 
 None blocking. Time-sensitive rather than blocking:
 
-- Issue #98's decision is honoured in T025 and T030; T040 still owes the `path` field on the
-  obsidian events and chat events carrying none.
 - Issue #94 (`git_commit` reads `unknown` on tagged installs) must be resolved before `v0.1.0` is
   tagged. Still an open maintainer decision.
-- Two of issue #104's acceptance boxes are issue admin that Batch 6c-1 could not close: #113 must
-  be closed as a duplicate of #104, and #104 must record that Telegram's response to a
-  percent-encoded invalid byte was **never verified against the live service** — the decision rests
-  on the Bot API documentation plus tdlib's source.
-- Issue #37's body still names `internal/post/build.go`. `tasks.md` has been corrected; the issue
-  has not.
+- Issue #119 is open and untouched: no test drives two destinations both succeeding, and `cli.Run`
+  still has no sink seam. Batch 6c-2 changed `NewService`'s signature in that same function without
+  closing it — a seam is its own decision, and the issue's acceptance is a mutant rather than a test.
+- The live check that would settle DEC-D4's one unverified premise — one `sendMessage` with
+  `text=a%FFb` — now hangs on #92 (T091), which is the only task with a bot token in scope. Issue
+  #104 is closed.
 
 ## Next best action
 
-Review the Batch 6c-1 branch `sgykfjsm/batch-6c-us1-front-door` (committed, not pushed, no PR),
-then run `run-batch-cycle` for **Batch 6c-2 — event emission** (T040, issue #41).
+Review the Batch 6c-2 branch `sgykfjsm/batch-6c2-event-emission`, then open its PR. `make check` is
+clean and the touched packages read 100.0% statement coverage.
 
-What 6c-2 inherits from 6c-1 rather than from the original plan:
+Three places this batch made a judgement rather than followed a decision, which is where a review
+should start:
 
-- The composition root is `internal/app`, so the `Recorder` adapter goes there and not in `cmd/mp`.
-- `internal/app/layering_test.go` fails the build if `internal/post` acquires any internal import,
-  so DEC-D2 is enforced rather than remembered.
-- `internal/cli/run.go` is where a front door's run sequence lives, so whatever T040 needs a front
-  door to pass in has one place to be added.
+- **DEC-E1** — `post.TargetReporting` is a declaration interface with one empty method that nothing
+  calls. The doc comment argues why a method cannot return the value, and the rejected alternative
+  is recorded in `state.yaml`.
+- **DEC-E2** — `error_type` is emitted now with two values, ahead of T056's classification.
+- **DEC-E3** — #110's recovered `Name` panic lands on the post's terminal record's `error` field,
+  including on a `request_completed` record for a post that succeeded.
 
-Still open from 6c-1's own scope, all recorded in `contracts/cli-interface.md` under
-**Not yet implemented**: FR-002 (the window, batch 7), FR-006 (T079), FR-007 (T080) and FR-018
-(T081). Each has a test pinning today's behaviour, so closing them is a deliberate change rather
-than a discovery.
+One change reaches outside the batch deliberately: the `internal/logging` level-field fix, without
+which T040's records cannot satisfy `contracts/log-events.md`.
 
-## Important decisions
-
-| # | Decision | Where recorded |
-|---|---|---|
-| 1 | `AllSucceeded` returns `false` for an empty result slice, not the vacuous `true`. The aggregate drives the exit status; exiting 0 for a post that reached no destination is what the status exists to prevent. FR-018 should make it unreachable. | `internal/post/result.go`, PR #97 |
-| 2 | `SinkResult` carries five render guards (`String`, `GoString`, `Format`, `MarshalJSON`, `LogValue`) routing `Err` through one `errMarker`, so no default Go render can emit the bot token. Matches the four-method pattern `data-model.md` prescribes for `Secret`, plus `Formatter`. | `internal/post/result.go`, PR #97 |
-| 3 | Note events keep orchestrator ownership; the obsidian sink exposes its resolved target via an optional `Targeter` interface. Rejected re-deriving the path in the orchestrator, which double-calls `time.Now()` and misreports across local midnight. | Issue #98 |
-| 4 | T003 is re-scoped: dependencies are pinned by the batch that first imports them (go-toml → settings, ulid → orchestrator, fyne → GUI), because `go mod tidy` drops an unimported requirement. | Issue #4 comment, `tasks.md` T003 |
-| 5 | `Message` carries no rune/byte accessors; `data-model.md` lists them but T006 scopes the type to the original text and T072 places the derivation in `internal/logging`. | PR #97 |
-| 6 | `Secret` holds its value behind a `*string` and implements five render guards, not the four `data-model.md` prescribes. `fmt` reaches unexported fields by reflection (`%d` printed the token), and `%p`/`%w` bypass `Formatter` — the pointer closes those two. | `internal/config/secret.go`, PR #100 |
-| 7 | `Load` never renders the settings document: go-toml's `DecodeError.String()` echoes context from the enclosing table header, reproducing `bot_token` for any defect in `[sink.telegram]`. Position and key path only. | `internal/config/load.go`, PR #100 |
-| 8 | The two Obsidian format keys are validated by what they **render**, and Go's `MST` element is rejected so the rendering is zone-independent. Sampling instants cannot work: a `Location` is not a zone, and a hostile TZif makes the transition schedule the attacker's. | `internal/config/validate.go`, `contracts/config-schema.md`, PR #100 |
-| 9 | FR-018's all-sinks-disabled check stays out of `config.Load` — a front-door rule (T081 CLI, T082 GUI). `data-model.md` and `plan.md` amended. | `data-model.md`, `plan.md`, PR #100 |
-| 10 | The logging type with no logging methods: `Logger.Post(messageID)` returns the only type that can emit. `message_id` is contractually on every record, and an attribute callers are asked to remember is one they forget — requiring it to *construct* the emitter makes the omission inexpressible. The event name travels in slog's message slot for the same reason: slog always emits a message, so the field cannot go missing. | `internal/logging/logger.go`, PR #106 |
-| 11 | `Open` returns no error and no `*Degradation`. FR-076 requires a diagnostics failure to change nothing about the post, and an error return invites the caller that treats it as fatal or holds a nil `*Logger`; a second `*Degradation` return invited emitting FR-076's single warning twice. A discarding logger is still a logger, and `Degraded()` is the one source of truth — it also covers a write that fails after a successful open. | `internal/logging/logger.go`, PR #106 |
-| 12 | `Open` refuses a non-regular file at the log path before opening it. `os.OpenFile` on a FIFO blocks inside `open(2)` until a reader attaches, so a named pipe at the log path stopped the post dead — no degradation, no warning, nothing. `os.Stat` not `Lstat`, so a symlink to a regular file still works. Device nodes are allowed: `logging.path` has no disable toggle, so `/dev/null` is how a user opts out. | `internal/logging/logger.go`, PR #106 |
-| 13 | The bot-token scrub is a chokepoint in `internal/logging`, not call-site discipline. The contract requires an `error` field on failures and its only natural source is `SinkResult.Err` — a `*url.Error` whose URL carries the token, which no value type can defend because an error has no `LogValue` and slog hands it to `json.Marshal`. `Options.Redact` takes `config.Secret`s and `ReplaceAttr` removes them at every depth. Exact-substring, so it cannot mangle legitimate text. **T040/T063 must pass the resolved token.** | `internal/logging/logger.go`, PR #106 |
-| 14 | The emission path `recover()`s and latches a panic as a degradation. `Options.Writer` is where rotation's rename/reopen logic will live, and a panic there would unwind into the sink's goroutine — diagnostics changing the post's outcome, which is the one thing FR-076 forbids. | `internal/logging/logger.go`, PR #106 |
-| 15 | The orchestrator enforces the per-sink timeout rather than trusting each sink to honour its context. `os.OpenFile`/`os.File.Write` take no context, so T031's obsidian sink on a synced or network mount would otherwise hold a post open indefinitely with its sibling's finished result unreachable. Delivery runs on a buffered channel and `run` stops waiting at timeout + a 250 ms grace, abandoning the goroutine. The context stays primary; the grace makes a cooperative sink's own error win deterministically. Accepted: an abandoned goroutine (~4.9 KiB, uncapped, reclaimed on unblock) and a possible phantom write. | `internal/post/service.go`, PR #108 |
-| 17 | The composition root is a new `internal/app` package (DEC-D1). T036's recorded `internal/post/build.go` cannot compile — both sinks import `internal/post` to implement `post.Sink` — and `cmd/mp` is wrong because `internal/gui` cannot import package `main`, so the GUI would need a second copy of the wiring. `internal/app` may import anything under `internal/`, and must never import a front door. | `internal/app/`, `plan.md`, Batch 6c-1 |
-| 18 | The two layering rules the compiler does **not** enforce — `internal/post` imports no other internal package (DEC-D2), and `internal/app` imports no front door (DEC-D1) — are asserted by a test that walks the module's import graph from source. Verified with two real mutants that compile. A rule only a reviewer enforces is a convention. | `internal/app/layering_test.go`, Batch 6c-1 |
-| 19 | `Message.Validate` rejects invalid UTF-8, with its own `ErrInvalidUTF8` (DEC-D4, issue #104). Not because the spec requires it — the spec is silent and its clauses conflict — but because the alternative's central promise is false: the chat service refuses those bytes, the JSON Lines log substitutes U+FFFD, and Obsidian re-serialises the note at the next save. The real status quo was a half-delivered post. Accepted cost: a legacy Shift_JIS or EUC-JP terminal cannot use the CLI until its locale is fixed. | `internal/post/message.go`, `spec.md` FR-009a, constitution 1.0.1 |
-| 20 | `logging.Open` resolves an empty `Path` itself (#107), and a resolution failure becomes an ordinary `Degradation` so the no-error signature survives. Resolving in the caller was rejected: it leaves the trap in place for the second front door, and `Options.Path`'s doc comment had already proved that a comment is the weakest enforcement available. | `internal/logging/logger.go`, Batch 6c-1 |
-| 21 | Both timeout keys are bounded **above** by one shared rule in `config.Validate` (#109, #114), at the largest whole second a `time.Duration` holds. The dangerous value is not the obvious overflow: `18446744074` wraps to a *positive* 290 ms, so it passes every floor downstream. The in-package clamps in `internal/sink/telegram` are **kept** as the second of two independent guards, deliberately — `New` is exported and does not require validated settings, and `http.Client` reads `Timeout: 0` as unbounded. | `internal/config/validate.go`, `contracts/config-schema.md`, `contracts/telegram-sink.md` |
-| 22 | `cmd/mp`'s tests build the real binary and run it. A test reading the `int` that `cli.Run` returns proves nothing about `os.Exit` being reached with that value, and `os.Exit` skips deferred flushes so a buffered writer would lose the report invisibly. Both were confirmed by mutants under which the whole of `./internal/...` stays green. | `cmd/mp/main_test.go`, Batch 6c-1 |
-| 16 | Both of a `Sink`'s methods are sink code and both run inside the bound. `Name()` was outside it twice — first outside the panic guard, then outside the timer — and each time reproduced the same class of failure the other method's guard existed to prevent. The name is published on a buffered channel so abandonment still attributes the result. | `internal/post/service.go`, PR #108 |
-
-## Touched files
-
-- `internal/config/` — `secret.go`, `paths.go`, `settings.go`, `load.go`, `validate.go`,
-  `credential.go`, their tests, and `export_test.go`
-- `testdata/config/` — five TOML fixtures
-- `go.mod`, `go.sum` — go-toml/v2@v2.4.3 as a direct requirement
-- `specs/001-dual-sink-quick-post/` — `tasks.md` (T011-T020 complete), and amendments to
-  `contracts/config-schema.md`, `data-model.md`, `plan.md`
-- `internal/logging/` — `events.go`, `logger.go`, their tests, `logger_unix_test.go` (the FIFO
-  case, build-tagged `unix`), and `export_test.go`
-- `internal/post/` — `service.go`, `service_test.go` (the orchestrator), and `result.go` with one
-  comment corrected
-- `go.mod`, `go.sum` — `oklog/ulid/v2@v2.1.2` as a direct requirement
-- `.specify/integrations/claude.manifest.json` — spec-kit installer timestamp, unrelated to the feature
+After 6c-2, **Batch 7 (US2, the Fyne GUI, T041–T051)** is next. It needs the `fyne/v2` pin, which is
+the last third of issue #4 and the first dependency added since batch 5.

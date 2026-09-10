@@ -172,7 +172,7 @@ func TestBothSinksRunAndBothResultsAreReported(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 
-			service := New([]Sink{test.telegram, test.obsidian}, generousTimeout)
+			service := New([]Sink{test.telegram, test.obsidian}, generousTimeout, nil)
 			outcome := service.Post(mustMessage(t, "今日も美琴が可愛い♡"))
 
 			// Both sinks ran. Asserted on the sinks themselves, not inferred
@@ -269,7 +269,7 @@ func TestOneSinkFailingDoesNotCancelItsSibling(t *testing.T) {
 		},
 	}
 
-	service := New([]Sink{failing, watching}, generousTimeout)
+	service := New([]Sink{failing, watching}, generousTimeout, nil)
 	outcome := service.Post(mustMessage(t, "independent"))
 
 	sibling := resultFor(t, outcome, "obsidian")
@@ -340,7 +340,7 @@ func TestSinksActuallyOverlap(t *testing.T) {
 
 	telegram, obsidian := rendezvous("telegram"), rendezvous("obsidian")
 
-	service := New([]Sink{telegram, obsidian}, 5*time.Second)
+	service := New([]Sink{telegram, obsidian}, 5*time.Second, nil)
 	outcome := service.Post(mustMessage(t, "concurrent"))
 
 	for _, result := range outcome.Results {
@@ -371,7 +371,7 @@ func TestABlockingSinkYieldsATimeoutAndDoesNotStallItsSibling(t *testing.T) {
 
 	quick := succeeds("obsidian")
 
-	service := New([]Sink{blocking, quick}, timeout)
+	service := New([]Sink{blocking, quick}, timeout, nil)
 
 	started := time.Now()
 	outcome := service.Post(mustMessage(t, "one sink hangs"))
@@ -455,7 +455,7 @@ func TestAPanickingSinkBecomesAFailureAndItsSiblingStillReports(t *testing.T) {
 
 			sibling := succeeds("obsidian")
 
-			service := New([]Sink{panicking, sibling}, generousTimeout)
+			service := New([]Sink{panicking, sibling}, generousTimeout, nil)
 			outcome := service.Post(mustMessage(t, "one sink panics"))
 
 			if len(outcome.Results) != 2 {
@@ -531,7 +531,7 @@ func TestEverySinkReceivesTheIdenticalOriginalMessage(t *testing.T) {
 
 	telegram, obsidian := succeeds("telegram"), succeeds("obsidian")
 
-	service := New([]Sink{telegram, obsidian}, generousTimeout)
+	service := New([]Sink{telegram, obsidian}, generousTimeout, nil)
 	outcome := service.Post(mustMessage(t, text))
 
 	for _, sink := range []*fakeSink{telegram, obsidian} {
@@ -582,7 +582,7 @@ func TestResultsFollowTheSinkOrderNotTheCompletionOrder(t *testing.T) {
 		},
 	}
 
-	service := New([]Sink{slow, fast}, generousTimeout)
+	service := New([]Sink{slow, fast}, generousTimeout, nil)
 	outcome := service.Post(mustMessage(t, "ordered"))
 
 	if len(outcome.Results) != 2 {
@@ -611,7 +611,7 @@ func TestEachResultRecordsHowLongItsSinkTook(t *testing.T) {
 		},
 	}
 
-	service := New([]Sink{slow}, generousTimeout)
+	service := New([]Sink{slow}, generousTimeout, nil)
 	outcome := service.Post(mustMessage(t, "timed"))
 
 	if got := resultFor(t, outcome, "telegram").Duration; got < spent {
@@ -628,7 +628,7 @@ func TestEachResultRecordsHowLongItsSinkTook(t *testing.T) {
 func TestPostWithNoSinksReportsNothingDelivered(t *testing.T) {
 	t.Parallel()
 
-	outcome := New(nil, generousTimeout).Post(mustMessage(t, "nowhere to go"))
+	outcome := New(nil, generousTimeout, nil).Post(mustMessage(t, "nowhere to go"))
 
 	if len(outcome.Results) != 0 {
 		t.Errorf("got %d results, want none", len(outcome.Results))
@@ -644,7 +644,7 @@ func TestPostWithNoSinksReportsNothingDelivered(t *testing.T) {
 func TestEveryPostGetsItsOwnIdentifier(t *testing.T) {
 	t.Parallel()
 
-	service := New([]Sink{succeeds("telegram")}, generousTimeout)
+	service := New([]Sink{succeeds("telegram")}, generousTimeout, nil)
 
 	before := time.Now()
 	first := service.Post(mustMessage(t, "one"))
@@ -716,7 +716,7 @@ func TestAFailureToGenerateAnIdentifierStillPosts(t *testing.T) {
 
 	sink := succeeds("telegram")
 
-	service := New([]Sink{sink}, generousTimeout)
+	service := New([]Sink{sink}, generousTimeout, nil)
 	// A *populated* identifier alongside the error, which is what the real
 	// generator does: ulid.New applies SetTime before it reads entropy, so an
 	// entropy failure returns a half-built, non-zero ULID together with the
@@ -765,7 +765,7 @@ func TestConcurrentPostsOnOneServiceDoNotInterfere(t *testing.T) {
 	service := New([]Sink{
 		&fakeSink{name: "telegram"},
 		&fakeSink{name: "obsidian"},
-	}, generousTimeout)
+	}, generousTimeout, nil)
 
 	var (
 		running sync.WaitGroup
@@ -904,7 +904,7 @@ func TestEachSinkGetsItsOwnDeadline(t *testing.T) {
 	service := New([]Sink{
 		record("telegram", timeout*3/4),
 		record("obsidian", timeout*3/4),
-	}, timeout)
+	}, timeout, nil)
 
 	outcome := service.Post(mustMessage(t, "budgets"))
 
@@ -1012,7 +1012,7 @@ func TestAPanicFromNameIsContainedLikeAnyOther(t *testing.T) {
 
 			sinks := test.sinks()
 
-			outcome := New(sinks, generousTimeout).Post(mustMessage(t, "one sink is broken"))
+			outcome := New(sinks, generousTimeout, nil).Post(mustMessage(t, "one sink is broken"))
 
 			// Reaching this line at all is most of the assertion: before the
 			// fix the process died here.
@@ -1142,7 +1142,7 @@ func TestASinkThatIgnoresItsContextIsAbandoned(t *testing.T) {
 				t.Cleanup(func() { test.clean(test.sink) })
 			}
 
-			service := New([]Sink{test.sink, succeeds("telegram")}, timeout)
+			service := New([]Sink{test.sink, succeeds("telegram")}, timeout, nil)
 
 			message := mustMessage(t, "the vault is on a dead mount")
 			finished := make(chan Outcome, 1)
@@ -1214,7 +1214,7 @@ func (goexitSink) Send(context.Context, Message) error {
 func TestAnAbnormalExitStillYieldsAWellFormedFailure(t *testing.T) {
 	t.Parallel()
 
-	outcome := New([]Sink{goexitSink{}, succeeds("obsidian")}, generousTimeout).
+	outcome := New([]Sink{goexitSink{}, succeeds("obsidian")}, generousTimeout, nil).
 		Post(mustMessage(t, "one sink Goexits"))
 
 	if len(outcome.Results) != 2 {
@@ -1275,7 +1275,7 @@ func TestAPanicValueThatCannotRenderDoesNotPanicAgain(t *testing.T) {
 		},
 	}
 
-	outcome := New([]Sink{hostile, succeeds("obsidian")}, generousTimeout).
+	outcome := New([]Sink{hostile, succeeds("obsidian")}, generousTimeout, nil).
 		Post(mustMessage(t, "the panic value cannot render itself"))
 
 	failed := resultFor(t, outcome, "telegram")
@@ -1327,7 +1327,7 @@ func TestNewReplacesATimeoutThatCannotBoundAnything(t *testing.T) {
 				send: func(ctx context.Context, _ Message) error { return ctx.Err() },
 			}
 
-			outcome := New([]Sink{sink}, timeout).Post(mustMessage(t, "misconfigured"))
+			outcome := New([]Sink{sink}, timeout, nil).Post(mustMessage(t, "misconfigured"))
 
 			result := resultFor(t, outcome, "telegram")
 			if !result.Success {
@@ -1387,7 +1387,7 @@ func TestNameIsBoundedLikeSend(t *testing.T) {
 		blocked := &obstinateNameSink{label: "obsidian", block: make(chan struct{})}
 		t.Cleanup(func() { close(blocked.block) })
 
-		service := New([]Sink{blocked, succeeds("telegram")}, timeout)
+		service := New([]Sink{blocked, succeeds("telegram")}, timeout, nil)
 
 		finished := make(chan Outcome, 1)
 		message := mustMessage(t, "Name is stuck")
@@ -1422,7 +1422,7 @@ func TestNameIsBoundedLikeSend(t *testing.T) {
 		t.Parallel()
 
 		outcome := New([]Sink{&obstinateNameSink{label: "obsidian", goexit: true}, succeeds("telegram")},
-			generousTimeout).Post(mustMessage(t, "Name Goexits"))
+			generousTimeout, nil).Post(mustMessage(t, "Name Goexits"))
 
 		abnormal := outcome.Results[0]
 
@@ -1448,7 +1448,7 @@ func TestNameIsBoundedLikeSend(t *testing.T) {
 
 		const slow = 120 * time.Millisecond
 
-		outcome := New([]Sink{&obstinateNameSink{label: "obsidian", slowFor: slow}}, generousTimeout).
+		outcome := New([]Sink{&obstinateNameSink{label: "obsidian", slowFor: slow}}, generousTimeout, nil).
 			Post(mustMessage(t, "Name is slow"))
 
 		result := resultFor(t, outcome, "obsidian")
@@ -1471,7 +1471,7 @@ func TestAnAbandonedSinkKeepsItsNameWhenItHasOne(t *testing.T) {
 	hung := &uncooperativeSink{name: "obsidian", release: make(chan struct{})}
 	t.Cleanup(func() { close(hung.release) })
 
-	service := New([]Sink{hung, succeeds("telegram")}, 100*time.Millisecond)
+	service := New([]Sink{hung, succeeds("telegram")}, 100*time.Millisecond, nil)
 
 	finished := make(chan Outcome, 1)
 	message := mustMessage(t, "Send hangs, Name is fine")
@@ -1506,7 +1506,7 @@ func TestAHugeTimeoutIsNotAnInstantTimeout(t *testing.T) {
 
 			sink := succeeds("telegram")
 
-			outcome := New([]Sink{sink}, timeout).Post(mustMessage(t, "effectively unbounded"))
+			outcome := New([]Sink{sink}, timeout, nil).Post(mustMessage(t, "effectively unbounded"))
 
 			result := resultFor(t, outcome, "telegram")
 			if !result.Success {
@@ -1534,7 +1534,7 @@ func TestNewCopiesTheSinks(t *testing.T) {
 
 	sinks := []Sink{intended}
 
-	service := New(sinks, generousTimeout)
+	service := New(sinks, generousTimeout, nil)
 
 	// The caller reuses its slice after handing it over.
 	sinks[0] = intruder
@@ -1580,7 +1580,7 @@ func TestACooperativeSinkReportsItsOwnTimeoutNotTheBackstops(t *testing.T) {
 		},
 	}
 
-	outcome := New([]Sink{cooperative}, timeout).Post(mustMessage(t, "the sink honours its deadline"))
+	outcome := New([]Sink{cooperative}, timeout, nil).Post(mustMessage(t, "the sink honours its deadline"))
 
 	result := resultFor(t, outcome, "telegram")
 
@@ -1623,7 +1623,7 @@ func TestASlowNameDoesNotCostTheSinkItsOwnDeadline(t *testing.T) {
 
 	slowlyNamed := &deadlineObservingSink{label: "obsidian", nameCost: nameCost}
 
-	outcome := New([]Sink{slowlyNamed}, timeout).Post(mustMessage(t, "Name is slower than the grace"))
+	outcome := New([]Sink{slowlyNamed}, timeout, nil).Post(mustMessage(t, "Name is slower than the grace"))
 
 	result := resultFor(t, outcome, "obsidian")
 
@@ -1692,7 +1692,7 @@ func TestAbandonedDeliveriesAreReclaimed(t *testing.T) {
 	release := make(chan struct{})
 	hung := &uncooperativeSink{name: "obsidian", release: release}
 
-	service := New([]Sink{hung}, time.Millisecond)
+	service := New([]Sink{hung}, time.Millisecond, nil)
 
 	for range posts {
 		service.Post(mustMessage(t, "the mount is dead"))
@@ -1782,7 +1782,7 @@ const panicNilSubprocessEnv = "MIKO_POST_PANICNIL_CASE"
 func runPanicNilCase(t *testing.T) {
 	t.Helper()
 
-	outcome := New([]Sink{panicNilSink{}, succeeds("obsidian")}, generousTimeout).
+	outcome := New([]Sink{panicNilSink{}, succeeds("obsidian")}, generousTimeout, nil).
 		Post(mustMessage(t, "the sink panics with nil"))
 
 	if len(outcome.Results) != 2 {

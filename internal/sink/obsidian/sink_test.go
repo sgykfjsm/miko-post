@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -333,15 +334,65 @@ func TestAMissingNoteRespectsCreateIfMissing(t *testing.T) {
 	})
 }
 
-// TestTargetReportsWhatSendActuallyWrote covers post.Targeter and the trap
-// issue #98 exists to document.
+// reportedTargets collects what a sink reports through post.ReportTarget.
 //
-// A Target that re-resolved on call would disagree with Send across local
-// midnight, and the log would then name a file the post never touched — the
-// exact reconstruction trail SC-008 and constitution principle III guarantee.
-// The clock advances past midnight between the write and the read, which is a
-// claim no test could make by waiting.
-func TestTargetReportsWhatSendActuallyWrote(t *testing.T) {
+// This is the value the orchestrator sees, and it is per post rather than per
+// sink: each post installs its own collector on its own context, which is what
+// makes "this post's note" a property of the plumbing rather than of timing
+// (decision DEC-D3, issue #111).
+type reportedTargets struct {
+	mu      sync.Mutex
+	reports []string
+}
+
+func (r *reportedTargets) record(target string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	r.reports = append(r.reports, target)
+}
+
+func (r *reportedTargets) all() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	return slices.Clone(r.reports)
+}
+
+// only returns the single target this post reported, failing the test when the
+// sink reported none or more than one.
+//
+// Both failures matter to the orchestrator rather than only to this test. No
+// report means the start event carries no path; two mean the sink contradicted
+// itself after a record had already been written, and only the first is kept.
+func (r *reportedTargets) only(t *testing.T) string {
+	t.Helper()
+
+	reports := r.all()
+	if len(reports) != 1 {
+		t.Fatalf("the sink reported %d targets (%q), want exactly one", len(reports), reports)
+	}
+
+	return reports[0]
+}
+
+// reporting returns a context carrying a fresh collector, as the orchestrator's
+// per-Send context does.
+func reporting(ctx context.Context) (context.Context, *reportedTargets) {
+	collected := &reportedTargets{}
+
+	return post.WithTargetReporter(ctx, collected.record), collected
+}
+
+// TestTheReportedTargetIsWhatSendActuallyWrote covers post.ReportTarget and the
+// trap issue #98 exists to document.
+//
+// A destination re-resolved after the write would disagree with Send across
+// local midnight, and the log would then name a file the post never touched —
+// the exact reconstruction trail SC-008 and constitution principle III
+// guarantee. The clock advances past midnight between the write and the check,
+// which is a claim no test could make by waiting.
+func TestTheReportedTargetIsWhatSendActuallyWrote(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
@@ -362,7 +413,9 @@ func TestTargetReportsWhatSendActuallyWrote(t *testing.T) {
 
 	sink := obsidian.NewWithClock(settingsFor(dir), clock)
 
-	if err := sink.Send(context.Background(), mustMessage(t, "深夜の思いつき")); err != nil {
+	ctx, reported := reporting(context.Background())
+
+	if err := sink.Send(ctx, mustMessage(t, "深夜の思いつき")); err != nil {
 		t.Fatalf("Send: %v", err)
 	}
 
@@ -382,9 +435,9 @@ func TestTargetReportsWhatSendActuallyWrote(t *testing.T) {
 		t.Errorf("%s exists; the post was written to the wrong note", wouldReResolve)
 	}
 
-	// And Target names it, not the note a second clock reading would give.
-	if got := sink.Target(); got != wrote {
-		t.Errorf("Target() = %q, want the note Send wrote (%q); re-resolving gives %q",
+	// And the report names it, not the note a second clock reading would give.
+	if got := reported.only(t); got != wrote {
+		t.Errorf("the sink reported %q, want the note Send wrote (%q); re-resolving gives %q",
 			got, wrote, wouldReResolve)
 	}
 
@@ -395,13 +448,15 @@ func TestTargetReportsWhatSendActuallyWrote(t *testing.T) {
 	}
 }
 
-// TestTargetIsRecordedEvenWhenTheWriteFails covers the other half of what the
-// orchestrator needs from Targeter.
+// TestTheTargetIsReportedEvenWhenTheWriteFails covers the other half of what
+// the orchestrator needs from a reported target.
 //
 // A failed append still has to be locatable: the log record for
 // obsidian_append_failed carries the path, and a user told only "permission
-// denied" cannot act on it.
-func TestTargetIsRecordedEvenWhenTheWriteFails(t *testing.T) {
+// denied" cannot act on it. This is also why the report happens before the I/O
+// rather than after a successful write — moving it later would trade one wrong
+// answer for a missing one.
+func TestTheTargetIsReportedEvenWhenTheWriteFails(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
@@ -411,12 +466,14 @@ func TestTargetIsRecordedEvenWhenTheWriteFails(t *testing.T) {
 
 	sink := obsidian.NewWithClock(settings, fixedClock(noon))
 
-	if err := sink.Send(context.Background(), mustMessage(t, "失敗しても場所は分かる")); err == nil {
+	ctx, reported := reporting(context.Background())
+
+	if err := sink.Send(ctx, mustMessage(t, "失敗しても場所は分かる")); err == nil {
 		t.Fatal("Send succeeded unexpectedly")
 	}
 
-	if got, want := sink.Target(), notePath(dir, noon); got != want {
-		t.Errorf("Target() = %q after a failed append, want %q", got, want)
+	if got, want := reported.only(t), notePath(dir, noon); got != want {
+		t.Errorf("the sink reported %q after a failed append, want %q", got, want)
 	}
 }
 
@@ -424,8 +481,8 @@ func TestTargetIsRecordedEvenWhenTheWriteFails(t *testing.T) {
 // test looks at the sink from inside Send without adding a seam for it.
 //
 // Send checks ctx.Err() at exactly one point before it opens anything, so the
-// first observation is taken between setTarget and the open. The second comes
-// from appendEntry, with the note already open.
+// first observation is taken between the target report and the open. The second
+// comes from appendEntry, with the note already open.
 type observingContext struct {
 	context.Context
 
@@ -438,16 +495,17 @@ func (c observingContext) Err() error {
 	return c.Context.Err()
 }
 
-// TestTheTargetIsRecordedBeforeTheNoteIsOpened pins the ordering sink.go
-// documents on Target and T040's obsidian_append_started event will depend on
-// for its path field.
+// TestTheTargetIsReportedBeforeTheNoteIsOpened pins the ordering sink.go
+// documents on ReportsTarget, and which obsidian_append_started depends on for
+// its path field.
 //
-// Deferring setTarget to the end of Send passes every other test here, because
-// they all read Target after Send has returned. The difference is only visible
-// from inside, and for a started event it is the whole difference: the open it
-// precedes is unbounded on a stalled mount, so an event emitted first with an
-// empty path names no file for as long as that lasts.
-func TestTheTargetIsRecordedBeforeTheNoteIsOpened(t *testing.T) {
+// Reporting at the end of Send passes every other test here, because they all
+// check after Send has returned. The difference is only visible from inside, and
+// for a started event it is the whole difference: the orchestrator holds that
+// event until the report arrives, and the open it precedes is unbounded on a
+// stalled mount — so a report deferred past the open means no started record at
+// all for as long as that lasts.
+func TestTheTargetIsReportedBeforeTheNoteIsOpened(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
@@ -456,12 +514,14 @@ func TestTheTargetIsRecordedBeforeTheNoteIsOpened(t *testing.T) {
 
 	var (
 		observations int
-		targetSeen   string
+		targetsSeen  []string
 		noteExisted  bool
 	)
 
+	base, reported := reporting(context.Background())
+
 	ctx := observingContext{
-		Context: context.Background(),
+		Context: base,
 		observe: func() {
 			observations++
 
@@ -469,7 +529,7 @@ func TestTheTargetIsRecordedBeforeTheNoteIsOpened(t *testing.T) {
 				return
 			}
 
-			targetSeen = sink.Target()
+			targetsSeen = reported.all()
 			_, statErr := os.Stat(path)
 			noteExisted = statErr == nil
 		},
@@ -483,8 +543,9 @@ func TestTheTargetIsRecordedBeforeTheNoteIsOpened(t *testing.T) {
 		t.Fatal("Send never consulted the context; the observation point this test depends on is gone")
 	}
 
-	if targetSeen != path {
-		t.Errorf("Target() = %q at the first point inside Send, want %q already recorded", targetSeen, path)
+	if len(targetsSeen) != 1 || targetsSeen[0] != path {
+		t.Errorf("the sink had reported %q at the first point inside Send, want exactly [%q]",
+			targetsSeen, path)
 	}
 
 	// The same observation confirms the point is the one claimed: no I/O has
@@ -566,10 +627,12 @@ func TestSendReportsAnAlreadyExpiredContext(t *testing.T) {
 
 	dir := t.TempDir()
 
-	ctx, cancel := context.WithCancel(context.Background())
+	cancelled, cancel := context.WithCancel(context.Background())
 	cancel()
 
 	sink := obsidian.NewWithClock(settingsFor(dir), fixedClock(noon))
+
+	ctx, reported := reporting(cancelled)
 
 	err := sink.Send(ctx, mustMessage(t, "もう遅い"))
 	if err == nil {
@@ -584,9 +647,9 @@ func TestSendReportsAnAlreadyExpiredContext(t *testing.T) {
 		t.Error("the note was created for a post whose deadline had already passed")
 	}
 
-	// The target is still recorded, so a cancelled post is locatable too.
-	if got, want := sink.Target(), notePath(dir, noon); got != want {
-		t.Errorf("Target() = %q, want %q", got, want)
+	// The target is still reported, so a cancelled post is locatable too.
+	if got, want := reported.only(t), notePath(dir, noon); got != want {
+		t.Errorf("the sink reported %q, want %q", got, want)
 	}
 }
 
@@ -664,9 +727,9 @@ func TestConcurrentAppendsToOneNoteAreWhole(t *testing.T) {
 // TestTheSinkSatisfiesTheOrchestratorsInterfaces is the compile-time claim,
 // asserted rather than assumed.
 //
-// post.Sink is what the orchestrator holds; post.Targeter is the optional
-// interface it type-asserts to add the path field to this sink's events
-// (issue #98). A refactor that changed either method's signature would break
+// post.Sink is what the orchestrator holds; post.TargetReporting is the optional
+// interface it type-asserts to decide whether to hold this sink's start event
+// for a reported path (issue #98). A refactor that changed either would break
 // the wiring in T036/T040 rather than here, where the cause is obvious.
 func TestTheSinkSatisfiesTheOrchestratorsInterfaces(t *testing.T) {
 	t.Parallel()
@@ -679,16 +742,24 @@ func TestTheSinkSatisfiesTheOrchestratorsInterfaces(t *testing.T) {
 	}
 
 	// The type assertion the orchestrator performs, exercised here so that
-	// dropping Target() fails in this package.
-	targeter, ok := asSink.(post.Targeter)
-	if !ok {
-		t.Fatal("the obsidian sink does not satisfy post.Targeter; its events would carry no path")
+	// dropping ReportsTarget fails in this package.
+	//
+	// Losing it is a silent failure at the far end rather than a compile error:
+	// the orchestrator would stop holding this sink's start event, emit it
+	// before Send with no path, and issue #98's requirement that all three
+	// obsidian_append_* records carry one would quietly stop holding.
+	if _, ok := asSink.(post.TargetReporting); !ok {
+		t.Fatal("the obsidian sink does not satisfy post.TargetReporting; " +
+			"its start event would carry no path")
 	}
 
-	// Before any post there is nothing to report, and reporting an invented
-	// path would be worse than reporting none.
-	if got := targeter.Target(); got != "" {
-		t.Errorf("Target() = %q before any post, want empty", got)
+	// And nothing is reported without a post to report it for. A sink that
+	// reported at construction would put a path on a record belonging to no
+	// submission.
+	_, reported := reporting(context.Background())
+
+	if got := reported.all(); len(got) != 0 {
+		t.Errorf("the sink reported %q before any post, want nothing", got)
 	}
 }
 
@@ -1542,65 +1613,137 @@ func TestASeparatorIsAddedOnlyWhenTheNoteNeedsOne(t *testing.T) {
 	}
 }
 
-// TestTargetIsSafeToReadWhileAPostIsInFlight covers the read side of the mutex,
-// which nothing exercised.
+// TestEachOverlappingPostReportsItsOwnNote is issue #111's acceptance, and the
+// reason decision DEC-D3 exists.
 //
-// The field's own comment says it is read by the orchestrator while other posts
-// may still be running. Removing the lock from Target alone survived the whole
-// suite under -race -count=8, because no test ever read it off the writing
-// goroutine — so the protection was correct but unverified in exactly the
-// property it is documented for.
-func TestTargetIsSafeToReadWhileAPostIsInFlight(t *testing.T) {
+// The interface this replaced returned the note from a method on the sink, and a
+// Sink is constructed once and serves every post — a GUI window outlives its
+// submission (FR-028). So the field held whichever post had *started* last: the
+// report ran at the top of Send, before the context check and before the open,
+// so the stale window opened the instant a later post entered Send and lasted
+// for the whole of that post's I/O. On a stalled mount that is unbounded.
+//
+// This reproduces it exactly rather than approximately. Post A resolves the note
+// before local midnight and then blocks where the old defect's window opened —
+// inside Send, after the target was known and before the note was opened. Post B
+// runs to completion in the meantime with a clock that has crossed midnight, so
+// it resolves a *different file*. Under the old shape A's caller then read B's
+// note; here A's own collector can only ever hold A's value, because the
+// collector never leaves A's context.
+//
+// Run under -race: the sink now has no shared mutable state at all, which is the
+// other half of what removing the field bought.
+func TestEachOverlappingPostReportsItsOwnNote(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	sink := obsidian.NewWithClock(settingsFor(dir), fixedClock(noon))
 
-	message := mustMessage(t, "並行して読む")
+	beforeMidnight := time.Date(2026, 9, 8, 23, 59, 59, 0, time.Local)
+	afterMidnight := beforeMidnight.Add(2 * time.Second)
 
+	// One clock shared by both posts, handing out the two instants in the order
+	// they are drawn. A guards the ordering below, so A always draws first.
 	var (
-		posting sync.WaitGroup
-		stop    = make(chan struct{})
+		clockMu  sync.Mutex
+		readings int
 	)
 
-	posting.Add(1)
+	clock := func() time.Time {
+		clockMu.Lock()
+		defer clockMu.Unlock()
 
-	go func() {
-		// Both deferred, and stop is closed unconditionally. Closing it only
-		// on the success path meant a Send failure left the reader's default
-		// arm spinning — no yield, a whole core busy — until the package's own
-		// timeout panicked, which takes every other test down with it and
-		// prints a goroutine dump instead of the assertion that failed.
-		defer posting.Done()
-		defer close(stop)
+		readings++
 
-		for range 200 {
-			if err := sink.Send(context.Background(), message); err != nil {
-				t.Errorf("Send: %v", err)
+		if readings == 1 {
+			return beforeMidnight
+		}
 
+		return afterMidnight
+	}
+
+	sink := obsidian.NewWithClock(settingsFor(dir), clock)
+
+	notes := struct{ a, b string }{
+		a: notePath(dir, beforeMidnight),
+		b: notePath(dir, afterMidnight),
+	}
+
+	if notes.a == notes.b {
+		t.Fatalf("both instants resolve to %s; the test cannot tell the two posts apart", notes.a)
+	}
+
+	var (
+		aReported = make(chan struct{})
+		bFinished = make(chan struct{})
+		running   sync.WaitGroup
+	)
+
+	// Post A: reports, then parks in the window until B has finished.
+	base, reportedByA := reporting(context.Background())
+
+	firstCheck := true
+	aCtx := observingContext{
+		Context: base,
+		observe: func() {
+			if !firstCheck {
 				return
 			}
+
+			firstCheck = false
+
+			close(aReported)
+			<-bFinished
+		},
+	}
+
+	running.Add(2)
+
+	go func() {
+		defer running.Done()
+
+		if err := sink.Send(aCtx, mustMessage(t, "post A (yesterday)")); err != nil {
+			t.Errorf("post A: Send: %v", err)
 		}
 	}()
 
-	// Read continuously while those posts run. Under -race this is what
-	// detects an unsynchronised read of the string header.
-	reads := 0
+	go func() {
+		defer running.Done()
+		defer close(bFinished)
 
-	for {
-		select {
-		case <-stop:
-			if reads == 0 {
-				t.Error("Target was never read while a post was in flight")
-			}
+		// Not started until A has reported, so the clock readings are ordered
+		// and B genuinely runs inside A's window rather than before it.
+		<-aReported
 
-			posting.Wait()
+		ctx, reportedByB := reporting(context.Background())
+
+		if err := sink.Send(ctx, mustMessage(t, "post B (today)")); err != nil {
+			t.Errorf("post B: Send: %v", err)
 
 			return
-		default:
-			_ = sink.Target()
-			reads++
 		}
+
+		if got := reportedByB.only(t); got != notes.b {
+			t.Errorf("post B reported %q, want its own note %q", got, notes.b)
+		}
+	}()
+
+	running.Wait()
+
+	// The assertion the old shape failed: A's caller reads A's note, even
+	// though B started later, resolved a different file, and finished first.
+	if got := reportedByA.only(t); got != notes.a {
+		t.Errorf("post A reported %q, want its own note %q (post B's was %q)",
+			got, notes.a, notes.b)
+	}
+
+	// And each post's line is in its own file, so the reports match what
+	// reached disk rather than merely differing from each other.
+	if got := readNote(t, notes.a); !strings.Contains(got, "post A (yesterday)") {
+		t.Errorf("%s holds %q, want post A's entry", notes.a, got)
+	}
+
+	if got := readNote(t, notes.b); !strings.Contains(got, "post B (today)") {
+		t.Errorf("%s holds %q, want post B's entry", notes.b, got)
 	}
 }
 

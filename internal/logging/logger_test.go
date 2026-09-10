@@ -227,6 +227,56 @@ func TestLevelIsExactlyInfoOrError(t *testing.T) {
 	}
 }
 
+// TestLevelStaysLowercaseWithACredentialConfigured is the same claim in the
+// configuration every real run uses, and it exists because the test above
+// passed while the field was broken.
+//
+// app.OpenLogger always arms Options.Redact, and the redacting ReplaceAttr used
+// to run before the rename. slog.Level implements fmt.Stringer, so the scrub's
+// Stringer arm converted the level attribute to the string "INFO" before the
+// rename could recognise it as a level, and the lowercasing silently stopped
+// happening. Every record written by the shipped binary carried "INFO" or
+// "ERROR"; a consumer filtering level == "error" got nothing. The test above
+// could not see it because it configures no credential, which is the one shape
+// no front door produces.
+//
+// Both a redacted and a plain record are checked, so the fix cannot be "the
+// scrub no longer runs".
+func TestLevelStaysLowercaseWithACredentialConfigured(t *testing.T) {
+	t.Parallel()
+
+	const token = "7654321:AA-the-sentinel-token"
+
+	logger, buffer := newBufferLogger(t, logging.Options{
+		Source: logging.SourceCLI,
+		Redact: []config.Secret{config.NewSecret(token)},
+	})
+
+	post := logger.Post("id")
+
+	post.Info(logging.EventRequestCompleted)
+	post.Error(logging.EventTelegramSendFailed,
+		slog.String("error", "Post \"https://api.telegram.org/bot"+token+"/sendMessage\": refused"))
+
+	records := decodeRecords(t, buffer.Bytes())
+	if len(records) != 2 {
+		t.Fatalf("got %d records, want 2", len(records))
+	}
+
+	for i, want := range []string{"info", "error"} {
+		if got := requireString(t, records[i], "level"); got != want {
+			t.Errorf("record %d level = %q, want %q; the credential scrub must not consume "+
+				"the level attribute before it is renamed", i, got, want)
+		}
+	}
+
+	// The scrub is still doing its job, so this test cannot be satisfied by
+	// disarming it.
+	if strings.Contains(buffer.String(), token) {
+		t.Errorf("the credential reached the record:\n%s", buffer.String())
+	}
+}
+
 // TestAMessageBodyCannotSplitARecord is the self-containment case that matters
 // in practice (FR-064, SC-007).
 //

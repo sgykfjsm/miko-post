@@ -32,7 +32,7 @@ The formatting-fallback path is observable as a distinct sequence (FR-039):
 | Field | Type | Present |
 |---|---|---|
 | `ts` | RFC 3339 with time zone | always |
-| `level` | `"info"` \| `"error"` | always |
+| `level` | `"info"` \| `"error"` — lowercase; slog's own `INFO`/`ERROR` is renamed | always |
 | `event` | stable name above | always |
 | `source` | `"cli"` \| `"gui"` | always |
 | `message_id` | ULID | always (per-post correlation, R-007) |
@@ -46,6 +46,31 @@ The formatting-fallback path is observable as a distinct sequence (FR-039):
 | `message_len` / `message_bytes` | int | rune count / byte count (R-010) |
 | `app_version`, `git_commit` | string | when enabled (FR-066) |
 | `stack` | string | when a trace is available and useful (FR-071) |
+
+## What is emitted as of T040, and what is still owed
+
+T040 emits `message_received`, the six sink lifecycle events, and the two terminal events. Three
+entries in the table above are not yet at their final state, and each is recorded here so that a
+missing field reads as a scheduled gap rather than as a defect.
+
+| Field | State after T040 | Owner of the rest |
+|---|---|---|
+| `error_type` | Two values, `timeout` and `failed`, from the same predicate that picks the display reason | **T056** widens the set; the two above keep their meaning |
+| `message` | **Not emitted at all.** FR-068's capture rule needs `message_on_error_only` and the post's outcome, so no record carries the body yet — including a failure, where SC-008 wants it | **T071** |
+| `stack` | Not emitted. A recovered panic from a sink's `Name` is reported as text on the terminal record (issue #110), which keeps the value rather than the trace | **T073** |
+
+`message_len` and `message_bytes` **are** emitted, on `message_received`, as R-010 defines them.
+
+The three formatting-fallback names are not produced by any code path yet (**T063**). That is
+asserted rather than assumed: `internal/app`'s recorder test compares the set of names the adapter
+can produce against `logging.AllEvents()` and lists exactly those three as deferred, so a name added
+to the vocabulary and never mapped fails the build rather than becoming a query that silently
+returns nothing.
+
+`path` is on the three `obsidian_append_*` events and on no others. The sink reports the note it
+resolved through `post.ReportTarget` from inside `Send`, before any I/O, and the orchestrator holds
+that sink's start event until the report arrives — so all three records name the file the sink
+actually opened, including a failed append (decision DEC-D3, issues #98 and #111).
 
 ## Message-capture rule (FR-068)
 

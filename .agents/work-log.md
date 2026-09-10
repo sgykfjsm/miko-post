@@ -552,3 +552,76 @@ killed only by the partial-failure test — by a *failing* Telegram — with `in
 #110, and #111 via DEC-D3. Four obligations are recorded in `state.yaml`, the load-bearing one being
 that `internal/logging`'s event-name test cannot see the adapter, so an unmapped event would silently
 never fire unless 6c-2 asserts the producible set against `AllEvents()`.
+
+## Batch 6c-2 — event emission (T040, branch `sgykfjsm/batch-6c2-event-emission`, 2026-09-10)
+
+Implemented and validated; not yet reviewed. `make check` clean, 100.0% statement coverage in
+`internal/post` and `internal/app`, 99.5% in `internal/logging` (unchanged). Discharges T040 and
+closes #41, #98, #110 and #111. Thirty-two mutants built, one surviving by design.
+
+**The shape is DEC-D2's, and the boundary held.** `post.Recording` and `post.Recorder` are
+domain-shaped interfaces declared in `internal/post`; the mapping onto `logging.Event` and the whole
+field vocabulary live in `internal/app/recorder.go`. `internal/post` still imports no other internal
+package, and `internal/app/layering_test.go` is what says so rather than three PR bodies. The cost
+DEC-D2 predicted is real and was paid where it said to pay it: every adapter test drives a whole post
+through a real `logging.Logger` and reads the bytes back off disk, decoding one line at a time so
+FR-064's self-containment fails rather than being reassembled by a lenient reader.
+
+**`post.Targeter` is gone (DEC-D3), and the replacement needed one decision the decision did not
+cover.** `post.ReportTarget(ctx, path)` carries the note per call, so the value never leaves the
+goroutine running the post — that is #111 closed by construction rather than by synchronisation, and
+the sink lost its mutex and its field along with the getter. What DEC-D3 did not say is how the
+orchestrator knows *whether to wait* for a report before emitting a sink's start event, and it has to
+know before `Send` is entered. `post.TargetReporting` answers it with one empty method nobody calls.
+A marker method is unusual in Go; the alternatives were worse. Making every sink call
+`ReportTarget(ctx, "")` removes the marker but edits the merged telegram sink to report nothing and
+moves correctness from the type system onto a convention — which is exactly what #115 is filed about.
+
+**Two fields were judgement calls, and both are recorded in three places rather than one.**
+`error_type` is emitted now with two values, from the same `errors.Is(err,
+context.DeadlineExceeded)` predicate `reasonFor` uses, with a test asserting the two partition
+failures identically — so the log and the terminal cannot describe one failure differently, and T056
+widens the set rather than redefining it. An absent field would have been a saved query that
+silently returns nothing, which is the harm `events.go`'s own comment is written about. `message` is
+emitted nowhere at all, and FR-068 is recorded as knowingly unmet until T071 in `tasks.md` and in a
+new section of `contracts/log-events.md` — so a reader finds a scheduled gap rather than inferring
+an oversight.
+
+**#110 closed without adding vocabulary, and it took three attempts to see why that was the
+constraint.** The recovered `Name` panic now survives as `SinkAttempt.NameErr`, wrapped in the same
+`panicError` a panicking `Send` produces. It cannot ride on that sink's lifecycle records, and the
+reason is structural rather than aesthetic: a panicking `Name` resolves to the `unknown` sentinel,
+and the event names are keyed by sink name, so **there are no records for such a sink at all**. That
+is the finding worth keeping — the adapter's honest answer for an unmapped sink name was going to be
+"emit nothing", which is the silent-drop shape five previous batches were caught by. Both the panic
+and the missing vocabulary are now named in the post's terminal record, whose own name and level
+still track `AllSucceeded` so the exit status and the log agree.
+
+**One defect outside the batch, found by the first end-to-end read of real records.**
+`internal/logging` emitted `level` as `"INFO"`/`"ERROR"` for every logger with `Options.Redact`
+populated — which `app.OpenLogger` always does, so every run of the shipped binary since 6c-1.
+`replaceAttrRedacting` ran `scrub` before `renameBuiltin`; `slog.Level` implements `fmt.Stringer`, so
+the scrub's Stringer arm stringified the level and the rename's type assertion to `slog.Level` then
+failed. `contracts/log-events.md` admits only `info` and `error`, and a consumer filtering `level ==
+"error"` got nothing. The package's own `TestLevelIsExactlyInfoOrError` passed throughout, because it
+configures no credential — **the one configuration no front door produces.** The lesson generalises
+past this bug: a test that exercises a component in a shape its callers never use can be green while
+the shipped behaviour is wrong, and 100% statement coverage says nothing about it. Fixed by
+reordering, pinned by a test that arms `Redact` and asserts both the level *and* that the scrub still
+fires, so the fix cannot decay into "the scrub was removed".
+
+**Two unfailable guards were caught by mutation rather than by reading.** Removing `sinkRecord`'s
+second-finish guard survived the suite, because `run` calls `finish` once per sink and nothing else
+can — so the guard was correct, load-bearing for a change a later task might make, and completely
+unexercised. Removing `guard`'s nil-recorder check survived too, because `guarded`'s own recover
+absorbs the nil method call: two guards in series, where neither one's test can tell which is doing
+the work — the shape `app.go`'s `SinkTimeout` comment already warns about. Both are now pinned by
+direct unit tests of the types rather than through a post, which is the difference between a
+documented intention and an asserted one. **The check that found them is cheap: build the mutant for
+every guard, not for every branch.**
+
+**What 6c-2 leaves for the next batch.** US1 is complete. Batch 7 is US2 (T041–T051, the Fyne GUI)
+and needs the `fyne/v2` pin, the last third of #4. #119 is untouched and still open: no test drives
+two destinations both succeeding, and `cli.Run` still has no sink seam — this batch changed
+`NewService`'s signature in that same function without closing it, deliberately, because a seam is
+its own decision.

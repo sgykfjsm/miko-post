@@ -809,13 +809,28 @@ func isReservedKey(key string) bool {
 // rewritten into the record's own identity keys.
 func replaceAttrRedacting(secrets []string) func([]string, slog.Attr) slog.Attr {
 	return func(groups []string, a slog.Attr) slog.Attr {
-		a = scrub(a, secrets)
-
-		if len(groups) > 0 {
-			return a
+		// The rename runs first, and the order is load bearing rather than
+		// arbitrary.
+		//
+		// It used to run last, and that silently broke the level field for
+		// every logger with a credential configured — which is every real run,
+		// because app.OpenLogger always arms Redact. slog.Level implements
+		// fmt.Stringer, so scrub's Stringer arm converted the level attribute
+		// to the string "INFO" before renameBuiltin could see it; its type
+		// assertion to slog.Level then failed and the lowercasing never
+		// happened. contracts/log-events.md admits only "info" and "error", so
+		// a consumer filtering level == "error" got nothing from a real log
+		// while every test in this package passed — none of them populated
+		// Redact and read the level in the same run.
+		//
+		// Renaming first hands scrub the already-lowercased string, which it
+		// scans harmlessly, and leaves the timestamp and event untouched for
+		// the same reasons as before.
+		if len(groups) == 0 {
+			a = renameBuiltin(a)
 		}
 
-		return renameBuiltin(a)
+		return scrub(a, secrets)
 	}
 }
 

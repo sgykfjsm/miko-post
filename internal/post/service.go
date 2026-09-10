@@ -84,6 +84,15 @@ type Service struct {
 	sinks   []Sink
 	timeout time.Duration
 
+	// recording receives this post's diagnostic events, and is nil when the
+	// caller wants none (T040, DEC-D2).
+	//
+	// Nil-tolerant rather than required, so a Service can be constructed for a
+	// test or a front door that has no logger without either of them having to
+	// supply a stub. Every call goes through recorderFor, which maps nil onto
+	// the discarding recorder, so no code on the posting path branches on it.
+	recording Recording
+
 	// newID generates the per-post correlation identifier. A field rather than
 	// a direct call so that identifier's failure branch is reachable from a
 	// test, which sets it directly — this package's tests are in-package, so
@@ -93,12 +102,17 @@ type Service struct {
 }
 
 // New returns a Service that posts to sinks, allowing each one timeout for its
-// entire operation (FR-015).
+// entire operation (FR-015), and reporting what happens to recording (T040).
 //
 // The timeout is per sink and not a budget for the post as a whole: two sinks
 // each get the full duration, measured independently from the moment that sink
 // starts.
-func New(sinks []Sink, timeout time.Duration) *Service {
+//
+// recording may be nil, which records nothing. That is not a convenience for
+// tests: a front door whose logger could not be opened must still post, and
+// FR-076 requires the outcome to be identical either way — so "no diagnostics"
+// has to be an ordinary state of this type rather than a degraded one.
+func New(sinks []Sink, timeout time.Duration, recording Recording) *Service {
 	// A duration that cannot bound anything is replaced by FR-015's default.
 	//
 	// config.Validate already requires posting.sink_timeout_seconds > 0, so a
@@ -121,9 +135,10 @@ func New(sinks []Sink, timeout time.Duration) *Service {
 		// clone at construction against a data race and an FR-016 hole —
 		// "disabled sinks are not invoked" is only true if the set cannot
 		// change underneath us.
-		sinks:   slices.Clone(sinks),
-		timeout: timeout,
-		newID:   generateID,
+		sinks:     slices.Clone(sinks),
+		timeout:   timeout,
+		recording: recording,
+		newID:     generateID,
 	}
 }
 
@@ -177,7 +192,24 @@ func (o Outcome) Succeeded() bool {
 // report (FR-014). There is no path that returns early: the only return is
 // after the WaitGroup drains.
 func (s *Service) Post(message Message) Outcome {
+	// Before the identifier, so a post whose ULID generation is slow is not
+	// credited with less time than it took. The whole post's elapsed time is
+	// FR-066's duration_ms on the terminal record.
+	started := time.Now()
+
 	outcome := Outcome{ID: s.identifier(), Message: message}
+
+	// One recorder for the whole post, obtained once and shared by every
+	// delivery goroutine. Sharing it is what makes the records correlate: the
+	// identifier is bound at construction, so no call site can emit a record
+	// belonging to a different post or to no post at all.
+	recorder := s.recorderFor(outcome.ID.String())
+
+	// Emitted before anything can fail, because FR-067 makes this the record
+	// that says a post existed. A submission that then panicked or hung in
+	// every sink still has to be reconstructable (SC-008), and it is only
+	// reconstructable from a record that was already written.
+	recorder.MessageReceived(message)
 
 	if len(s.sinks) == 0 {
 		// Not an error state to report here. FR-018 makes settings with every
@@ -186,6 +218,8 @@ func (s *Service) Post(message Message) Outcome {
 		// Returning an Outcome with no results is the fail-closed answer for
 		// the path that reaches it anyway: AllSucceeded is false for an empty
 		// slice, so the exit status says nothing was delivered.
+		recorder.PostCompleted(outcome, time.Since(started))
+
 		return outcome
 	}
 
@@ -204,13 +238,20 @@ func (s *Service) Post(message Message) Outcome {
 		go func(index int, sink Sink) {
 			defer running.Done()
 
-			results[index] = s.run(sink, message)
+			results[index] = s.run(recorder, sink, message)
 		}(i, sink)
 	}
 
 	running.Wait()
 
 	outcome.Results = results
+
+	// After the wait, so the terminal record cannot precede a sink record that
+	// belongs to the same post. An abandoned delivery goroutine is the one
+	// exception and it is unavoidable: it may still be inside a sink when this
+	// runs, and its own records were already emitted by run's backstop, so what
+	// arrives late is nothing. sinkRecord is what guarantees that.
+	recorder.PostCompleted(outcome, time.Since(started))
 
 	return outcome
 }
@@ -259,10 +300,17 @@ func (s *Service) Post(message Message) Outcome {
 //     only one abandoned inside the write itself becomes a phantom entry. The
 //     cost is stated at its widest because Sink is an interface and no
 //     implementation is obliged to check anything.
-func (s *Service) run(sink Sink, message Message) SinkResult {
+func (s *Service) run(rec Recorder, sink Sink, message Message) SinkResult {
 	// Before anything the sink can influence, so a slow Name() is counted in
 	// Duration rather than excluded from it.
 	started := time.Now()
+
+	// The arbiter for this sink's two records. Both this goroutine and the
+	// delivery goroutine can reach it — the backstop below finishes an
+	// abandoned sink, and the abandoned goroutine finishes itself if it ever
+	// returns — and it is what makes "one start and one finish per sink" true
+	// rather than usually true.
+	record := newSinkRecord(rec)
 
 	// Both buffered, so the abandoned goroutine's sends always complete and
 	// the goroutine can exit. An unbuffered channel would park it forever on a
@@ -314,12 +362,17 @@ func (s *Service) run(sink Sink, message Message) SinkResult {
 			done <- outcome
 		}()
 
-		name := s.nameOf(sink)
+		name, namePanic := s.nameOf(sink)
+
+		// Published to the record before the start event can be emitted, so
+		// every record for this sink names the same destination — including the
+		// one the backstop writes for a sink it abandoned.
+		record.named(name, namePanic)
 
 		named <- name
 		outcome.Name = name
 
-		outcome = s.deliver(name, sink, message, started)
+		outcome = s.deliver(record, name, sink, message, started)
 		delivered = true
 	}()
 
@@ -328,11 +381,18 @@ func (s *Service) run(sink Sink, message Message) SinkResult {
 
 	select {
 	case result := <-done:
+		record.finish(result)
+
 		return result
 	case <-timer.C:
 		name := resolvedName(named)
 
-		return SinkResult{
+		// Recorded from here rather than left to the abandoned goroutine.
+		// FR-070 wants every failure logged, and this one is a failure the
+		// orchestrator caused: waiting for the goroutine to report it would
+		// mean the record arrived after the post's own terminal record, or on a
+		// hard-mounted dead export never at all.
+		result := SinkResult{
 			Name:    name,
 			Success: false,
 			Reason:  reasonTimedOut,
@@ -343,6 +403,10 @@ func (s *Service) run(sink Sink, message Message) SinkResult {
 				name, enforcementBound(s.timeout), context.DeadlineExceeded),
 			Duration: time.Since(started),
 		}
+
+		record.finish(result)
+
+		return result
 	}
 }
 
@@ -386,14 +450,18 @@ func resolvedName(named <-chan string) string {
 // Name() is sink code, and this is called from inside the delivery goroutine so
 // that it is bounded by the same backstop as Send.
 //
-// What is *not* kept is the recovered value itself. FR-071 wants a trace for
-// every panic, and deliver preserves Send's for that purpose, but a Name panic
-// is discarded here — so a sink that panics in Name while delivering
-// successfully leaves no evidence anywhere, and the information is gone by the
-// time T073 could record it. Recorded as issue #110 rather than fixed here:
-// there is no field on SinkResult for it that would not put an error on a
-// successful result, and inventing one before T073 defines where traces go
-// would be guessing at its shape.
+// The recovered value is kept and returned (issue #110). It used to be
+// discarded here, which made a sink that panicked in Name while delivering
+// successfully invisible forever: the result was a clean success and the panic
+// value was destroyed at the layer that recovered it, so no later task could
+// record what FR-071 requires. It travels to the recorder as
+// SinkAttempt.NameErr, wrapped in the same panicError deliver uses for a
+// panicking Send, so both panics render through one guarded description.
+//
+// One shape still leaves nothing: panic(nil) under GODEBUG=panicnil=1 arrests
+// the panic while recover returns nil, so there is no value to keep. The name
+// is still corrected to the sentinel, which is the part that keeps the record
+// well formed.
 //
 // Both properties were learned the hard way, one review each. First, Name was
 // called outside any recover, so a panicking Name — or a nil element in the
@@ -403,26 +471,39 @@ func resolvedName(named <-chan string) string {
 // Name reproduced the unbounded hang the backstop had just been built to fix,
 // and a Goexit inside it produced a result naming nothing at all. Two
 // interface methods; both are sink code; both need the same treatment.
-func (s *Service) nameOf(sink Sink) (name string) {
+func (s *Service) nameOf(sink Sink) (name string, namePanic error) {
 	defer func() {
-		// recover is called for its arresting effect and its value is
-		// deliberately not branched on.
+		// The recovered value is captured, and the name is still corrected
+		// without consulting it.
 		//
-		// Branching on it was wrong twice over. panic(nil) under panicnil=1
-		// arrests a panic while returning nil, so the guard did not fire and
-		// the zero value came back — a blank name, which is exactly what this
-		// sentinel exists to prevent. And a sink that simply returns "" needs
-		// no panic at all to reach the same place. Deciding from the name
-		// rather than from the recovered value covers every route out of here,
-		// including ones nobody has thought of yet.
-		_ = recover()
+		// Branching on the recovered value to decide the *name* was wrong twice
+		// over. panic(nil) under panicnil=1 arrests a panic while returning
+		// nil, so the guard did not fire and the zero value came back — a blank
+		// name, which is exactly what this sentinel exists to prevent. And a
+		// sink that simply returns "" needs no panic at all to reach the same
+		// place. Deciding the name from the name covers every route out of
+		// here, including ones nobody has thought of yet, and the value below
+		// only ever adds a diagnostic.
+		recovered := recover()
 
 		if name == "" {
 			name = unknownSinkName
 		}
+
+		// After the correction, so the diagnostic names the same sink the
+		// records do. A panic deferred *after* Name set its result leaves both
+		// a usable name and a recovered value, which is the one shape where
+		// these two are not the sentinel and a diagnostic at once.
+		if recovered != nil {
+			namePanic = &panicError{sink: name, value: recovered}
+		}
 	}()
 
-	return sink.Name()
+	// Assigned to the named result rather than returned directly, so the
+	// deferred correction above sees the value the sink produced.
+	name = sink.Name()
+
+	return name, nil
 }
 
 // deliver runs one sink under its own deadline and converts whatever happens
@@ -446,7 +527,7 @@ func (s *Service) nameOf(sink Sink) (name string) {
 // needed both: it has to be able to attribute a timeout to a sink it abandoned,
 // and the clock has to start before Name() is called so that a slow Name() is
 // counted in Duration rather than excluded from it.
-func (s *Service) deliver(name string, sink Sink, message Message, started time.Time) (result SinkResult) {
+func (s *Service) deliver(record *sinkRecord, name string, sink Sink, message Message, started time.Time) (result SinkResult) {
 	// Failure-shaped before anything runs, for the exit that stops a panic
 	// without giving recover anything to work with.
 	//
@@ -485,6 +566,23 @@ func (s *Service) deliver(name string, sink Sink, message Message, started time.
 	// the grace mean what its comment says it means, whatever Name costs.
 	ctx, cancel := context.WithDeadline(context.Background(), started.Add(s.timeout))
 	defer cancel()
+
+	// The reporter is installed for every sink, whether or not the sink
+	// declares that it uses one: a sink that reports without declaring still
+	// gets its destination onto its records, and the alternative — installing
+	// it only for declared reporters — would make the declaration decide
+	// correctness rather than only ordering.
+	ctx = WithTargetReporter(ctx, record.start)
+
+	// A sink that reports a destination has its start event emitted at the
+	// report, from inside Send, so the record carries the path (issue #98).
+	// One that does not gets it here, before Send, because holding it back
+	// would mean waiting for a report that never comes: the record would then
+	// be written after the send it describes had already finished, and a send
+	// interrupted by a killed process would leave no trace of having begun.
+	if _, reports := sink.(TargetReporting); !reports {
+		record.start("")
+	}
 
 	if err := sink.Send(ctx, message); err != nil {
 		return SinkResult{Name: name, Success: false, Reason: reasonFor(err), Err: err}

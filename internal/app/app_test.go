@@ -128,7 +128,7 @@ func TestNoSinkIsBuiltWhenNeitherIsEnabled(t *testing.T) {
 	settings.Sink.Obsidian.Enabled = false
 	settings.Sink.Telegram.Enabled = false
 
-	outcome := app.NewService(settings).Post(post.Message{Original: "nowhere to go"})
+	outcome := app.NewService(settings, nil).Post(post.Message{Original: "nowhere to go"})
 
 	if len(outcome.Results) != 0 {
 		t.Fatalf("a post with no enabled destination produced %d results", len(outcome.Results))
@@ -164,33 +164,65 @@ func TestSinksAreTheConcreteTypesTheSettingsName(t *testing.T) {
 // TestTheObsidianSinkIsBuiltFromItsOwnSettings closes the other half of the
 // swap: the right type built from the wrong settings table.
 //
-// It is observable through Target, which reports the note Send resolved, so a
-// sink handed an empty DailyNoteDir would write to a relative path instead of
-// into the configured vault.
+// It observes the filesystem rather than asking the sink where it went, and the
+// change of mechanism is deliberate. This test used to read post.Targeter's
+// Target(), which decision DEC-D3 removed — a getter on a sink that serves every
+// post can only report the sink's most recent note, which is issue #111. Its
+// failure message ("the obsidian sink no longer reports a target") would now be
+// actively misleading, because the interface it named is gone by design rather
+// than by regression.
+//
+// Reading the vault is the stronger observation anyway. A sink handed the zero
+// ObsidianSettings has an empty DailyNoteDir, and filepath.Join("", …) resolves
+// relative to the working directory — which is how a mutation run in this
+// repository once left a stray daily note inside a source package. Asserting
+// that the note landed *under the configured vault* fails for that sink; asking
+// the sink for a string it computed itself could still agree with a wrong
+// answer.
 func TestTheObsidianSinkIsBuiltFromItsOwnSettings(t *testing.T) {
 	t.Parallel()
 
 	settings := validSettings(t)
 	settings.Sink.Telegram.Enabled = false
 
+	vault := settings.Sink.Obsidian.DailyNoteDir
+
 	built := app.Sinks(settings)
 	if len(built) != 1 {
 		t.Fatalf("built %d sinks, want one", len(built))
 	}
 
-	if err := built[0].Send(t.Context(), post.Message{Original: "into the vault"}); err != nil {
+	// Proof that the assertion below can fail: nothing is in the vault yet, so
+	// finding a note there afterwards is this Send's doing and not a fixture's.
+	if before, err := os.ReadDir(vault); err == nil && len(before) != 0 {
+		t.Fatalf("the vault already holds %d entries before the post; "+
+			"the assertion below would pass without the sink writing anything", len(before))
+	}
+
+	const body = "into the vault"
+
+	if err := built[0].Send(t.Context(), post.Message{Original: body}); err != nil {
 		t.Fatalf("Send: %v", err)
 	}
 
-	targeter, ok := built[0].(post.Targeter)
-	if !ok {
-		t.Fatalf("the obsidian sink no longer reports a target")
+	notes, err := os.ReadDir(vault)
+	if err != nil {
+		t.Fatalf("reading the configured vault %s: %v", vault, err)
 	}
 
-	target := targeter.Target()
-	if dir := filepath.Dir(target); dir != settings.Sink.Obsidian.DailyNoteDir {
-		t.Errorf("the note went to %s, want a note under %s",
-			target, settings.Sink.Obsidian.DailyNoteDir)
+	if len(notes) != 1 {
+		t.Fatalf("the configured vault %s holds %d notes, want the one this post wrote; "+
+			"a sink built from the wrong settings table writes elsewhere", vault, len(notes))
+	}
+
+	written, err := os.ReadFile(filepath.Join(vault, notes[0].Name()))
+	if err != nil {
+		t.Fatalf("reading the note: %v", err)
+	}
+
+	if !strings.Contains(string(written), body) {
+		t.Errorf("the note under %s does not contain the posted message; it holds %q",
+			vault, written)
 	}
 }
 

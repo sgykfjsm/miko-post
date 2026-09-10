@@ -76,15 +76,21 @@ func SinkTimeout(settings config.Settings) time.Duration {
 	return time.Duration(settings.Posting.SinkTimeoutSeconds) * time.Second
 }
 
-// NewService builds the posting service for one run from settings.
+// NewService builds the posting service for one run from settings, reporting
+// what happens to recording (T040).
 //
 // Sinks and SinkTimeout stay exported alongside it because they are separately
 // testable — "only the enabled sinks were built" is an assertion about names,
-// and a *post.Service does not expose the set it holds — and because the GUI
-// will need to rebuild sinks per submission (issue #111) without rebuilding
-// everything else.
-func NewService(settings config.Settings) *post.Service {
-	return post.New(Sinks(settings), SinkTimeout(settings))
+// and a *post.Service does not expose the set it holds.
+//
+// recording is a parameter rather than built from settings here, because the
+// logger it wraps has a lifetime the service does not: a front door opens it,
+// posts, then closes it and asks whether diagnostics reached disk, and that
+// close has to happen before the results are rendered so a failure at close can
+// still be reported (FR-076). Passing nil records nothing and changes nothing
+// else about the post, which is the property FR-076 requires.
+func NewService(settings config.Settings, recording post.Recording) *post.Service {
+	return post.New(Sinks(settings), SinkTimeout(settings), recording)
 }
 
 // OpenLogger builds the diagnostic logger for one run (FR-064 – FR-066,
