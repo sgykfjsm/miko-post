@@ -371,26 +371,45 @@ completed:
           obligation, not a type invariant. data-model.md has been corrected in this batch;
           secret.go's comment still says "exactly one place".
 
-in_progress:
   - id: 6c-1
-    name: "US1 front door and wiring"
+    summary: >-
+      US1 front door and wiring - argv to exit status. New internal/app composition root, new
+      internal/cli (parsing, run sequence, rendering), and cmd/mp with the program's single
+      os.Exit. mp "some thought" posts to every enabled destination and exits 0 only if all
+      succeeded.
     tasks: [T029, T036, T037, T038, T039]
     issues: [30, 37, 38, 39, 40]
-    also_discharges: [107, 109, 114]
-    branch: sgykfjsm/batch-6c-us1-front-door
-    state: implemented-not-reviewed
-    commit: PENDING
-    coverage: "internal/app 100.0%, internal/cli 100.0%, internal/post 100.0%, internal/config 99.0%, internal/logging 99.5%, cmd/mp 0.0% (its tests drive a child process)"
-    split_from: 6c
-    split_reason: >-
-      Two review lenses, not one: does the binary do the right thing (argv -> exit status ->
-      rendered output), and does it say the right thing (event names, field shapes, redaction,
-      per-post path). Six tasks plus six inherited issues plus three structural decisions, where
-      6a was four tasks and needed four review cycles and 6b four tasks and three. The risky half
-      is separable and should be reviewed alone.
-    known_oddity_between_the_two_prs: >-
-      Between 6c-1 and 6c-2 the binary writes an empty log file whose path it prints on failure.
-      Odd-looking but not wrong, and better than one six-task PR nobody can review in a pass.
+    also_closed: [107, 109, 114, 117]
+    advances: [104]
+    commits: [142a999, 22ca3da]
+    squashed_as: f757707
+    pr: 120
+    state: merged
+    merged_at: 2026-09-10
+    review_verdict: passed-with-notes
+    review_cycles: 1
+    fix_passes: 2
+    coverage: "app/cli/post 100%, config 99.1%, logging 99.5%, cmd/mp 0.0% by design"
+    review_run_state: "~/.agents/review-runs/sgykfjsm__miko-post/20260910T010313Z-b3fbd16d/"
+    note: >-
+      Verified the squashed tree is byte-identical to the reviewed tip 22ca3da (both tree d4f4cb57).
+      Contract VALID, zero blockers at every stage. First batch in this project whose decisions were
+      recorded BEFORE implementation rather than after review demanded them. Five required findings
+      fixed, two found independently by two stages: mp -c <non-regular path> never returned (a FIFO
+      hung with no output or exit status, /dev/zero reached ~1.9 GB RSS - and internal/logging had
+      already refused exactly this for the log path since batch 4); the batch made a source comment
+      false in a file it never opened while its own new contract asserted the correction had been
+      made; and a short bot_token corrupted every log record including message_id, because the scrub
+      is armed whether or not the chat sink is enabled. 45 mutants across three stages. Two
+      unfailable assertions were caught during AUTHORSHIP rather than a batch later - the first time
+      that has happened here.
+    coordinator_error_worth_recording: >-
+      The PR body was opened with "Closes #30 (T029), #37 (T036), #38 ..." on one line, and GitHub
+      registered only the first - the identical defect found as CON-001 in batch 6a, where four
+      references registered as one, and which already had a memory written about it. Caught because
+      closingIssuesReferences is checked after every PR open rather than trusted from the text.
+      Without that check five issues would have stayed open after merge. The verification habit
+      saved it; the memory did not.
     decisions:
       - id: DEC-D1
         decision: >-
@@ -566,12 +585,16 @@ in_progress:
     discharges_decision_issue: 104
     also_owed_by_this_batch:
       - "DONE: the byte-exactness test internal/sink/obsidian lacked. TestTheMessageBodyIsWrittenByteForByte, fourteen rows, killed by two mutants (a TrimSpace and a ToValidUTF8 in Entry). Its invalid-UTF-8 rows construct their Message directly, deliberately, for the same reason DEC-C1's form encoding is kept."
+
+in_progress:
   - id: 6c-2
     name: "Event emission"
     tasks: [T040]
     issues: [41]
     also_discharges: [98, 110, 111]
-    state: blocked-on-6c-1
+    branch: sgykfjsm/batch-6c2-event-emission
+    state: ready
+    prerequisites_met: true
     note: >-
       T040 plus the Recorder seam and the adapter. Carries #41's four acceptance riders, #98 boxes
       1-3, #110 (nameOf can hand the recovered panic value to the Recorder - about ten lines, and
@@ -582,6 +605,32 @@ in_progress:
       and say which. Similarly FR-068's message-on-error body is T071 (batch 10): recommend emitting
       no message field at all, only message_len, and stating that FR-068 is knowingly unmet until
       then rather than letting it read as an oversight.
+    inherited_review_obligations:
+      - id: DEC-D2-mandatory
+        what: >-
+          internal/logging's event-name test scans that package's own source and CANNOT see the
+          adapter, so an unmapped event would silently never fire. 6c-2 MUST assert that the set of
+          names the adapter can produce equals the orchestrator-reachable subset of
+          logging.AllEvents().
+      - id: CON-007
+        what: >-
+          internal/app/app_test.go asserts the obsidian sink's settings wiring THROUGH post.Targeter,
+          which DEC-D3 deprecates. When Targeter goes, that mechanism disappears and its failure
+          message ("the obsidian sink no longer reports a target") becomes actively misleading. It
+          needs a replacement observation that still distinguishes "right type, wrong settings table"
+          - the swap mutant it exists to kill.
+      - id: adapter-fidelity
+        what: >-
+          The adapter's tests must read bytes out of a real logging.Logger{Writer: buf}, not a
+          counting spy. Every trap on #41's acceptance list is a record-shape bug rather than an
+          orchestrator bug: duration_ms in nanoseconds instead of milliseconds, a silently dropped
+          reserved key, a record that is not one self-contained object per line, Redact never passed.
+      - id: leak-fixture-must-be-proven-leaky
+        what: >-
+          The redaction test's fixture must be proven capable of leaking BEFORE asserting it does
+          not - t.Fatalf if the raw error's own rendering does not contain the sentinel. This is the
+          direct mirror of batch 6b's M-SAFE-01, which stopped being killed the moment an unrelated
+          fix made its fixture clean.
 blockers: []
 
 time_sensitive:
@@ -792,4 +841,4 @@ assumptions:
     The batch decomposition above is re-derived by run-batch-cycle's triage step each run; it is
     recorded here for orientation, not as a binding plan.
 
-last_updated: 2026-09-09
+last_updated: 2026-09-10

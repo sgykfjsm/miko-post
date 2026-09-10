@@ -45,19 +45,25 @@ per PR, driven by the `run-batch-cycle` skill.
 
 ## In progress
 
-**Batch 6c-2 — event emission.** T040 and issue #41, plus #98 boxes 1–3, #110 and #111 via DEC-D3.
-Blocked on 6c-1 being reviewed and merged. Under DEC-D2 the orchestrator emits through a
-domain-shaped `post.Recorder` declared in `internal/post`, with the mapping onto `logging.Event` in
-`internal/app`, so `internal/post` keeps importing no other internal package —
-`internal/app/layering_test.go` now fails the build if it acquires one.
+**Batch 6c-2 — event emission.** Branch `sgykfjsm/batch-6c2-event-emission`, cut from merged `main`
+and carrying the Batch 6c-1 merge record. T040 and issue #41, plus #98 boxes 1–3, #110 and #111.
+Prerequisites met: both sinks and the front door are merged.
 
-**Between 6c-1 and 6c-2 the binary creates its log file and leaves it empty**, while printing that
-path on failure. Deliberate and recorded: the path is real and the file exists; only the records are
-owed.
+Under **DEC-D2** the orchestrator emits through a domain-shaped `post.Recorder` declared in
+`internal/post`, with the mapping onto `logging.Event` in `internal/app`, so `internal/post` keeps
+importing no other internal package — `internal/app/layering_test.go` fails the build if it acquires
+one. Under **DEC-D3** the orchestrator installs a per-call target reporter on the context, which
+closes #98 box 1 and #111 together and deprecates `post.Targeter`.
 
-Batch 6 as recorded was fourteen tasks across four packages and two unrelated external surfaces, so
-triage split it into 6a (`69e17e3`), 6b (`13705e0`), 6c-1 (this branch) and 6c-2.
-**Do not re-derive Batch 6 as one unit.**
+**Four review obligations are inherited**, recorded in `state.yaml` under
+`in_progress[0].inherited_review_obligations`. The load-bearing one: `internal/logging`'s event-name
+test scans its own package and cannot see the adapter, so 6c-2 **must** assert that the adapter's
+producible event-name set equals the orchestrator-reachable subset of `AllEvents()` — otherwise an
+unmapped event silently never fires.
+
+Two open questions to answer rather than default: whether `error_type` is emitted from today's two
+`Reason` constants or omitted until T056 (batch 8), and whether the `message` field is omitted
+entirely until T071 (batch 10) with only `message_len` recorded.
 
 ## Review follow-ups
 

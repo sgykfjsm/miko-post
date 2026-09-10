@@ -504,3 +504,51 @@ adapter can produce equals the orchestrator-reachable subset of `AllEvents()` �
 unmapped event silently never fires. Two open questions to answer rather than default: whether
 `error_type` is emitted from today's two `Reason` constants or omitted until T056, and whether the
 `message` field is omitted entirely until T071 with only `message_len` recorded.
+
+## Batch 6c-1 — the US1 front door (PR #120, squashed as `f757707`, 2026-09-10)
+
+Merged `passed-with-notes` after one review cycle and two fix passes. The squashed tree is
+byte-identical to the reviewed tip `22ca3da` (both tree `d4f4cb57`). Closed #30, #37, #38, #39, #40,
+#107, #109, #114, #117; advanced #104; filed #119.
+
+**The first batch here whose decisions were written down before the code.** DEC-D1 through DEC-D4
+were recorded in `state.yaml` with their rationale, rejected alternatives and costs before
+implementation started — the concrete fix for the bookkeeping failure that had recurred in three
+consecutive batches. It held: the contract reviewer judged each decision against the code rather
+than the record, and found none overreaching.
+
+**Two review findings were the same shape, and it is a shape worth naming.** `mp -c <non-regular
+path>` never returned — a FIFO hung with no output, no timeout and no exit status, and `/dev/zero`
+reached ~1.9 GB RSS in a second. `internal/logging` had refused exactly this for the *log* path since
+Batch 4, with a comment recording that a FIFO there "made Open never return". The guard existed; the
+counterpart didn't. Separately, the batch made a comment false in `internal/sink/telegram/sink.go` —
+a file it never opened — because its own new `MaxTimeoutSeconds` ceiling falsified a sentence saying
+validation "bounds it only from below", while the contract it *did* write asserted the correction had
+already been made. **Both are the same failure: a fact established in one place and not carried to
+the place that already depended on it.** Worth a habit — when a batch changes a fact, grep for who
+asserts it.
+
+**Two unfailable assertions were caught during authorship rather than a batch later**, which is new.
+One asserted `Contains(err, "a directory")`, which `os.ReadFile`'s own EISDIR text already satisfies,
+so it passed with the guard deleted. One keyed off `"bot_token"`, which the required-when-enabled
+problem satisfies for a different reason on different input. Both now assert their rule's own clause
+— text nothing but the new code writes. The check that found them is cheap and should be routine:
+**for each new assertion, ask what text or state would satisfy it without the fix present.**
+
+**A coordinator error worth recording, because a memory did not prevent it.** The PR was opened with
+`Closes #30 (T029), #37 (T036), #38 …` on one line, and GitHub registered only the first — the
+identical defect found as CON-001 in Batch 6a, which already had a memory written about it. It was
+caught because `closingIssuesReferences` is checked after every PR open rather than trusted from the
+body; without that, five issues would have stayed open after merge. The verification habit saved it,
+the memory did not. The lesson is not "remember harder" — it is that a check at the point of action
+beats a note recalled at the point of writing.
+
+**The honest hole, filed as #119.** No test drives two destinations both succeeding, and as written
+none can: `telegram.Sink.baseURL` is unexported and `cli.Run` has no seam. The `sinks[:1]` mutant was
+killed only by the partial-failure test — by a *failing* Telegram — with `internal/app` and
+`internal/cli` both passing it. The issue's acceptance is the mutant, not a test's existence.
+
+**What 6c-2 inherits.** T040, the `Recorder` seam, the adapter, #41's four riders, #98 boxes 1–3,
+#110, and #111 via DEC-D3. Four obligations are recorded in `state.yaml`, the load-bearing one being
+that `internal/logging`'s event-name test cannot see the adapter, so an unmapped event would silently
+never fire unless 6c-2 asserts the producible set against `AllEvents()`.
