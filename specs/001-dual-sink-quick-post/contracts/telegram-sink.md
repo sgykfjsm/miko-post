@@ -93,7 +93,8 @@ as an error condition.
 Exactly one unformatted retry runs **if and only if**:
 
 ```text
-response.ok == false
+HTTP status == 400 and the response envelope is trusted
+AND response.ok == false
 AND response.error_code == 400
 AND response.description contains "can't parse entities"
 ```
@@ -109,6 +110,11 @@ description — makes **no second attempt of any kind** (FR-038, FR-041). Fail c
 | Attempt 1 rejected for formatting, rescue succeeds | **success** (FR-036) | **none** (FR-061) |
 | Attempt 1 rejected for formatting, rescue fails | failure; **both** attempts retained in the log (FR-037) | `1` |
 | Any non-formatting failure | failure, no retry (FR-038, FR-041) | `1` |
+
+Batch 9 implements this contract. Both request contexts retain the original overall
+deadline. Failed rescue retains both sanitized attempt errors, while the final error
+supplies the display classification and overall HTTP status. Correlated formatting
+events precede the sink outcome; see [log events](log-events.md).
 
 ## Timeouts
 

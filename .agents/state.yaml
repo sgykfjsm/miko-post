@@ -774,13 +774,14 @@ completed:
       GitHub issues remain open. T003 is complete because go.sum is committed in
       9c3e47f. The existing Claude manifest timestamp is unrelated and
       was preserved. Project-state bookkeeping is separate from the review target.
-in_progress:
   - id: 8
     name: US3 sink independence
     tasks: [T052, T053, T054, T055, T056, T057, T058]
     issues: [53, 54, 55, 56, 57, 58, 59]
     branch: sgykfjsm/batch-8-cycle
-    state: draft-pr-open
+    state: merged
+    merged_at: 2026-09-11T07:32:22Z
+    squashed_as: 48fdd6a114cc45630d7cd6674b3fcca7bbb02d8f
     committed: true
     pushed: true
     implementation_commit: 2b78af1
@@ -807,6 +808,46 @@ in_progress:
       Adds safe error identity classification while preserving diagnostics. Verifies prior
       sink independence and CLI/GUI rendering, with real local HTTP/filesystem tests and
       headless GUI outcomes. No timeout-policy, retry, GUI lifecycle or config change.
+  - id: 9
+    name: US4 formatting rescue
+    tasks: [T059, T060, T061, T062, T063, T064]
+    issues: [60, 61, 62, 63, 64, 65]
+    branch: sgykfjsm/batch-9-review-fixes
+    state: draft-pr
+    committed: true
+    pushed: true
+    pull_request: 125
+    prepared_pr_body: .agents/batch-9-pr-body.md
+    review_mode: review-and-fix
+    review_verdict: passed
+    review_cycle: 1
+    review_fix_passes: 1
+    review_stages: {contract: valid, correctness: pass, adversarial: pass}
+    resolved_review_findings: [COR-001, COR-002]
+    review_required_findings: []
+    review_run_state: /Users/shige/.agents/review-runs/sgykfjsm__miko-post/20260911-batch9
+    validation: "make check, native arm64 build, uncached focused race tests, reset-deadline mutation gate, HTTP service JSONL integration passed"
+    validation_gaps: [live-Telegram]
+  - id: issue-122
+    name: Subtle random GUI background
+    state: draft-pr
+    source_snapshot: /tmp/miko-122-source
+    review_run_state: /Users/shige/.agents/review-runs/sgykfjsm__miko-post/20260911-issue122
+    validation: "full make check, native build, native editor/success/failure/black-fallback checks passed"
+    committed: true
+    pushed: true
+    pull_request: 125
+    prepared_pr_body: .agents/issue-122-pr-body.md
+    review_mode: review-and-fix
+    review_verdict: passed
+    review_cycle: 1
+    review_fix_passes: 1
+    review_stages: {contract: valid, correctness: pass, adversarial: pass}
+    resolved_review_findings: [COR-001]
+    review_required_findings: []
+    validation_gaps: [real-IME-composition, Intel-Mac]
+in_progress: []
+
 blockers: []
 
 time_sensitive:
@@ -860,7 +901,7 @@ time_sensitive:
     deadline: before tagging v0.1.0
 
 next_best_action: >-
-  Review draft PR #124 for merge readiness; T052–T058 are complete and all three review stages passed.
+  Obtain acceptance and merge draft PR #125 for Batch 9 and explicitly requested issue #122 before starting Batch 10.
 
 
 review_followups_filed:
@@ -948,29 +989,53 @@ batch_6_split:
     internal package.
 
 remaining_batches:
-  - {id: 8, name: "US3 sink independence", tasks: "T052-T058", state: draft-pr-open}
-  - {id: 9, name: "US4 formatting rescue", tasks: "T059-T064"}
   - {id: 10, name: "US5 diagnostics", tasks: "T065-T074"}
   - {id: 11, name: "US6 settings resolution", tasks: "T075-T083"}
   - {id: 12, name: "Polish and gates", tasks: "T084-T091"}
 
 touched_files:
-  - internal/post/reason.go
-  - internal/post/reason_test.go
-  - internal/post/service.go
-  - internal/post/recorder.go
-  - internal/post/result.go
-  - internal/sink/telegram/response.go
-  - internal/sink/telegram/reason.go
-  - internal/sink/telegram/reason_test.go
-  - internal/sink/telegram/independence_test.go
+  - .agents/archive/project-status-before-batch-9.md
+  - .agents/batch-9-cycle.md
+  - .agents/batch-9-pr-body.md
+  - .agents/batch-9-pr-title.txt
+  - .agents/batch-9-reconciliation.md
+  - .agents/batch-9-review.md
+  - .agents/change-groups.json
+  - .agents/issue-122-pr-body.md
+  - .agents/issue-122-pr-title.txt
+  - .agents/issue-122-review.md
+  - .agents/project-status.md
+  - .agents/state.yaml
+  - .agents/work-log.md
+  - docs/DEVELOPER_GUIDE.md
+  - docs/USER_GUIDE.md
+  - docs/design.ja.md
+  - docs/design.md
+  - docs/gui-background.md
+  - internal/app/recorder.go
   - internal/app/recorder_test.go
-  - internal/gui/result_test.go
-  - specs/001-dual-sink-quick-post/tasks.md
+  - internal/config/background_test.go
+  - internal/config/settings.go
+  - internal/config/validate.go
+  - internal/gui/background.go
+  - internal/gui/background_limits_test.go
+  - internal/gui/background_test.go
+  - internal/gui/window.go
+  - internal/post/formatting.go
+  - internal/post/service.go
+  - internal/sink/telegram/fallback_test.go
+  - internal/sink/telegram/request.go
+  - internal/sink/telegram/rescue.go
+  - internal/sink/telegram/rescue_deadline_test.go
+  - internal/sink/telegram/rescue_integration_test.go
+  - internal/sink/telegram/rescue_test.go
+  - internal/sink/telegram/sink.go
+  - internal/sink/telegram/sink_test.go
+  - specs/001-dual-sink-quick-post/contracts/config-schema.md
   - specs/001-dual-sink-quick-post/contracts/log-events.md
-  - .agents/batch-8-cycle.md
-  - .agents/batch-8-review.md
-  - .agents/batch-8-pr-body.md
+  - specs/001-dual-sink-quick-post/contracts/telegram-sink.md
+  - specs/001-dual-sink-quick-post/spec.md
+  - specs/001-dual-sink-quick-post/tasks.md
 
 assumptions:
   - >-
@@ -983,5 +1048,5 @@ backlog_additions:
   - issue: 122
     title: GUI random subtle background image from a configured directory
     state: open
-    implementation: deferred
-    scope: Separate future feature; excluded from Batch 7
+    implementation: draft-pr
+    scope: Explicitly requested separately from Batch 9; original Batch 7 deferral preserved as history

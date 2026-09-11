@@ -116,6 +116,11 @@ The GUI is implemented with Fyne and contains only:
 - A Cancel button
 - A compact result/error display
 
+Accepted extension (#122): `gui.background_image_dir` optionally selects a subtle
+local PNG/JPEG background once per window, with black fallback for unusable sources.
+It adds no controls or image-posting behavior; [the background contract](gui-background.md)
+defines the placement, opacity and decoding bounds.
+
 The message field receives focus at launch. Cancel closes the window without posting.
 
 During submission, Send is disabled to prevent duplicate posts. The GUI invokes the shared posting service, waits for every enabled sink to complete, and displays a compact result for each sink.

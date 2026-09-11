@@ -1,0 +1,53 @@
+{
+  "batch_9": [
+    ".agents/batch-9-cycle.md",
+    ".agents/batch-9-pr-body.md",
+    ".agents/batch-9-pr-title.txt",
+    ".agents/batch-9-review.md",
+    "internal/app/recorder.go",
+    "internal/app/recorder_test.go",
+    "internal/post/formatting.go",
+    "internal/post/service.go",
+    "internal/sink/telegram/fallback_test.go",
+    "internal/sink/telegram/request.go",
+    "internal/sink/telegram/rescue.go",
+    "internal/sink/telegram/rescue_deadline_test.go",
+    "internal/sink/telegram/rescue_integration_test.go",
+    "internal/sink/telegram/rescue_test.go",
+    "internal/sink/telegram/sink.go",
+    "internal/sink/telegram/sink_test.go",
+    "specs/001-dual-sink-quick-post/contracts/log-events.md",
+    "specs/001-dual-sink-quick-post/tasks.md"
+  ],
+  "issue_122": [
+    ".agents/issue-122-pr-body.md",
+    ".agents/issue-122-pr-title.txt",
+    ".agents/issue-122-review.md",
+    "docs/gui-background.md",
+    "internal/config/background_test.go",
+    "internal/config/settings.go",
+    "internal/config/validate.go",
+    "internal/gui/background.go",
+    "internal/gui/background_limits_test.go",
+    "internal/gui/background_test.go",
+    "internal/gui/window.go",
+    "specs/001-dual-sink-quick-post/contracts/config-schema.md"
+  ],
+  "documentation_reconciliation": [
+    ".agents/archive/project-status-before-batch-9.md",
+    ".agents/batch-9-reconciliation.md",
+    ".agents/change-groups.json",
+    ".agents/project-status.md",
+    ".agents/state.yaml",
+    ".agents/work-log.md",
+    "docs/DEVELOPER_GUIDE.md",
+    "docs/USER_GUIDE.md",
+    "docs/design.ja.md",
+    "docs/design.md",
+    "specs/001-dual-sink-quick-post/contracts/telegram-sink.md",
+    "specs/001-dual-sink-quick-post/spec.md"
+  ],
+  "excluded_preexisting": [
+    ".specify/integrations/claude.manifest.json"
+  ]
+}
