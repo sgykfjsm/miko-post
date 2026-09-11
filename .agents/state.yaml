@@ -752,8 +752,8 @@ in_progress:
     review_fix_passes: 0
     committed: true
     pushed: true
-    pull_request: null
-    prepared_pr_body: /Users/shige/.agents/review-runs/sgykfjsm__miko-post/20260911T022010Z-8e1ba8b0/cycle-01/input/pr-body.md
+    pull_request: 123
+    prepared_pr_body: /tmp/miko-post-batch7-pr-body.md
     review_mode: review-only
     review_run_state: /Users/shige/.agents/review-runs/sgykfjsm__miko-post/20260911T022010Z-8e1ba8b0
     validation: "make check passed; native arm64 build; headless GUI race tests; native isolated-vault checks"

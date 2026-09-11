@@ -112,8 +112,8 @@ resolved, with no remaining required findings or material validation gaps.
 real IME, live Telegram/native both-success and isolated cross-app activation
 remain disclosed limits. Cycle 0 reports remain preserved.
 
-The reviewed changes are committed as `9c3e47f` and pushed, with no remote PR or
-issue closure yet. Next: create the draft PR using cycle-01/input/pr-body.md. Full-feature reconciliation waits
+The reviewed changes are committed as `9c3e47f` and `aba79bd`, pushed, and
+available as draft PR #123, with no issue closure. Full-feature reconciliation waits
 for the remaining implementation batches.
 
 Separately, user-requested future background images are recorded in #122. No

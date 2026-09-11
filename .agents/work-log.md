@@ -838,4 +838,8 @@ Using the explicitly requested commit-and-pr workflow, committed the reviewed
 Batch 7 work as `9c3e47f` (`feat: add GUI quick-post window`) and pushed
 `sgykfjsm/batch-7-cycle` to origin. This also satisfies T003's committed
 `go.sum` condition, so T003 was checked. No open PR existed for the branch;
-draft PR creation remains the next step.
+draft PR creation remained the next step.
+
+Created draft PR #123 at https://github.com/sgykfjsm/miko-post/pull/123 with the
+Batch 7 implementation, validation evidence, T003 completion, and disclosed
+out-of-scope limits. No issue was closed.
