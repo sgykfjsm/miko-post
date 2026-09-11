@@ -586,7 +586,6 @@ completed:
     also_owed_by_this_batch:
       - "DONE: the byte-exactness test internal/sink/obsidian lacked. TestTheMessageBodyIsWrittenByteForByte, fourteen rows, killed by two mutants (a TrimSpace and a ToValidUTF8 in Entry). Its invalid-UTF-8 rows construct their Message directly, deliberately, for the same reason DEC-C1's form encoding is kept."
 
-in_progress:
   - id: 6c-2
     name: "Event emission"
     tasks: [T040]
@@ -595,7 +594,9 @@ in_progress:
     branch: sgykfjsm/batch-6c2-event-emission-2
     commit: 1420095
     owner: Codex
-    state: reviewed-and-published-awaiting-merge
+    state: merged
+    squashed_as: 928736699937396598343cf9d335c90a447d0296
+    merged_at: 2026-09-11T01:59:58Z
     review_pr: 121
     review_verdict: passed-with-notes
     review_required_findings: []
@@ -733,7 +734,47 @@ in_progress:
     open_questions_answered:
       - "error_type: emitted now, two values, one predicate shared with reasonFor (DEC-E2)"
       - "message: not emitted at all; FR-068 recorded as knowingly unmet until T071, in tasks.md and in contracts/log-events.md"
+in_progress:
+  - id: 7
+    name: US2 GUI
+    tasks: [T041, T042, T043, T044, T045, T046, T047, T048, T049, T050, T051]
+    issues: [42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52]
+    partial_tasks: [T003]
+    branch: sgykfjsm/batch-7-cycle
+    state: reviewed-uncommitted
+    review_verdict: passed
+    prior_review_verdict: request-changes
+    review_cycle: 1
+    review_required_findings: []
+    resolved_review_findings: [CON-001]
+    review_validation_gaps: []
+    review_stages: {contract: valid, correctness: pass, adversarial: pass}
+    review_fix_passes: 0
+    committed: false
+    pushed: false
+    pull_request: null
+    prepared_pr_body: /Users/shige/.agents/review-runs/sgykfjsm__miko-post/20260911T022010Z-8e1ba8b0/cycle-01/input/pr-body.md
+    review_mode: review-only
+    review_run_state: /Users/shige/.agents/review-runs/sgykfjsm__miko-post/20260911T022010Z-8e1ba8b0
+    validation: "make check passed; native arm64 build; headless GUI race tests; native isolated-vault checks"
+    validation_gaps: [real-IME-composition, Intel-Mac]
+    native_focus_validation: >-
+      Unchanged production binary with passive diagnostic observer: actual key-window
+      loss via standard About panel and regain via AXRaise, no target input, retained
+      success/failure result beyond45s and manual exit0/1. Idle control auto-exit45.091s.
+      Source and traces are in review cycle-01/input/native-validation.
+    scope_notes: >-
+      Adds Fyne v2.8.1, the GUI and main dispatch. A small macOS local event counter
+      and key-window notification observer support T049 without consuming input.
+      Dismissal during a post hides the window but waits for all sink outcomes and
+      logger close before process exit. Settings-error UI remains T082; logging
+      degradation UI and richer classification remain in their assigned later batches.
+    publication_notes: >-
+      GitHub issues remain open. T003 remains unchecked because its go.sum commit
+      condition is not met. The existing Claude manifest timestamp is unrelated and
+      was preserved. Project-state bookkeeping is separate from the review target.
 blockers: []
+
 
 time_sensitive:
   - issue: 114
@@ -786,8 +827,7 @@ time_sensitive:
     deadline: before tagging v0.1.0
 
 next_best_action: >-
-  Merge PR #121 when authorized; the reviewed implementation is published and its
-  description verified. CON-102 is a non-blocking T053 evidence-annotation follow-up.
+  Publish the reviewed Batch 7 change and prepared PR when publication is authorized.
 
 
 review_followups_filed:
@@ -864,8 +904,8 @@ batch_6_split:
   parts:
     - {id: 6a, name: "Obsidian daily-note sink", tasks: [T027, T030, T031, T032], issues: [28, 31, 32, 33], package: internal/sink/obsidian, surface: filesystem, pr: 112, state: merged, squashed_as: 69e17e3}
     - {id: 6b, name: "Telegram sink", tasks: [T028, T033, T034, T035], issues: [29, 34, 35, 36], package: internal/sink/telegram, surface: HTTP, pr: 116, state: merged, squashed_as: 13705e0}
-    - {id: 6c-1, name: "US1 front door and wiring", tasks: [T029, T036, T037, T038, T039], issues: [30, 37, 38, 39, 40], also_discharges: [104, 107, 109, 114], packages: [internal/app, internal/cli, cmd/mp], surface: "process, exit status", state: implemented-not-reviewed, requires: [6a, 6b], requires_met: true, branch: sgykfjsm/batch-6c-us1-front-door}
-    - {id: 6c-2, name: "Event emission", tasks: [T040], issues: [41], also_discharges: [98, 110, 111], packages: [internal/post, internal/app, internal/logging, internal/sink/obsidian, internal/cli], surface: "log records", state: implemented-not-reviewed, requires: [6c-1], requires_met: true, branch: sgykfjsm/batch-6c2-event-emission}
+    - {id: 6c-1, name: "US1 front door and wiring", tasks: [T029, T036, T037, T038, T039], issues: [30, 37, 38, 39, 40], also_discharges: [104, 107, 109, 114], packages: [internal/app, internal/cli, cmd/mp], surface: "process, exit status", state: merged, pr: 120, requires: [6a, 6b], requires_met: true, branch: sgykfjsm/batch-6c-us1-front-door}
+    - {id: 6c-2, name: "Event emission", tasks: [T040], issues: [41], also_discharges: [98, 110, 111], packages: [internal/post, internal/app, internal/logging, internal/sink/obsidian, internal/cli], surface: "log records", state: merged, pr: 121, requires: [6c-1], requires_met: true, branch: sgykfjsm/batch-6c2-event-emission}
   6c_owns: [107, 41, 98, 109, 110, 111]
   6c_blocker: >-
     T036 places build.go in internal/post, which cannot compile: the sink packages import
@@ -875,7 +915,7 @@ batch_6_split:
     internal package.
 
 remaining_batches:
-  - {id: 7, name: "US2 GUI", tasks: "T041-T051", pins: "fyne/v2"}
+  - {id: 7, name: "US2 GUI", tasks: "T041-T051", pins: "fyne/v2@v2.8.1", state: reviewed-uncommitted}
   - {id: 8, name: "US3 sink independence", tasks: "T052-T058"}
   - {id: 9, name: "US4 formatting rescue", tasks: "T059-T064"}
   - {id: 10, name: "US5 diagnostics", tasks: "T065-T074"}
@@ -883,6 +923,9 @@ remaining_batches:
   - {id: 12, name: "Polish and gates", tasks: "T084-T091"}
 
 touched_files:
+  - internal/gui/
+  - cmd/mp/main.go
+  - cmd/mp/main_test.go
   - internal/config/secret.go
   - internal/config/paths.go
   - internal/config/settings.go
@@ -943,3 +986,10 @@ assumptions:
     recorded here for orientation, not as a binding plan.
 
 last_updated: 2026-09-11
+
+backlog_additions:
+  - issue: 122
+    title: GUI random subtle background image from a configured directory
+    state: open
+    implementation: deferred
+    scope: Separate future feature; excluded from Batch 7

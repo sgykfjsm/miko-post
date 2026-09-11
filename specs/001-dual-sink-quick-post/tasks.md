@@ -36,7 +36,7 @@ exercise (`foo_test.go` next to `foo.go`) rather than in a separate `tests/` tre
 - [x] T002 [P] Create the package skeleton directories `cmd/mp/`, `internal/{cli,gui,post,config,logging,version}/`, `internal/sink/{telegram,obsidian}/`, and `testdata/` per the plan's Source Code layout
 - [ ] T003 [P] Add and pin dependencies `fyne.io/fyne/v2@v2.8.1`, `github.com/pelletier/go-toml/v2@v2.4.3`, `github.com/oklog/ulid/v2@v2.1.2` in `go.mod` and commit `go.sum`
   - **Deferred in Batch 1, partially done in Batch 3.** Go records a dependency only when a package imports it: `go get` marks all three `// indirect` and `go mod tidy` removes them, leaving `go.sum` empty. Pin each one in the batch that first imports it — go-toml in the settings batch, ULID in the orchestrator batch, Fyne in the GUI batch. The intended versions are recorded in research.md (R-003, R-004, R-007).
-  - `github.com/pelletier/go-toml/v2@v2.4.3` is pinned as a **direct** requirement as of the settings batch (T016), with `go.sum` populated. `github.com/oklog/ulid/v2@v2.1.2` is pinned as of the orchestrator batch (T025). `fyne.io/fyne/v2@v2.8.1` remains outstanding until the GUI batch.
+  - `github.com/pelletier/go-toml/v2@v2.4.3` is pinned as a **direct** requirement as of the settings batch (T016), with `go.sum` populated. `github.com/oklog/ulid/v2@v2.1.2` is pinned as of the orchestrator batch (T025). `fyne.io/fyne/v2@v2.8.1` is pinned directly by Batch 7; all three pins are present. T003 stays open until the prepared `go.sum` change is committed.
 - [x] T004 [P] Implement build-time version and commit variables with a `runtime/debug.ReadBuildInfo()` fallback in `internal/version/version.go` (research R-009, resolves A-008)
 - [x] T005 [P] Add a `Makefile` at the repository root with `build` (including `-ldflags -X` version stamping), `test`, `race`, `vet`, and `install` targets
 
@@ -162,22 +162,24 @@ neither can be retrofitted later without rewriting every story.
 
 ### Tests for User Story 2
 
-- [ ] T041 [P] [US2] Write headless tests using `fyne.io/fyne/v2/test` asserting `Enter` inserts a line break, `Cmd+Enter` submits, and `Esc` cancels **while the entry holds focus**, in `internal/gui/entry_test.go` (FR-022, research R-003)
-- [ ] T042 [P] [US2] Write a window test asserting the Send control and `Cmd+Enter` reach the same submission path and that Send is disabled for the duration of a submission, in `internal/gui/window_test.go` (FR-023, FR-024)
+- [x] T041 [P] [US2] Write headless tests using `fyne.io/fyne/v2/test` asserting `Enter` inserts a line break, `Cmd+Enter` submits, and `Esc` cancels **while the entry holds focus**, in `internal/gui/entry_test.go` (FR-022, research R-003)
+- [x] T042 [P] [US2] Write a window test asserting the Send control and `Cmd+Enter` reach the same submission path and that Send is disabled for the duration of a submission, in `internal/gui/window_test.go` (FR-023, FR-024)
 
 ### Implementation for User Story 2
 
-- [ ] T043 [US2] Implement the extended `widget.Entry` overriding `TypedShortcut` and `TypedKey`, delegating unhandled events to the embedded `Entry` so standard editing and IME input keep working, in `internal/gui/entry.go` (FR-021, FR-022, research R-003)
-- [ ] T044 [US2] Implement the window containing exactly the message field, Send, Cancel, and a compact result area, with the field focused at launch, in `internal/gui/window.go` (FR-020, FR-021)
-- [ ] T045 [US2] Implement the single `submit()` path shared by the Send control and `Cmd+Enter`, calling the same `post.Service` the CLI uses, in `internal/gui/window.go` (FR-023, constitution principle II)
-- [ ] T046 [US2] Disable the Send control for the whole submission so a post cannot be submitted twice, in `internal/gui/window.go` (FR-024)
-- [ ] T047 [US2] Implement the compact per-sink result panel showing short reasons only, never detailed errors or traces, in `internal/gui/result.go` (FR-025, FR-029)
-- [ ] T048 [US2] Implement the auto-close timers using `gui.success_close_seconds` and `gui.error_close_seconds`, in `internal/gui/window.go` (FR-026)
-- [ ] T049 [US2] Cancel the pending auto-close on **any** interaction — keypress, click, or the window regaining focus — leaving the result on screen until dismissed, in `internal/gui/window.go` (FR-028, SC-012)
-- [ ] T050 [US2] Register the `Cmd+Q` canvas shortcut and implement Cancel/`Esc` closing without contacting any sink, in `internal/gui/window.go` (FR-022)
-- [ ] T051 [US2] Propagate the post outcome to the process exit status when the window closes, whether by auto-close or by the user, in `internal/gui/window.go` and `cmd/mp/main.go` (FR-027)
+- [x] T043 [US2] Implement the extended `widget.Entry` overriding `TypedShortcut` and `TypedKey`, delegating unhandled events to the embedded `Entry` so standard editing and IME input keep working, in `internal/gui/entry.go` (FR-021, FR-022, research R-003)
+- [x] T044 [US2] Implement the window containing exactly the message field, Send, Cancel, and a compact result area, with the field focused at launch, in `internal/gui/window.go` (FR-020, FR-021)
+- [x] T045 [US2] Implement the single `submit()` path shared by the Send control and `Cmd+Enter`, calling the same `post.Service` the CLI uses, in `internal/gui/window.go` (FR-023, constitution principle II)
+- [x] T046 [US2] Disable the Send control for the whole submission so a post cannot be submitted twice, in `internal/gui/window.go` (FR-024)
+- [x] T047 [US2] Implement the compact per-sink result panel showing short reasons only, never detailed errors or traces, in `internal/gui/result.go` (FR-025, FR-029)
+- [x] T048 [US2] Implement the auto-close timers using `gui.success_close_seconds` and `gui.error_close_seconds`, in `internal/gui/window.go` (FR-026)
+- [x] T049 [US2] Cancel the pending auto-close on **any** interaction — keypress, click, or the window regaining focus — leaving the result on screen until dismissed, in `internal/gui/window.go` (FR-028, SC-012)
+- [x] T050 [US2] Register the `Cmd+Q` canvas shortcut and implement Cancel/`Esc` closing without contacting any sink, in `internal/gui/window.go` (FR-022)
+- [x] T051 [US2] Propagate the post outcome to the process exit status when the window closes, whether by auto-close or by the user, in `internal/gui/window.go` and `cmd/mp/main.go` (FR-027)
 
 **Checkpoint**: US1 and US2 both work independently through the same posting core.
+
+**Batch 7 validation (2026-09-11):** Headless Fyne tests and `make check` pass. Native macOS checks cover launch focus, Enter/Cmd+Enter, result rendering, auto-close, and process status 0/1. T049 uses a small native event observer because Fyne exposes no window-wide mouse observer; headless tests exercise the counter/deadline boundary. The initial review found native focus-only validation missing (CON-001); [the 2026-09-11 recheck](validation/t049-native-focus.md) now verifies real key-window loss/regain with no additional target-window input, retained success/failure results beyond the deadline, and exit codes 0/1. T049's completion is supported by that evidence. The startup-error window remains T082; richer failure classification and diagnostics remain their later batches.
 
 ---
 
