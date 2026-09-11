@@ -386,7 +386,7 @@ func TestAFailedPostWritesTheFailureFields(t *testing.T) {
 
 	const note = "/vault/2026-09-10.md"
 
-	noteFailure := errors.New("opening /vault/2026-09-10.md: permission denied")
+	noteFailure := &os.PathError{Op: "open", Path: note, Err: os.ErrPermission}
 	chatFailure := &telegram.APIError{HTTPStatus: 429, Code: 429, Description: "Too Many Requests"}
 
 	records := postThrough(t, settings, path,
@@ -419,8 +419,8 @@ func TestAFailedPostWritesTheFailureFields(t *testing.T) {
 		t.Errorf("obsidian_append_failed carries error %q, want the sink's own diagnostic %q", got, want)
 	}
 
-	if got := text(t, noteFailed, "error_type"); got != "failed" {
-		t.Errorf("obsidian_append_failed carries error_type %q, want %q", got, "failed")
+	if got := text(t, noteFailed, "error_type"); got != "permission_denied" {
+		t.Errorf("obsidian_append_failed carries error_type %q, want %q", got, "permission_denied")
 	}
 
 	if _, present := noteFailed["http_status"]; present {
@@ -435,6 +435,10 @@ func TestAFailedPostWritesTheFailureFields(t *testing.T) {
 
 	if got := text(t, chatFailed, "error"); !strings.Contains(got, "429") {
 		t.Errorf("telegram_send_failed carries error %q, want the API error's own text", got)
+	}
+
+	if got := text(t, chatFailed, "error_type"); got != "rate_limited" {
+		t.Errorf("telegram_send_failed carries error_type %q, want rate_limited", got)
 	}
 
 	// The terminal record does not restate the sink failures: each is already

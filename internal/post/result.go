@@ -67,7 +67,10 @@ type SinkResult struct {
 	Reason string
 
 	// Err is the detailed diagnostic error, for the log only. Never shown to
-	// the user, and never the source of Reason.
+	// the user. Classification inspects error identity, never its rendered text.
+	// Service-produced successes have nil Err; attempt diagnostics belong to
+	// the recorder. Consumers use Success as authoritative even for a manually
+	// constructed result carrying both Success:true and a non-nil Err.
 	Err error
 
 	// Duration is how long the sink took, recorded as duration_ms (FR-066).

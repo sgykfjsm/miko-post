@@ -61,7 +61,7 @@ missing field reads as a scheduled gap rather than as a defect.
 
 | Field | State after T040 | Owner of the rest |
 |---|---|---|
-| `error_type` | Two values, `timeout` and `failed`, from the same predicate that picks the display reason | **T056** widens the set; the two above keep their meaning |
+| `error_type` | `timeout`, `permission_denied`, `chat_not_found`, `unauthorized`, `rate_limited`, or generic `failed`, selected with the display reason by one classifier | **T056 / Batch 8** adds specific categories; `timeout` and the generic fallback retain their meaning |
 | `message` | **Not emitted at all.** FR-068's capture rule needs `message_on_error_only` and the post's outcome, so no record carries the body yet — including a failure, where SC-008 wants it | **T071** |
 | `stack` | Not emitted. A recovered panic from a sink's `Name` is reported as text on the terminal record (issue #110), which keeps the value rather than the trace | **T073** |
 

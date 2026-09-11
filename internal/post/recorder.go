@@ -1,8 +1,6 @@
 package post
 
 import (
-	"context"
-	"errors"
 	"sync"
 	"time"
 )
@@ -116,46 +114,6 @@ type SinkAttempt struct {
 	// record instead. That is also why this is a field rather than its own
 	// Recorder method — there is one place it can go, whatever caused it.
 	NameErr error
-}
-
-// errorType values for contracts/log-events.md's error_type field.
-//
-// Two, because the orchestrator makes exactly one distinction: a sink that
-// exceeded its own deadline, and everything else. T056 replaces this with the
-// full classification alongside reasonFor, and will widen the set rather than
-// change what these two mean — a log query written today for "timeout" keeps
-// working, which is the property an absent field would not have given.
-//
-// Chosen from constants in this package for the same reason Reason is (see
-// reasonTimedOut): a slug built from an error's text would eventually carry a
-// URL or a credential into a field consumers group by.
-const (
-	errorTypeTimeout = "timeout"
-	errorTypeFailed  = "failed"
-)
-
-// ErrorType returns contracts/log-events.md's error_type for one sink's result,
-// and "" for a success.
-//
-// It tests the same condition reasonFor does, deliberately: the display reason
-// and the classified type are two renderings of one judgement, and deriving
-// them from the same predicate is what stops them drifting into disagreeing
-// about the same failure. TestErrorTypeAndReasonAgree pins that.
-//
-// A failure whose Err is nil is classified as errorTypeFailed rather than as
-// nothing. That result is not reachable through this package's orchestrator, but
-// error_type is required on a failure, and a field that is silently absent for
-// one shape of failure is worse than a slug that is merely unspecific.
-func ErrorType(result SinkResult) string {
-	if result.Success {
-		return ""
-	}
-
-	if errors.Is(result.Err, context.DeadlineExceeded) {
-		return errorTypeTimeout
-	}
-
-	return errorTypeFailed
 }
 
 // noRecorder discards everything, and is what a Service with no Recording uses.

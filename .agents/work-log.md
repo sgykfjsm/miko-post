@@ -843,3 +843,80 @@ draft PR creation remained the next step.
 Created draft PR #123 at https://github.com/sgykfjsm/miko-post/pull/123 with the
 Batch 7 implementation, validation evidence, T003 completion, and disclosed
 out-of-scope limits. No issue was closed.
+
+## 2026-09-11 — Batch 8 implementation and verification
+
+- Confirmed Batch 7 PR #123 merged as 6f40dada; archived its prior status snapshot.
+- Triaged #53–#59: T052/T054/T055 and rendering already implemented; T053 logging
+  already supplied by Batch 6c-2; T056 needs the classifier. No issue was closed.
+- Implemented fixed-vocabulary classification with error identities, preserving the
+  original diagnostic and post package boundary; Telegram matches only trusted refusals.
+- Added real local HTTP/filesystem integration and core-driven headless GUI matrices;
+  strengthened both-failure log classification assertions.
+- make check and native arm64 production build passed. Initial test fixture mistakes
+  (Outcome ID field and note filename extension) were corrected before full validation.
+- Prepared PR text; all changes uncommitted. Three-stage review started in review-only
+  mode. DEC-A1 timeout grace retained; later batches and Claude manifest edit excluded.
+- Next: complete the three-stage review of the prepared Batch 8 diff.
+
+## 2026-09-11 — Batch 8 review completed: request-changes
+
+- Contract valid; fresh correctness and adversarial stages independently found the same
+  should-fix defect: COR-001 / ADV-001, missing/null Telegram ok interpreted as a valid
+  refusal for classification. Deduplicated to one required correction.
+- Full suite/build stayed green; coordinator and adversarial external overlays reproduced
+  the missing/null envelope failure. Explicit false control passes; no reviewed file
+  was changed by probes. Raw reports/evidence: /Users/shige/.agents/review-runs/sgykfjsm__miko-post/20260911T055009Z-f2faa64e.
+- Review-only, zero fix passes. No commits, pushes, PR publication or issue closure.
+- Post-review tracking corrected T056 to incomplete; six other selected tasks verified.
+  This tasks.md-only metadata delta is recorded separately from the frozen review target.
+- Post-review cleanup found no additional closure to publish. No feature closeout or
+  guide/task-artifact archival: implementation still needs the required correction.
+- Next: fix COR-001 (also ADV-001) and rerun the full three-stage Batch 8 review.
+
+## 2026-09-11 — Authorized Batch 8 correction and fresh rereview
+
+- User explicitly authorized COR-001/ADV-001 fixes, regression tests and all-three-stage
+  rereview, leaving changes uncommitted. Interruption audit confirmed no partial fix.
+- Single fixer changed response.go and reason_test.go only. A required boolean ok is
+  now distinguished from missing/null; invalid envelopes retain generic classification.
+  Optional null description is treated like omission; exact chat-not-found text remains
+  required for that category. Missing/null error codes remain generic.
+- Eight regression failures reproduced before correction; targeted race tests, make check
+  and native arm64 build passed afterward. No task-completion or remote edits.
+- Fresh collaboration reviewer launch hit the agent-thread limit before starting. Its
+  attempt was abandoned and replaced by a fresh read-only Codex CLI session; reviewers
+  remain independent and receive only the immutable packet and valid contract.
+- Cycle 1 full target fingerprint: ba30b1d0bc6ed7a84852862c379baf78f04e9b23f5dc68c048c465d33c9e3050.
+- Next: complete contract, correctness and adversarial rereview of the full diff.
+
+## 2026-09-11 — Batch 8 authorized rereview passed
+
+- One correction pass resolved COR-001/ADV-001. All three fresh stages passed against
+  the full 13-file target ba30b1d0bc6ed7a84852862c379baf78f04e9b23f5dc68c048c465d33c9e3050.
+- Canonical target/contract/stage fingerprints verified; original diagnostics and HTTP
+  status retained, invalid ok remains generic, optional description policy tested.
+- make check and native arm64 build passed. Independent race tests passed for core,
+  adapter, CLI/GUI and Telegram classification. Reviewer socket restrictions blocked
+  fresh HTTP reruns; the fixer's full validation had exercised that matrix successfully.
+- Process history retained: collaboration thread-limit failure; rejected redundant
+  fingerprint typo; inconclusive correctness setup superseded by a fresh verified run.
+- Integrated report: /Users/shige/.agents/review-runs/sgykfjsm__miko-post/20260911T055009Z-f2faa64e/integrated.yaml.
+- No task-completion, staging, commit, push, PR or issue mutations. T056 remains unchecked
+  as historical tracking; current acceptance is passed. No remaining review findings.
+- Next: reconcile preserved T056 and prepared PR tracking before publication.
+
+## 2026-09-11 — Batch 8 publication preparation
+
+User invoked commit-and-pr. Verified the implementation still matches the passed review;
+reconciled T056 and all seven closing references, preserving cycle 0 history.
+The unrelated pre-existing Claude manifest timestamp remains outside publication.
+
+## 2026-09-11 — Batch 8 draft PR published
+
+Created implementation commit 2b78af1 and pushed the branch with upstream tracking.
+Opened draft PR #124: https://github.com/sgykfjsm/miko-post/pull/124.
+Existing history was preserved. All seven completed issues have individual closing
+references; no merge or issue closure was performed. The pre-existing manifest
+timestamp edit remains local and uncommitted. Publication bookkeeping is recorded
+in a separate documentation commit.
