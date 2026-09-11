@@ -690,3 +690,30 @@ target, and aggregate error_type. Mutants never changed the working checkout.
 All three dispositions are fixed, pending full staged rereview. No issues closed,
 PR changes, commits or pushes. Receipt: /Users/shige/.agents/review-runs/sgykfjsm__miko-post/20260911T004422Z-c992f78b/fix-01/receipt.yaml
 Next action: full review of the updated uncommitted Batch 6c-2 diff.
+
+
+## 2026-09-11 — Commit and full Batch 6c-2 rereview
+
+User requested commit, checks, and review. Committed corrections and project-state
+updates as 1420095 (`fix: isolate diagnostic writes and verify post correlation`).
+Preserved the unrelated Claude integration timestamp. No push.
+
+make check passed after commit. Fresh uncached go test -race -count=1 ./... passed
+on the archived exact commit. Coverage: post/app100.0%, logging99.3%. Correctness
+review inspected all114hunks/26files and independently reran five relevant packages;
+it passed without findings. Contract is valid. The built-in fresh adversarial
+launcher hit its thread limit; recorded that abandoned attempt, then ran a fresh
+ephemeral read-only Codex CLI reviewer with only the packet/contract/raw validation.
+It passed without findings; it verified23non-state file blobs, inspected applicable
+risk lanes, and did not independently rerun tests.
+
+Original COR-001/CON-001/CON-002 are resolved. Overall request-changes is now limited
+to publication requirement CON-101: PR121 still describes remote124abea and needs
+current queue/completion/validation wording before publishing1420095. Prepared a
+local body draft. CON-102 (stale T053 evidence annotation) is non-blocking and left
+to its owning documentation/batch workflow. No issue closures or PR mutations.
+
+Cycle-1 report: /Users/shige/.agents/review-runs/sgykfjsm__miko-post/20260911T004422Z-c992f78b/cycle-01/integrated.yaml
+PR draft: /Users/shige/.agents/review-runs/sgykfjsm__miko-post/20260911T004422Z-c992f78b/cycle-01/pr-body-draft.md
+Next action: authorized publication of reviewed commit and accurate PR body, then
+verify remote state. These post-review state updates remain uncommitted.

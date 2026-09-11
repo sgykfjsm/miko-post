@@ -45,32 +45,31 @@ per PR, driven by the `run-batch-cycle` skill.
 
 ## In progress
 
-**Batch 6c-2 — event emission.** Branch `sgykfjsm/batch-6c2-event-emission-2`. **Implemented and
-committed as `124abea`; review corrections are now uncommitted and await full rereview.** Codex took over on 2026-09-11 and
-reran `make check` successfully (formatting, vet, and race-enabled tests). T040 and issue #41, plus #98, #110 and #111. `make check`
-clean; 100.0% statement coverage in `internal/post` and `internal/app`, 99.5% in `internal/logging`
-(unchanged). Thirty-two mutants built, one surviving by design.
+**Batch 6c-2 — event emission.** Branch `sgykfjsm/batch-6c2-event-emission-2`,
+committed through **`1420095`**. The complete local batch passed correctness and
+independent adversarial review in cycle 1; no code findings remain. Overall review
+verdict remains **request-changes for publication metadata only (CON-101)**.
+PR #121 still points to `124abea`; nothing was pushed or changed remotely.
 
-**Review completed 2026-09-11, review-only.** The contract is valid; correctness and
-independent adversarial review completed across the committed diff. Three required
-findings remain: synchronous logging can block delivery and defeat timeout completion
-(COR-001 / ADV-001); emitted message_id/path pairing across overlapping real posts
-lacks the required integration test (CON-001 / COR-002); terminal failure field
-applicability needs clarification (CON-002). `make check` and the stated coverage
-figures were freshly verified. No implementation fixes or remote changes were made.
-Keep #41, #98 and #111 open; #110's diagnostic-survival acceptance is supported.
-Prior statements below about discharged obligations describe implementation intent;
-they do not override these review findings.
+The prior three findings are resolved: bounded asynchronous production logging,
+real overlapping-post JSONL ID/path validation across midnight (including refusal),
+and explicit terminal failure-field applicability. One ordered logger worker holds
+at most 256 pending entries; flush/close wait at most 250 ms. Saturation or timeout
+drops the backlog and warns; an in-flight write may land late and retain its worker
+and handle until it returns. These costs are documented and tested.
 
-**Correction pass completed 2026-09-11.** All three findings have fixes and focused
-validation; acceptance remains pending rereview. The production recorder uses one
-ordered logging worker with 256 pending entries and a 250 ms flush/close bound.
-Queue saturation or timeout drops the backlog and warns; the one in-flight write
-may land late and retains its worker/handle until it returns. Integrated tests now
-correlate overlapping real Obsidian posts across midnight, including a refused note.
-The contract explicitly limits `error_type` to sink failures and documents DEC-E3's
-terminal `error` exception. `make check` passed; three deliberate regressions were
-rejected by the focused tests. No commits, pushes or remote changes.
+Fresh validation at `1420095`: `make check`, an uncached full race suite, and diff
+checks passed. Coverage is post/app 100.0%, logging 99.3%. Correctness inspected all
+114 hunks across 26 files. A fresh read-only ephemeral Codex session performed the
+independent adversarial stage after the built-in launcher reached its thread cap;
+it verified file hashes and inspected tests, relying on the fresh executed evidence.
+The historical 32-mutant campaign and live Telegram run were not rerun at this head.
+
+**Publication requirements:** refresh the PR body for the new queue policy, current
+validation, and T040 completion with #119 still open. A draft is stored beside the
+cycle-1 report. Selected acceptance for #41/#98/#110/#111 is supported by this local
+head, but no issues were closed. **CON-102 is non-blocking:** T053's annotation should
+acknowledge the existing both-failure logging test without closing adjacent work.
 
 Under **DEC-D2** the orchestrator emits through a domain-shaped `post.Recorder` declared in
 `internal/post`, with the mapping onto `logging.Event` in `internal/app/recorder.go`, so
@@ -118,7 +117,7 @@ construct the logger with `Options.Redact`, and the `slog.Duration` nanosecond t
 
 ## Blockers
 
-Batch 6c-2 corrections need full rereview before the findings can be accepted. Other tracked items:
+Batch 6c-2 has no remaining code findings. CON-101 requires accurate PR publication metadata. Other tracked items:
 
 - Issue #94 (`git_commit` reads `unknown` on tagged installs) must be resolved before `v0.1.0` is
   tagged. Still an open maintainer decision.
@@ -131,21 +130,9 @@ Batch 6c-2 corrections need full rereview before the findings can be accepted. O
 
 ## Next best action
 
-Rerun the full staged review of the updated Batch 6c-2 diff, including its uncommitted fixes. `make check` is
-clean and the touched packages read 100.0% statement coverage.
-
-Three places this batch made a judgement rather than followed a decision, which is where a review
-should start:
-
-- **DEC-E1** — `post.TargetReporting` is a declaration interface with one empty method that nothing
-  calls. The doc comment argues why a method cannot return the value, and the rejected alternative
-  is recorded in `state.yaml`.
-- **DEC-E2** — `error_type` is emitted now with two values, ahead of T056's classification.
-- **DEC-E3** — #110's recovered `Name` panic lands on the post's terminal record's `error` field,
-  including on a `request_completed` record for a post that succeeded.
-
-One change reaches outside the batch deliberately: the `internal/logging` level-field fix, without
-which T040's records cannot satisfy `contracts/log-events.md`.
+Publish reviewed commit `1420095` with the prepared PR #121 description when authorized,
+then verify the remote head and description. The local code review is complete;
+CON-101 remains open until publication metadata is updated.
 
 After 6c-2, **Batch 7 (US2, the Fyne GUI, T041–T051)** is next. It needs the `fyne/v2` pin, which is
 the last third of issue #4 and the first dependency added since batch 5.

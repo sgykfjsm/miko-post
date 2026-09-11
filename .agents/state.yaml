@@ -593,18 +593,23 @@ in_progress:
     issues: [41]
     also_discharges: [98, 110, 111]
     branch: sgykfjsm/batch-6c2-event-emission-2
-    commit: 124abea
+    commit: 1420095
     owner: Codex
-    state: review-fixes-applied-awaiting-rereview
+    state: code-reviewed-awaiting-publication
     review_pr: 121
     review_verdict: request-changes
-    review_required_findings: [COR-001, CON-001, CON-002]
+    review_required_findings: [CON-101]
+    review_code_verdict: passed
+    review_cycle: 1
+    review_nonblocking_findings: [CON-102]
+    remote_pr_head: 124abea
+    pushed: false
     fix_dispositions: {COR-001: fixed, CON-001: fixed, CON-002: fixed}
     fix_validation: "make check passed; all three focused regression mutants rejected"
     fix_receipt: "/Users/shige/.agents/review-runs/sgykfjsm__miko-post/20260911T004422Z-c992f78b/fix-01/receipt.yaml"
     review_run_state: "/Users/shige/.agents/review-runs/sgykfjsm__miko-post/20260911T004422Z-c992f78b"
     prerequisites_met: true
-    validation: "make check clean; coverage 100.0% internal/post, 100.0% internal/app, 99.5% internal/logging"
+    validation: "1420095: make check and uncached full race suite passed; post/app coverage100.0%, logging99.3%"
     mutants_run: 32
     mutants_survived_by_design: 2
     shape: >-
@@ -779,8 +784,8 @@ time_sensitive:
     deadline: before tagging v0.1.0
 
 next_best_action: >-
-  Rerun the full staged Batch 6c-2 review against the updated uncommitted diff;
-  the three required findings have corrections and validation, but are not yet accepted.
+  Publish reviewed commit 1420095 with the prepared PR #121 description when authorized,
+  then verify the remote head and description; CON-101 is the remaining publication requirement.
 
 
 review_followups_filed:
