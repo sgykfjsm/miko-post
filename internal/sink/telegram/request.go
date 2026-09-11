@@ -157,6 +157,7 @@ func newSendRequest(
 	baseURL string,
 	settings config.TelegramSettings,
 	text string,
+	plain ...bool,
 ) (*http.Request, error) {
 	// The first of this package's two config.Secret.Reveal call sites, and the
 	// one that type's comment names. The second is the credential net in
@@ -166,7 +167,11 @@ func newSendRequest(
 		return nil, err
 	}
 
-	body := sendMessageForm(settings, text).Encode()
+	form := sendMessageForm(settings, text)
+	if len(plain) > 0 && plain[0] {
+		form.Del(fieldParse)
+	}
+	body := form.Encode()
 
 	// A *strings.Reader rather than an io.Reader of unknown kind, because
 	// net/http then fills in ContentLength and GetBody itself. Content-Length

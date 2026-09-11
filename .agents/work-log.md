@@ -920,3 +920,45 @@ Existing history was preserved. All seven completed issues have individual closi
 references; no merge or issue closure was performed. The pre-existing manifest
 timestamp edit remains local and uncommitted. Publication bookkeeping is recorded
 in a separate documentation commit.
+
+## 2026-09-11 — Batch 9 reviewed; issue #122 separately in progress
+
+Verified Batch 8 merge #124 at 48fdd6a. Implemented T059–T064 formatting rescue.
+Three-stage review cycle 0 found two validation gaps (COR-001/COR-002); one fix pass
+added deterministic request-deadline equality, a rejected reset-context mutant,
+second-request timeout and real HTTP→Service→JSONL outcome coverage. Fresh cycle 1
+contract/correctness/adversarial stages all passed. Full check/native build and
+uncached focused race tests passed. T059–T064 checked complete; issues remain open.
+
+Issue #122 explicitly requested separately. Implemented optional bounded JPEG/PNG
+background selection in an isolated source snapshot; tests/build and native visual
+checks passed. Its independent review continues. No publication. Next: finish #122.
+
+## 2026-09-11 — Issue #122 accepted; cycle complete
+
+Applied ten #122 files byte-identically from the isolated review snapshot. Initial
+contract/adversarial stages passed; correctness required meaningful image-limit tests.
+One correction pass added valid boundary/over-limit images and recovery. Four applied
+mutations fail; fresh contract/correctness/adversarial stages all passed. Combined
+Batch 9 + #122 make check and native build passed. All findings are resolved.
+
+Reconciled accepted contracts/spec/design and user/developer guides; preserved the
+original #122 Batch 7 deferral and prior status snapshot. Batches 10–12 and unrelated
+documentation debts remain. No issues closed or remote publication performed.
+Next: publish Batch 9 with #122 and reconciliation kept separately reviewable.
+
+Workflow notes retained for traceability: collaboration thread capacity was exhausted,
+so later stages used fresh read-only ephemeral Codex sessions. The first #122 overlay
+mutation keys used /tmp while Go resolved /private/tmp; those runs did not apply the
+mutants and were discarded. Canonical-path overlays subsequently killed all four.
+The generated review diff omitted new-file mode headers and forward git apply rejected
+it without changes. The ten files were then copied only after verifying each original
+against HEAD (or absence), and byte equality with the immutable review snapshot was
+confirmed. Valid git-generated publication patches now reverse-check successfully.
+
+### 2026-09-11 — Authorized commit and PR publication
+- User invoked commit-and-pr. Retained the existing non-default branch and excluded the pre-existing Claude manifest edit.
+- Committed and pushed Batch 9 as 1cac8b2 and #122 as 5fd39bd; created draft PR #125: https://github.com/sgykfjsm/miko-post/pull/125.
+- Publication uses one PR with separate feature and documentation commits, following the skill's existing-branch policy. Earlier separate-PR preparation remains useful scope history.
+- Preserved history; no issue closed. Existing combined make check/native build and both fresh three-stage review passes remain the implementation validation; publication adds diff whitespace and state consistency checks.
+- Next: obtain acceptance and merge #125 before Batch 10.

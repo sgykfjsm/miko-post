@@ -880,9 +880,9 @@ func TestFormattingRejectionKeepsTheFieldsTheRescuePredicateNeeds(t *testing.T) 
 		t.Fatal("Send returned nil for a formatting rejection")
 	}
 
-	// FR-019 and FR-041 until T062 lands. When Batch 9 makes this two, it is
-	// this line that must be updated deliberately rather than deleted.
-	rec.only(t)
+	if got := len(rec.requests()); got != 2 {
+		t.Fatalf("requests = %d, want 2", got)
+	}
 
 	var apiErr *telegram.APIError
 	if !errors.As(err, &apiErr) {
@@ -1021,8 +1021,12 @@ func TestSendMakesExactlyOneAttempt(t *testing.T) {
 				t.Fatal("Send returned nil")
 			}
 
-			if seen := rec.requests(); len(seen) != 1 {
-				t.Fatalf("requests sent = %d, want exactly 1 (FR-019, FR-041)", len(seen))
+			want := 1
+			if test.name == "a formatting rejection" {
+				want = 2
+			}
+			if seen := rec.requests(); len(seen) != want {
+				t.Fatalf("requests sent = %d, want %d (FR-019, FR-041)", len(seen), want)
 			}
 		})
 	}

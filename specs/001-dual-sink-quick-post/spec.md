@@ -383,7 +383,14 @@ it, while a subsequently launched window still used the default.
 **Windowed interface**
 
 - **FR-020**: The window MUST contain a multi-line message field, a Send control, a Cancel control,
-  and a compact result/error area, and nothing else.
+  and a compact result/error area, with no additional controls.
+- **FR-020a** (accepted extension, issue #122): An optional absolute
+  `gui.background_image_dir` MUST select one usable top-level PNG/JPEG image at launch,
+  keep it fixed for that window, and display it faintly over black without reducing
+  editor, control or result readability. Unusable sources MUST fall back to another
+  candidate or black. Placement, format and decoding limits are specified in
+  [the background contract](../../docs/gui-background.md). This decorative extension
+  adds no control or image-posting capability.
 - **FR-021**: The message field MUST hold keyboard focus when the window appears.
 - **FR-022**: `Esc` MUST cancel and close without posting; `Enter` MUST insert a line break;
   `Cmd+Enter` MUST send; `Cmd+Q` MUST quit the application.

@@ -112,7 +112,7 @@ func lifecycleFor(sink string) (lifecycle, bool) {
 func producibleEvents() []logging.Event {
 	events := make([]logging.Event, 0, 2+3*len(recordedSinks()))
 
-	events = append(events, logging.EventMessageReceived)
+	events = append(events, logging.EventMessageReceived, logging.EventTelegramMarkdownFailed, logging.EventTelegramPlaintextSucceeded, logging.EventTelegramPlaintextFailed)
 
 	for _, entry := range recordedSinks() {
 		events = append(events, entry.events.started, entry.events.succeeded, entry.events.failed)
@@ -421,4 +421,22 @@ func httpStatus(err error) (int, bool) {
 	}
 
 	return 0, false
+}
+
+// FormattingFinished records each fallback stage under the existing post ID.
+func (r *recorder) FormattingFinished(sink post.SinkAttempt, attempt post.FormattingAttempt) {
+	attrs := append(sinkAttrs(sink), slog.Int64(keyDurationMS, attempt.Duration.Milliseconds()))
+	event := logging.EventTelegramMarkdownFailed
+	if attempt.Plain {
+		event = logging.EventTelegramPlaintextFailed
+	}
+	if attempt.Err == nil {
+		r.log.Info(logging.EventTelegramPlaintextSucceeded, attrs...)
+		return
+	}
+	attrs = append(attrs, slog.String(keyErrorType, post.ErrorType(post.SinkResult{Err: attempt.Err})), slog.String(keyError, errorMessage(attempt.Err)))
+	if status, ok := httpStatus(attempt.Err); ok {
+		attrs = append(attrs, slog.Int(keyHTTPStatus, status))
+	}
+	r.log.Error(event, attrs...)
 }

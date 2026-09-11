@@ -1,39 +1,37 @@
 # Project status — miko-post
 
-_Last updated: 2026-09-11_
+Updated 2026-09-11. Batches 1–8 are merged; Batch 8 merged as `48fdd6a` (#124).
+Batch 9 / T059–T064 / #60–#65 and the separately requested GUI feature #122 are
+implemented, reviewed, committed and pushed on `sgykfjsm/batch-9-review-fixes`
+in draft PR [#125](https://github.com/sgykfjsm/miko-post/pull/125).
 
-Deliver v0.1 CLI and GUI over one shared independent dual-sink posting core.
-Batches 1–7 are merged. Batch 7's squash `6f40dada0f92df828251dd4ee746b34772f593f0`
-is the base of `sgykfjsm/batch-8-cycle`.
+Both scopes passed fresh contract, correctness and adversarial reviews after one
+correction pass each. Batch 9 fixed two validation gaps (COR-001/COR-002): original
+request-deadline equality, rejected reset-deadline mutation, second-request timeout
+and real HTTP→Service→JSONL integration. Issue #122 fixed its COR-001 with decodable
+boundary fixtures; four removed/tightened guard mutations fail. No required finding
+or decision remains. Complete reports: `batch-9-review.md` and `issue-122-review.md`.
 
-Batch 8 (US3, T052–T058, #53–#59) now has **review verdict: passed** after one
-explicitly authorized correction pass. Fresh contract, correctness and adversarial
-reviews accepted the full 13-file diff. COR-001/ADV-001 is resolved; no review blocker
-remains. Implementation commit `2b78af1` is pushed on `sgykfjsm/batch-8-cycle`;
-[draft PR #124](https://github.com/sgykfjsm/miko-post/pull/124) is open.
-T052–T058 tracking is reconciled. No issue has been closed.
+Batch 9 supplies one trusted formatting-only rescue, original text/destination,
+omitted parse_mode, shared deadline and correlated fallback events. Failed rescue
+retains both diagnostics and classifies by the final attempt. T059–T064 are checked.
+Issue #122 adds optional `gui.background_image_dir`, top-level random PNG/JPEG,
+12% opacity over black, aspect-preserving placement and graceful bounded fallback.
 
-The correction changes only Telegram response.go and reason_test.go beyond the prior
-Batch 8 implementation. Missing/null required `ok` now produces an untrusted-envelope
-error and generic failure classification. Explicit false refusals retain specific
-categories; optional null description equals omission, and chat-not-found still
-requires exact text. HTTP status, original diagnostic identity and credential secrecy
-are tested. Independent sink timeouts and DEC-A1's 250 ms grace remain unchanged.
+Validation: combined make check and native arm64 build passed; uncached core/app/
+Telegram race tests passed. Native GUI checks verified multilingual editor content,
+success/failure output and black fallback with temporary config/state/vault. No live
+Telegram, real IME-composition or Intel Mac validation is claimed.
 
-Validation: eight before-fix regression failures reproduced; the corrected matrix,
-focused race tests, make check (format/vet/full race suite), and native arm64 build
-passed. Independent reviewers reran core/app/CLI/headless-GUI and non-network Telegram
-checks. Their fresh HTTP reruns were sandbox-blocked; the fixer's passing full-suite
-run exercised the real local HTTP/filesystem matrix. No live Telegram, native GUI
-interaction during Batch 8, or Intel Mac run is claimed.
+Durable spec/contracts, English/Japanese design notes and user/developer guides are
+reconciled. Prior status is archived; tasks remain because Batches 10–12 are unfinished.
+Review targets and publication patches are preserved under the external review runs.
+See `change-groups.json` for the separate commit boundaries.
 
-T056 is checked complete after the passed correction review; the original cycle 0
-request-changes record is retained as history. Remote issues remain open until merge.
-The pre-existing Claude integration manifest edit is preserved outside this change.
+Feature commits: `1cac8b2` (Batch 9) and `5fd39bd` (#122). Documentation follows in
+a separate commit. Publication combines both explicitly requested scopes on the existing
+branch, following commit-and-pr branch policy. No history was rewritten or issue closed.
+The pre-existing Claude manifest edit is preserved and excluded from every group.
 
-Fresh review execution used isolated Codex sessions after the collaboration thread limit.
-Rejected/inconclusive setup attempts are retained; the final accepted reports verify the
-canonical target, contract and stage fingerprints. See `batch-8-review.md` and the
-[structured report](/Users/shige/.agents/review-runs/sgykfjsm__miko-post/20260911T055009Z-f2faa64e/integrated.yaml).
-
-Next: review draft PR #124 for merge readiness. Batches 9–12 and unrelated follow-ups remain separate.
+Next: obtain acceptance and merge draft PR #125. Batch 10 follows acceptance/merge.
+The feature is not ready for closeout.
