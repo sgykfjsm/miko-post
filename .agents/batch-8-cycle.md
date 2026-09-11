@@ -1,6 +1,6 @@
 # Batch 8 — US3 sink independence
 
-Current status: **passed after authorized cycle 1 rereview**; publication authorized.
+Current status: **passed after authorized cycle 1 rereview**; published as draft [PR #124](https://github.com/sgykfjsm/miko-post/pull/124).
 T052–T058 tracking is reconciled. See `project-status.md` for publication status and
 `batch-8-review.md` for the review snapshot.
 

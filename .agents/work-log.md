@@ -911,3 +911,12 @@ out-of-scope limits. No issue was closed.
 User invoked commit-and-pr. Verified the implementation still matches the passed review;
 reconciled T056 and all seven closing references, preserving cycle 0 history.
 The unrelated pre-existing Claude manifest timestamp remains outside publication.
+
+## 2026-09-11 — Batch 8 draft PR published
+
+Created implementation commit 2b78af1 and pushed the branch with upstream tracking.
+Opened draft PR #124: https://github.com/sgykfjsm/miko-post/pull/124.
+Existing history was preserved. All seven completed issues have individual closing
+references; no merge or issue closure was performed. The pre-existing manifest
+timestamp edit remains local and uncommitted. Publication bookkeeping is recorded
+in a separate documentation commit.

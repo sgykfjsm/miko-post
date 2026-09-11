@@ -780,10 +780,12 @@ in_progress:
     tasks: [T052, T053, T054, T055, T056, T057, T058]
     issues: [53, 54, 55, 56, 57, 58, 59]
     branch: sgykfjsm/batch-8-cycle
-    state: ready-to-publish
-    committed: false
-    pushed: false
-    pull_request: null
+    state: draft-pr-open
+    committed: true
+    pushed: true
+    implementation_commit: 2b78af1
+    pull_request: 124
+    pull_request_url: https://github.com/sgykfjsm/miko-post/pull/124
     prepared_pr_body: .agents/batch-8-pr-body.md
     review_mode: review-and-fix
     prior_review_verdict: request-changes
@@ -858,7 +860,7 @@ time_sensitive:
     deadline: before tagging v0.1.0
 
 next_best_action: >-
-  Publish the reviewed Batch 8 branch as a draft PR; T052–T058 tracking is reconciled.
+  Review draft PR #124 for merge readiness; T052–T058 are complete and all three review stages passed.
 
 
 review_followups_filed:
@@ -946,7 +948,7 @@ batch_6_split:
     internal package.
 
 remaining_batches:
-  - {id: 8, name: "US3 sink independence", tasks: "T052-T058", state: ready-to-publish}
+  - {id: 8, name: "US3 sink independence", tasks: "T052-T058", state: draft-pr-open}
   - {id: 9, name: "US4 formatting rescue", tasks: "T059-T064"}
   - {id: 10, name: "US5 diagnostics", tasks: "T065-T074"}
   - {id: 11, name: "US6 settings resolution", tasks: "T075-T083"}

@@ -9,7 +9,9 @@ is the base of `sgykfjsm/batch-8-cycle`.
 Batch 8 (US3, T052–T058, #53–#59) now has **review verdict: passed** after one
 explicitly authorized correction pass. Fresh contract, correctness and adversarial
 reviews accepted the full 13-file diff. COR-001/ADV-001 is resolved; no review blocker
-remains. Publication is authorized; T052–T058 tracking is reconciled. No issue has been closed.
+remains. Implementation commit `2b78af1` is pushed on `sgykfjsm/batch-8-cycle`;
+[draft PR #124](https://github.com/sgykfjsm/miko-post/pull/124) is open.
+T052–T058 tracking is reconciled. No issue has been closed.
 
 The correction changes only Telegram response.go and reason_test.go beyond the prior
 Batch 8 implementation. Missing/null required `ok` now produces an untrusted-envelope
@@ -34,4 +36,4 @@ Rejected/inconclusive setup attempts are retained; the final accepted reports ve
 canonical target, contract and stage fingerprints. See `batch-8-review.md` and the
 [structured report](/Users/shige/.agents/review-runs/sgykfjsm__miko-post/20260911T055009Z-f2faa64e/integrated.yaml).
 
-Next: publish Batch 8 as a draft PR. Batches 9–12 and unrelated follow-ups remain separate.
+Next: review draft PR #124 for merge readiness. Batches 9–12 and unrelated follow-ups remain separate.
