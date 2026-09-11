@@ -158,7 +158,9 @@ func (r *Recording) Post(id string) post.Recorder {
 		return nil
 	}
 
-	return &recorder{log: r.logger.Post(id)}
+	// Storage runs on the logger's ordered worker, never while the posting
+	// core holds its per-attempt mutex or is enforcing a sink deadline.
+	return &recorder{log: r.logger.PostAsync(id)}
 }
 
 // recorder emits one post's records.

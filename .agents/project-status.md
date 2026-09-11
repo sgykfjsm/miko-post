@@ -1,6 +1,6 @@
 # Project status — miko-post
 
-_Last updated: 2026-09-10_
+_Last updated: 2026-09-11_
 
 ## Objective
 
@@ -15,7 +15,7 @@ per PR, driven by the `run-batch-cycle` skill.
 
 - Phase 1 Setup — complete (Batch 1, `0a00212`, PR #93)
 - Phase 2 Foundational — **complete** (posting core contracts, settings, diagnostics, orchestrator)
-- Phase 3 US1 (the CLI slice) — **complete** with Batch 6c-2, pending review
+- Phase 3 US1 (the CLI slice) — scheduled implementation complete with Batch 6c-2; review requests changes
 - Phases 4-9 (five user stories, polish) — not started; Batch 7 is US2, the Fyne GUI
 
 ## Completed
@@ -45,10 +45,32 @@ per PR, driven by the `run-batch-cycle` skill.
 
 ## In progress
 
-**Batch 6c-2 — event emission.** Branch `sgykfjsm/batch-6c2-event-emission`. **Implemented and
-validated; not reviewed, not committed.** T040 and issue #41, plus #98, #110 and #111. `make check`
+**Batch 6c-2 — event emission.** Branch `sgykfjsm/batch-6c2-event-emission-2`. **Implemented and
+committed as `124abea`; review corrections are now uncommitted and await full rereview.** Codex took over on 2026-09-11 and
+reran `make check` successfully (formatting, vet, and race-enabled tests). T040 and issue #41, plus #98, #110 and #111. `make check`
 clean; 100.0% statement coverage in `internal/post` and `internal/app`, 99.5% in `internal/logging`
 (unchanged). Thirty-two mutants built, one surviving by design.
+
+**Review completed 2026-09-11, review-only.** The contract is valid; correctness and
+independent adversarial review completed across the committed diff. Three required
+findings remain: synchronous logging can block delivery and defeat timeout completion
+(COR-001 / ADV-001); emitted message_id/path pairing across overlapping real posts
+lacks the required integration test (CON-001 / COR-002); terminal failure field
+applicability needs clarification (CON-002). `make check` and the stated coverage
+figures were freshly verified. No implementation fixes or remote changes were made.
+Keep #41, #98 and #111 open; #110's diagnostic-survival acceptance is supported.
+Prior statements below about discharged obligations describe implementation intent;
+they do not override these review findings.
+
+**Correction pass completed 2026-09-11.** All three findings have fixes and focused
+validation; acceptance remains pending rereview. The production recorder uses one
+ordered logging worker with 256 pending entries and a 250 ms flush/close bound.
+Queue saturation or timeout drops the backlog and warns; the one in-flight write
+may land late and retains its worker/handle until it returns. Integrated tests now
+correlate overlapping real Obsidian posts across midnight, including a refused note.
+The contract explicitly limits `error_type` to sink failures and documents DEC-E3's
+terminal `error` exception. `make check` passed; three deliberate regressions were
+rejected by the focused tests. No commits, pushes or remote changes.
 
 Under **DEC-D2** the orchestrator emits through a domain-shaped `post.Recorder` declared in
 `internal/post`, with the mapping onto `logging.Event` in `internal/app/recorder.go`, so
@@ -96,7 +118,7 @@ construct the logger with `Options.Redact`, and the `slog.Duration` nanosecond t
 
 ## Blockers
 
-None blocking. Time-sensitive rather than blocking:
+Batch 6c-2 corrections need full rereview before the findings can be accepted. Other tracked items:
 
 - Issue #94 (`git_commit` reads `unknown` on tagged installs) must be resolved before `v0.1.0` is
   tagged. Still an open maintainer decision.
@@ -109,7 +131,7 @@ None blocking. Time-sensitive rather than blocking:
 
 ## Next best action
 
-Review the Batch 6c-2 branch `sgykfjsm/batch-6c2-event-emission`, then open its PR. `make check` is
+Rerun the full staged review of the updated Batch 6c-2 diff, including its uncommitted fixes. `make check` is
 clean and the touched packages read 100.0% statement coverage.
 
 Three places this batch made a judgement rather than followed a decision, which is where a review

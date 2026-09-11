@@ -592,8 +592,17 @@ in_progress:
     tasks: [T040]
     issues: [41]
     also_discharges: [98, 110, 111]
-    branch: sgykfjsm/batch-6c2-event-emission
-    state: implemented-not-reviewed
+    branch: sgykfjsm/batch-6c2-event-emission-2
+    commit: 124abea
+    owner: Codex
+    state: review-fixes-applied-awaiting-rereview
+    review_pr: 121
+    review_verdict: request-changes
+    review_required_findings: [COR-001, CON-001, CON-002]
+    fix_dispositions: {COR-001: fixed, CON-001: fixed, CON-002: fixed}
+    fix_validation: "make check passed; all three focused regression mutants rejected"
+    fix_receipt: "/Users/shige/.agents/review-runs/sgykfjsm__miko-post/20260911T004422Z-c992f78b/fix-01/receipt.yaml"
+    review_run_state: "/Users/shige/.agents/review-runs/sgykfjsm__miko-post/20260911T004422Z-c992f78b"
     prerequisites_met: true
     validation: "make check clean; coverage 100.0% internal/post, 100.0% internal/app, 99.5% internal/logging"
     mutants_run: 32
@@ -770,30 +779,9 @@ time_sensitive:
     deadline: before tagging v0.1.0
 
 next_best_action: >-
-  Review the Batch 6c-2 branch (sgykfjsm/batch-6c2-event-emission), then open its PR.
+  Rerun the full staged Batch 6c-2 review against the updated uncommitted diff;
+  the three required findings have corrections and validation, but are not yet accepted.
 
-  6c-2 is implemented and NOT committed at the time this was written; make check is clean and the
-  touched packages read 100.0% statement coverage (internal/logging 99.5%, unchanged). Thirty-two
-  mutants were built and two survive by design, both recorded: the abandoned goroutine reporting its
-  own late outcome (absorbed by sinkRecord's finished guard, which is what that guard is for), and
-  nothing else.
-
-  Three things the reviewer should look at first, because they are where this batch made a judgement
-  rather than followed a decision. DEC-E1's declaration interface has one empty method and nothing
-  calls it - the doc comment argues why, and the alternative is recorded. DEC-E2 emits error_type
-  with two values ahead of T056, which widens the vocabulary later rather than changing it. DEC-E3
-  puts #110's recovered Name panic on the post's terminal record's error field, including on a
-  success record, because a panicking Name resolves to a sentinel the sink-keyed event vocabulary
-  cannot cover.
-
-  One fix reaches outside the batch and is deliberate: internal/logging emitted level as
-  "INFO"/"ERROR" for every logger with Options.Redact armed - so every real run since 6c-1 - because
-  the credential scrub consumed the level attribute before the rename could see it. T040's records
-  cannot satisfy contracts/log-events.md without it. Three lines, plus the test that arms Redact and
-  would have caught it.
-
-  After 6c-2, US1 is complete and Batch 7 (US2, the Fyne GUI, T041-T051) is next. It needs the
-  fyne/v2 pin, which is the last third of #4.
 
 review_followups_filed:
   filed_at: 2026-09-07
@@ -947,4 +935,4 @@ assumptions:
     The batch decomposition above is re-derived by run-batch-cycle's triage step each run; it is
     recorded here for orientation, not as a binding plan.
 
-last_updated: 2026-09-10
+last_updated: 2026-09-11

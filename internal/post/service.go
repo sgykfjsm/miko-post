@@ -208,7 +208,9 @@ func (s *Service) Post(message Message) Outcome {
 	// Emitted before anything can fail, because FR-067 makes this the record
 	// that says a post existed. A submission that then panicked or hung in
 	// every sink still has to be reconstructable (SC-008), and it is only
-	// reconstructable from a record that was already written.
+	// reconstructable from an arrival record admitted before delivery. The
+	// production recorder queues I/O; a stalled or crashed logger can lose
+	// diagnostics, but must never hold up the destinations.
 	recorder.MessageReceived(message)
 
 	if len(s.sinks) == 0 {

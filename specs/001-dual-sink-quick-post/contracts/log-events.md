@@ -38,14 +38,20 @@ The formatting-fallback path is observable as a distinct sequence (FR-039):
 | `message_id` | ULID | always (per-post correlation, R-007) |
 | `sink` | `"telegram"` \| `"obsidian"` | sink events |
 | `duration_ms` | int | completion events |
-| `error_type` | classified string | failures |
-| `error` | detailed message | failures |
+| `error_type` | classified string | sink failure events |
+| `error` | detailed message | sink failure events; terminal records only for sink-identity diagnostics (DEC-E3) |
 | `http_status` | int | Telegram failures with a response |
 | `path` | string | note events (FR-066) |
 | `message` | string | see message-capture rule |
 | `message_len` / `message_bytes` | int | rune count / byte count (R-010) |
 | `app_version`, `git_commit` | string | when enabled (FR-066) |
 | `stack` | string | when a trace is available and useful (FR-071) |
+
+The terminal event reports the aggregate outcome and elapsed time. It does not repeat
+sink errors or carry an aggregate `error_type`; consumers join the sink failure records
+by `message_id` for those details. Under DEC-E3, either terminal event may carry `error`
+when a sink's name panicked or has no registered event vocabulary. That diagnostic does
+not change the terminal event's name or level, which still reflects delivery outcomes.
 
 ## What is emitted as of T040, and what is still owed
 
@@ -132,3 +138,21 @@ If that name already exists, append `-1`, `-2`, … rather than overwriting (R-0
 ```json
 {"ts":"2026-08-27T11:42:03+09:00","level":"error","event":"telegram_send_failed","source":"cli","message_id":"01K...","sink":"telegram","message":"...","error_type":"timeout","error":"request timed out","duration_ms":10012,"app_version":"0.1.0","git_commit":"abc1234"}
 ```
+
+
+## Diagnostic storage stalls (Batch 6c-2 review correction)
+
+The production recorder admits records to one ordered worker per logger, with at most
+256 pending records. Timestamps describe admission time. Delivery does not wait for
+log storage. `Flush`, including the flush performed by `Degraded`, and `Close` each
+wait at most 250 ms; a full queue or an expired wait permanently disables further
+records for that logger and surfaces through the front door's single diagnostics warning.
+Normal write errors retain the logger's existing recovery behavior.
+
+Normal shutdown drains the queue before reporting results. On overload or a stall,
+pending records are discarded: preserving delivery takes precedence over diagnostics
+(FR-076). An in-flight write cannot be cancelled and may land late; no pending records
+follow it after the queue is disabled. The one worker retains its handle until that
+operation returns and cleanup completes. A permanently stalled operation therefore
+retains one worker/handle per logger, not one per post. A process crash can lose queued
+records. Reopening the logger starts a fresh queue; there is no automatic replay.

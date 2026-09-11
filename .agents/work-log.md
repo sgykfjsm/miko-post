@@ -625,3 +625,68 @@ and needs the `fyne/v2` pin, the last third of #4. #119 is untouched and still o
 two destinations both succeeding, and `cli.Run` still has no sink seam — this batch changed
 `NewService`'s signature in that same function without closing it, deliberately, because a seam is
 its own decision.
+
+
+## 2026-09-11 — Codex takeover
+
+User requested takeover from Claude Code. This checkout is on
+`sgykfjsm/batch-6c2-event-emission-2`, with implementation committed as `124abea`.
+Orca lists this Codex terminal and an idle setup shell in this checkout; no Claude
+terminal is attached here. Other checkouts were not stopped or modified.
+`make check` passed (formatting, vet, race-enabled tests). Corrected stale current
+state claiming the implementation was uncommitted. Preserved the existing Claude
+integration installation timestamp change. No implementation changes made.
+Next action: structured review of Batch 6c-2 at `124abea`. Prior coverage and mutation
+figures are inherited evidence and were not rerun during takeover.
+
+
+## 2026-09-11 — Batch 6c-2 staged review
+
+Reviewed PR #121, base f757707 → head 124abea, review-only. Contract valid;
+correctness inspected all 22 changed files/hunks; the independent adversarial
+stage confirmed the diagnostic-blocking defect. Verdict: request-changes.
+
+Required findings: COR-001 / ADV-001 (synchronous logger blocks delivery and
+bypasses timeout completion), CON-001 / COR-002 (missing integrated emitted
+message_id/path overlap test), CON-002 (terminal failure field contract ambiguity).
+A real logger with a controlled blocked Writer reproduced blocking at four event
+stages past 350 ms with a 10 ms sink timeout; the start stall changed the outcome.
+No physical stalled mount or live Telegram service was used.
+
+Fresh make check passed on the exact snapshot. Coverage reproduced: post 100%,
+app 100%, logging 99.5%. Historical mutations were not rerun. #110's specific
+acceptance is supported; #41/#98/#111 remain open pending corrections. No fixes,
+commits, pushes, PR updates, or issue mutations. Existing local edits preserved.
+
+Review report and reproduction: /Users/shige/.agents/review-runs/sgykfjsm__miko-post/20260911T004422Z-c992f78b
+Next action: explicitly authorized correction pass, then full staged rereview.
+
+
+## 2026-09-11 — Authorized Batch 6c-2 correction pass
+
+User invoked fix-review-findings for COR-001, CON-001 and CON-002. Verified HEAD
+124abea and preserved pre-existing state edits and Claude setup timestamp.
+Reproduced all four blocked-writer cases before correction.
+
+COR-001 / ADV-001: production recording now uses PostAsync and one ordered,
+bounded logger worker. Flush/Close wait at most 250 ms, the queue holds 256 pending
+entries, and error-state reads no longer wait behind the writer lock. Timeout or
+saturation permanently disables this logger's queue, drops pending records and
+warns. An in-flight write can land late; one worker/handle remains until it returns.
+Normal errors retain existing recovery. Timestamps are captured at admission;
+crash-time queue loss and delayed cleanup are documented in the log contract.
+
+CON-001 / COR-002: integrated Service.Post tests share a real Obsidian sink across
+midnight and force B to complete before A appends, then decode JSONL and match each
+start/finish path to its returned ID and actual note. Includes a failed B append.
+CON-002: clarified sink-only error_type and detailed errors, with DEC-E3's terminal
+identity diagnostic exception; tests reject ordinary aggregate failure fields.
+
+Validation: make check passed (fmt/vet/full race suite). Focused liveness, queue
+ordering/timestamp, saturation, timeout, late cleanup and close-stall tests passed.
+Three temporary mutants were rejected: synchronous production logging, shared latest
+target, and aggregate error_type. Mutants never changed the working checkout.
+
+All three dispositions are fixed, pending full staged rereview. No issues closed,
+PR changes, commits or pushes. Receipt: /Users/shige/.agents/review-runs/sgykfjsm__miko-post/20260911T004422Z-c992f78b/fix-01/receipt.yaml
+Next action: full review of the updated uncommitted Batch 6c-2 diff.

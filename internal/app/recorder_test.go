@@ -440,8 +440,10 @@ func TestAFailedPostWritesTheFailureFields(t *testing.T) {
 	// The terminal record does not restate the sink failures: each is already
 	// recorded once, and repeating them would make FR-070's guarantee
 	// ambiguous about how many failures there were.
-	if _, present := terminal["error"]; present {
-		t.Errorf("request_completed_with_error carries an error field: %v", terminal["error"])
+	for _, key := range []string{"error", "error_type"} {
+		if _, present := terminal[key]; present {
+			t.Errorf("request_completed_with_error carries aggregate %s: %v", key, terminal[key])
+		}
 	}
 }
 
