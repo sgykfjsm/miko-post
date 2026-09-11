@@ -717,3 +717,23 @@ Cycle-1 report: /Users/shige/.agents/review-runs/sgykfjsm__miko-post/20260911T00
 PR draft: /Users/shige/.agents/review-runs/sgykfjsm__miko-post/20260911T004422Z-c992f78b/cycle-01/pr-body-draft.md
 Next action: authorized publication of reviewed commit and accurate PR body, then
 verify remote state. These post-review state updates remain uncommitted.
+
+
+## 2026-09-11 — Publish review corrections and post-review notes
+
+User authorized committing state notes, pushing, and updating the PR description.
+Committed post-review notes as5c30ce5, then fast-forward pushed1420095 and5c30ce5 to
+PR121's existing branch sgykfjsm/batch-6c2-event-emission. The local takeover branch
+now tracks that remote branch. The unrelated Claude installation timestamp remains
+uncommitted.
+
+Updated PR121 from the prepared body, removing draft language and documenting the
+reviewed implementation, queue limits, current validation, selected issue acceptance,
+and exclusions. Read back the remote head and exact body and verified that changes
+since the tested1420095 are project-state documentation only. CON-101 is resolved;
+current disposition passed-with-notes. CON-102 remains a non-blocking T053 annotation
+follow-up, noted in the PR; no new issue or task closure is needed for publication.
+No merge or direct issue closure was performed. This entry records publication and
+will accompany the final documentation-only push.
+
+Next action: merge PR121 when authorized.

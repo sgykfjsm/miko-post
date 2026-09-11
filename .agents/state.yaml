@@ -595,15 +595,17 @@ in_progress:
     branch: sgykfjsm/batch-6c2-event-emission-2
     commit: 1420095
     owner: Codex
-    state: code-reviewed-awaiting-publication
+    state: reviewed-and-published-awaiting-merge
     review_pr: 121
-    review_verdict: request-changes
-    review_required_findings: [CON-101]
+    review_verdict: passed-with-notes
+    review_required_findings: []
     review_code_verdict: passed
     review_cycle: 1
     review_nonblocking_findings: [CON-102]
-    remote_pr_head: 124abea
-    pushed: false
+    published_code_commit: 1420095
+    remote_head_at_publication_verification: 5c30ce5
+    pushed: true
+    pr_description_verified: true
     fix_dispositions: {COR-001: fixed, CON-001: fixed, CON-002: fixed}
     fix_validation: "make check passed; all three focused regression mutants rejected"
     fix_receipt: "/Users/shige/.agents/review-runs/sgykfjsm__miko-post/20260911T004422Z-c992f78b/fix-01/receipt.yaml"
@@ -784,8 +786,8 @@ time_sensitive:
     deadline: before tagging v0.1.0
 
 next_best_action: >-
-  Publish reviewed commit 1420095 with the prepared PR #121 description when authorized,
-  then verify the remote head and description; CON-101 is the remaining publication requirement.
+  Merge PR #121 when authorized; the reviewed implementation is published and its
+  description verified. CON-102 is a non-blocking T053 evidence-annotation follow-up.
 
 
 review_followups_filed:

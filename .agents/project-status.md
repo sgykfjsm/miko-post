@@ -47,9 +47,9 @@ per PR, driven by the `run-batch-cycle` skill.
 
 **Batch 6c-2 — event emission.** Branch `sgykfjsm/batch-6c2-event-emission-2`,
 committed through **`1420095`**. The complete local batch passed correctness and
-independent adversarial review in cycle 1; no code findings remain. Overall review
-verdict remains **request-changes for publication metadata only (CON-101)**.
-PR #121 still points to `124abea`; nothing was pushed or changed remotely.
+independent adversarial review in cycle 1; no code findings remain. The publication finding CON-101 is now resolved: the reviewed implementation was
+pushed to PR #121 and its updated description was read back and verified. The
+current disposition is **passed-with-notes**, awaiting authorized merge.
 
 The prior three findings are resolved: bounded asynchronous production logging,
 real overlapping-post JSONL ID/path validation across midnight (including refusal),
@@ -65,10 +65,9 @@ independent adversarial stage after the built-in launcher reached its thread cap
 it verified file hashes and inspected tests, relying on the fresh executed evidence.
 The historical 32-mutant campaign and live Telegram run were not rerun at this head.
 
-**Publication requirements:** refresh the PR body for the new queue policy, current
-validation, and T040 completion with #119 still open. A draft is stored beside the
-cycle-1 report. Selected acceptance for #41/#98/#110/#111 is supported by this local
-head, but no issues were closed. **CON-102 is non-blocking:** T053's annotation should
+**Publication verified:** PR #121 describes the queue policy, current validation,
+and T040 completion with #119 still open. Selected acceptance for #41/#98/#110/#111
+is supported by the published implementation; no issues were directly closed. **CON-102 is non-blocking:** T053's annotation should
 acknowledge the existing both-failure logging test without closing adjacent work.
 
 Under **DEC-D2** the orchestrator emits through a domain-shaped `post.Recorder` declared in
@@ -117,7 +116,7 @@ construct the logger with `Options.Redact`, and the `slog.Duration` nanosecond t
 
 ## Blockers
 
-Batch 6c-2 has no remaining code findings. CON-101 requires accurate PR publication metadata. Other tracked items:
+Batch 6c-2 has no required findings remaining. CON-102 is a non-blocking documentation follow-up. Other tracked items:
 
 - Issue #94 (`git_commit` reads `unknown` on tagged installs) must be resolved before `v0.1.0` is
   tagged. Still an open maintainer decision.
@@ -130,9 +129,8 @@ Batch 6c-2 has no remaining code findings. CON-101 requires accurate PR publicat
 
 ## Next best action
 
-Publish reviewed commit `1420095` with the prepared PR #121 description when authorized,
-then verify the remote head and description. The local code review is complete;
-CON-101 remains open until publication metadata is updated.
+Merge PR #121 when authorized. The reviewed code is pushed and the PR description
+has been verified. CON-102 remains a non-blocking T053 evidence-annotation follow-up.
 
 After 6c-2, **Batch 7 (US2, the Fyne GUI, T041–T051)** is next. It needs the `fyne/v2` pin, which is
 the last third of issue #4 and the first dependency added since batch 5.
