@@ -94,18 +94,8 @@ var errRequestFailed = errors.New("the request failed without a reported cause")
 
 // Sink delivers a message to a Telegram chat over the Bot API (FR-031 – FR-041).
 //
-// One attempt, and only one. FR-019 forbids queueing or automatically
-// re-sending a failed chat message, and FR-041 forbids retrying transport
-// errors, timeouts, error statuses, or service-reported errors. The single
-// unformatted rescue FR-035 permits is narrower than any of those and is Batch
-// 9's work (T059 – T064); nothing here re-sends anything, and the test asserting
-// exactly one request per Send is what keeps it that way.
-//
-// "Nothing here" was once narrower than the guarantee, which is what decision
-// DEC-C4 fixed: this package re-sending nothing does not stop http.Client from
-// doing it, and its default redirect policy replays a POST body along a 307
-// chain without asking. One attempt is a property of the client as configured,
-// not of the code in this file; see refuseRedirect.
+// One MarkdownV2 attempt, followed only on a trusted formatting rejection by
+// one plain-text rescue. Redirects remain refused (DEC-C4).
 //
 // Unlike the obsidian sink this type holds no mutable state and needs no mutex:
 // it does not implement post.Targeter, so there is nothing to record between
@@ -124,8 +114,7 @@ type Sink struct {
 	// client carries FR-040's per-request bound as its Timeout. That bound is
 	// not the same as the orchestrator's per-sink deadline (FR-015), which
 	// arrives as the context: the first limits one HTTP round trip, the second
-	// limits everything this sink does for one post, and in Batch 9 it will
-	// have to cover two attempts. Both are honoured here, and a failure from
+	// limits everything this sink does for one post, and covers both attempts. Both are honoured here, and a failure from
 	// either wraps context.DeadlineExceeded so the orchestrator's classifier
 	// reports "request timed out" for both.
 	client *http.Client
@@ -210,7 +199,7 @@ func refuseRedirect(*http.Request, []*http.Request) error {
 // Name identifies this sink (post.Sink).
 func (s *Sink) Name() string { return SinkName }
 
-// Send performs the single MarkdownV2 attempt (FR-019, FR-033, FR-040, FR-041).
+// Send performs MarkdownV2 delivery with one formatting-only rescue (FR-033–FR-041).
 //
 // The shape is four steps and one exit rule: every error leaves through
 // s.safe, and every transport error is stripped of its request URL before it is
@@ -244,7 +233,23 @@ func (s *Sink) Name() string { return SinkName }
 // itself and answers with the same error, so a pre-check would only add a
 // second code path producing a different one.
 func (s *Sink) Send(ctx context.Context, message post.Message) error {
-	request, err := newSendRequest(ctx, s.baseURL, s.settings, message.Original)
+	started := time.Now()
+	first := s.send(ctx, message, false)
+	if !isFormattingRejection(first) {
+		return first
+	}
+	post.ReportFormatting(ctx, post.FormattingAttempt{Err: first, Duration: time.Since(started)})
+	started = time.Now()
+	second := s.send(ctx, message, true)
+	post.ReportFormatting(ctx, post.FormattingAttempt{Plain: true, Err: second, Duration: time.Since(started)})
+	if second != nil {
+		return &RescueError{Markdown: first, Plaintext: second}
+	}
+	return nil
+}
+
+func (s *Sink) send(ctx context.Context, message post.Message, plain bool) error {
+	request, err := newSendRequest(ctx, s.baseURL, s.settings, message.Original, plain)
 	if err != nil {
 		return s.safe(fmt.Errorf("building the telegram request: %w", withoutRequestURL(err)))
 	}

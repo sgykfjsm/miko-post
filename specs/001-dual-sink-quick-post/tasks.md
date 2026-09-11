@@ -251,15 +251,15 @@ Batch 8; the GUI rendering/status coverage is headless and the HTTP server is lo
 
 ### Tests for User Story 4
 
-- [ ] T059 [P] [US4] Write a table-driven test of the rescue predicate covering a formatting 400, a **non**-formatting 400, 401, 403, 429, 5xx, and a transport error — asserting a rescue **only** for the first — in `internal/sink/telegram/rescue_test.go` (FR-035, FR-038, FR-041)
-- [ ] T060 [P] [US4] Write tests asserting a successful rescue yields overall sink success and a failed rescue yields failure with both attempts retained, in `internal/sink/telegram/sink_test.go` (FR-036, FR-037, FR-061)
+- [x] T059 [P] [US4] Write a table-driven test of the rescue predicate covering a formatting 400, a **non**-formatting 400, 401, 403, 429, 5xx, and a transport error — asserting a rescue **only** for the first — in `internal/sink/telegram/rescue_test.go` (FR-035, FR-038, FR-041)
+- [x] T060 [P] [US4] Write tests asserting a successful rescue yields overall sink success and a failed rescue yields failure with both attempts retained, in `internal/sink/telegram/sink_test.go` (FR-036, FR-037, FR-061)
 
 ### Implementation for User Story 4
 
-- [ ] T061 [US4] Implement the rescue predicate `ok == false && error_code == 400 && description contains "can't parse entities"` as a single isolated function, failing closed for every other failure, in `internal/sink/telegram/rescue.go` (FR-035, FR-038, research R-008)
-- [ ] T062 [US4] Implement the single unformatted retry that re-sends the message verbatim with `parse_mode` **omitted**, executed at most once and still bounded by the sink's overall timeout, in `internal/sink/telegram/sink.go` (FR-033, FR-035, FR-040)
-- [ ] T063 [US4] Emit `telegram_markdown_failed` followed by `telegram_plaintext_succeeded` or `telegram_plaintext_failed` as distinct stable events, in `internal/sink/telegram/sink.go` (FR-039, FR-067)
-- [ ] T064 [US4] Accept and validate `parse_mode` and `fallback_to_plain_text` while asserting by test that neither alters v0.1 delivery behavior, in `internal/config/validate.go` and `internal/sink/telegram/sink_test.go` (FR-034, FR-057)
+- [x] T061 [US4] Implement the rescue predicate `ok == false && error_code == 400 && description contains "can't parse entities"` as a single isolated function, failing closed for every other failure, in `internal/sink/telegram/rescue.go` (FR-035, FR-038, research R-008)
+- [x] T062 [US4] Implement the single unformatted retry that re-sends the message verbatim with `parse_mode` **omitted**, executed at most once and still bounded by the sink's overall timeout, in `internal/sink/telegram/sink.go` (FR-033, FR-035, FR-040)
+- [x] T063 [US4] Emit `telegram_markdown_failed` followed by `telegram_plaintext_succeeded` or `telegram_plaintext_failed` as distinct stable events, in `internal/sink/telegram/sink.go` (FR-039, FR-067)
+- [x] T064 [US4] Accept and validate `parse_mode` and `fallback_to_plain_text` while asserting by test that neither alters v0.1 delivery behavior, in `internal/config/validate.go` and `internal/sink/telegram/sink_test.go` (FR-034, FR-057)
 
 **Checkpoint**: The chat destination survives ordinary punctuation without escaping the user's text.
 
