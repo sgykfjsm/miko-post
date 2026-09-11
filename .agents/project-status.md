@@ -16,9 +16,8 @@ and review records remain in state.yaml and work-log.md.
 Batch 7 (US2, T041–T051, #42–#52) is implemented locally on
 `sgykfjsm/batch-7-cycle` with **cycle 1 review passed**. Cycle 0 returned request-changes for missing
 native focus-only evidence; that evidence is now supplied.
-No commit, push, remote PR, or issue closure has occurred. A PR description is
-prepared in the durable review directory under `cycle-01/input/pr-body.md`. T003 has all three dependency pins
-but remains unchecked until go.sum is committed.
+The reviewed changes are committed as `9c3e47f` and pushed; no remote PR or issue closure has occurred. A PR description is
+prepared in the durable review directory under `cycle-01/input/pr-body.md`. T003's dependency pins and committed `go.sum` condition are complete.
 
 ## Behavior and scope
 

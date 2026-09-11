@@ -30,7 +30,7 @@ completed:
       Settings - XDG paths, strict TOML decoding onto defaults, redacting Secret, credential
       precedence, accumulating validation, and rendered-value rules for the two Obsidian format keys
     tasks: [T011, T012, T013, T014, T015, T016, T017, T018, T019, T020]
-    partial_tasks: [T003]
+    partial_tasks: []
     issues: [12, 13, 14, 15, 16, 17, 18, 19, 20, 21]
     pins: "github.com/pelletier/go-toml/v2@v2.4.3"
     commits: [72d9642, 3bc2f32, a6a734e]
@@ -750,8 +750,8 @@ in_progress:
     review_validation_gaps: []
     review_stages: {contract: valid, correctness: pass, adversarial: pass}
     review_fix_passes: 0
-    committed: false
-    pushed: false
+    committed: true
+    pushed: true
     pull_request: null
     prepared_pr_body: /Users/shige/.agents/review-runs/sgykfjsm__miko-post/20260911T022010Z-8e1ba8b0/cycle-01/input/pr-body.md
     review_mode: review-only
@@ -770,8 +770,8 @@ in_progress:
       logger close before process exit. Settings-error UI remains T082; logging
       degradation UI and richer classification remain in their assigned later batches.
     publication_notes: >-
-      GitHub issues remain open. T003 remains unchecked because its go.sum commit
-      condition is not met. The existing Claude manifest timestamp is unrelated and
+      GitHub issues remain open. T003 is complete because go.sum is committed in
+      9c3e47f. The existing Claude manifest timestamp is unrelated and
       was preserved. Project-state bookkeeping is separate from the review target.
 blockers: []
 

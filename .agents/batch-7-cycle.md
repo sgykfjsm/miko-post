@@ -10,7 +10,7 @@ batch was implemented.
 
 | Issue | Task | Classification | Disposition |
 | --- | --- | --- | --- |
-| #4 | T003 dependency pins | foundation, partly complete before this run | Fyne pin now present; keep open until go.sum committed |
+| #4 | T003 dependency pins | foundation, completed by this batch | All pins present and go.sum committed in 9c3e47f |
 | #42 | T041 focused keyboard tests | verification | batch-now |
 | #43 | T042 shared submission tests | verification | batch-now |
 | #44 | T043 extended Entry | feature-slice | batch-now |
@@ -59,7 +59,7 @@ Busy dismissal hides the window while all sinks and terminal logging finish.
 A local PR description is prepared. No commit, push, remote PR or issue closure
 has occurred. The unrelated pre-existing Claude manifest timestamp is preserved.
 Project-state documentation is separate from the 14-file implementation review.
-T003 remains unchecked pending its explicit committed-go.sum condition.
+T003 was checked after commit `9c3e47f` satisfied its explicit committed-go.sum condition.
 
 Durable packet and reports:
 `/Users/shige/.agents/review-runs/sgykfjsm__miko-post/20260911T022010Z-8e1ba8b0/`.
@@ -112,9 +112,8 @@ resolved, with no remaining required findings or material validation gaps.
 real IME, live Telegram/native both-success and isolated cross-app activation
 remain disclosed limits. Cycle 0 reports remain preserved.
 
-The local work remains uncommitted, with no push, remote PR or issue closure.
-T003 still requires committed go.sum. Next: publish the reviewed Batch 7 change
-when authorized, using cycle-01/input/pr-body.md. Full-feature reconciliation waits
+The reviewed changes are committed as `9c3e47f` and pushed, with no remote PR or
+issue closure yet. Next: create the draft PR using cycle-01/input/pr-body.md. Full-feature reconciliation waits
 for the remaining implementation batches.
 
 Separately, user-requested future background images are recorded in #122. No
