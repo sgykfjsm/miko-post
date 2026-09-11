@@ -1684,8 +1684,8 @@ func TestSinkImplementsSinkAndNotTargeter(t *testing.T) {
 		t.Error("*telegram.Sink does not satisfy post.Sink")
 	}
 
-	if _, ok := sink.(post.Targeter); ok {
-		t.Error("*telegram.Sink satisfies post.Targeter; chat events carry no path (issue #98)")
+	if _, ok := sink.(post.TargetReporting); ok {
+		t.Error("*telegram.Sink satisfies post.TargetReporting; chat events carry no path (issue #98)")
 	}
 }
 
@@ -1695,7 +1695,7 @@ func TestSinkImplementsSinkAndNotTargeter(t *testing.T) {
 // A GUI window outlives its submission (FR-028), so one Sink serves more than
 // one post over its life and two can overlap. Under -race this fails if the
 // type ever acquires shared mutable state — which is exactly what implementing
-// post.Targeter would have required.
+// a target-reporting interface with a getter would have required (issue #111).
 func TestOneSinkServesConcurrentPosts(t *testing.T) {
 	t.Parallel()
 

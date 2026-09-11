@@ -371,26 +371,45 @@ completed:
           obligation, not a type invariant. data-model.md has been corrected in this batch;
           secret.go's comment still says "exactly one place".
 
-in_progress:
   - id: 6c-1
-    name: "US1 front door and wiring"
+    summary: >-
+      US1 front door and wiring - argv to exit status. New internal/app composition root, new
+      internal/cli (parsing, run sequence, rendering), and cmd/mp with the program's single
+      os.Exit. mp "some thought" posts to every enabled destination and exits 0 only if all
+      succeeded.
     tasks: [T029, T036, T037, T038, T039]
     issues: [30, 37, 38, 39, 40]
-    also_discharges: [107, 109, 114]
-    branch: sgykfjsm/batch-6c-us1-front-door
-    state: implemented-not-reviewed
-    commit: PENDING
-    coverage: "internal/app 100.0%, internal/cli 100.0%, internal/post 100.0%, internal/config 99.0%, internal/logging 99.5%, cmd/mp 0.0% (its tests drive a child process)"
-    split_from: 6c
-    split_reason: >-
-      Two review lenses, not one: does the binary do the right thing (argv -> exit status ->
-      rendered output), and does it say the right thing (event names, field shapes, redaction,
-      per-post path). Six tasks plus six inherited issues plus three structural decisions, where
-      6a was four tasks and needed four review cycles and 6b four tasks and three. The risky half
-      is separable and should be reviewed alone.
-    known_oddity_between_the_two_prs: >-
-      Between 6c-1 and 6c-2 the binary writes an empty log file whose path it prints on failure.
-      Odd-looking but not wrong, and better than one six-task PR nobody can review in a pass.
+    also_closed: [107, 109, 114, 117]
+    advances: [104]
+    commits: [142a999, 22ca3da]
+    squashed_as: f757707
+    pr: 120
+    state: merged
+    merged_at: 2026-09-10
+    review_verdict: passed-with-notes
+    review_cycles: 1
+    fix_passes: 2
+    coverage: "app/cli/post 100%, config 99.1%, logging 99.5%, cmd/mp 0.0% by design"
+    review_run_state: "~/.agents/review-runs/sgykfjsm__miko-post/20260910T010313Z-b3fbd16d/"
+    note: >-
+      Verified the squashed tree is byte-identical to the reviewed tip 22ca3da (both tree d4f4cb57).
+      Contract VALID, zero blockers at every stage. First batch in this project whose decisions were
+      recorded BEFORE implementation rather than after review demanded them. Five required findings
+      fixed, two found independently by two stages: mp -c <non-regular path> never returned (a FIFO
+      hung with no output or exit status, /dev/zero reached ~1.9 GB RSS - and internal/logging had
+      already refused exactly this for the log path since batch 4); the batch made a source comment
+      false in a file it never opened while its own new contract asserted the correction had been
+      made; and a short bot_token corrupted every log record including message_id, because the scrub
+      is armed whether or not the chat sink is enabled. 45 mutants across three stages. Two
+      unfailable assertions were caught during AUTHORSHIP rather than a batch later - the first time
+      that has happened here.
+    coordinator_error_worth_recording: >-
+      The PR body was opened with "Closes #30 (T029), #37 (T036), #38 ..." on one line, and GitHub
+      registered only the first - the identical defect found as CON-001 in batch 6a, where four
+      references registered as one, and which already had a memory written about it. Caught because
+      closingIssuesReferences is checked after every PR open rather than trusted from the text.
+      Without that check five issues would have stayed open after merge. The verification habit
+      saved it; the memory did not.
     decisions:
       - id: DEC-D1
         decision: >-
@@ -566,22 +585,154 @@ in_progress:
     discharges_decision_issue: 104
     also_owed_by_this_batch:
       - "DONE: the byte-exactness test internal/sink/obsidian lacked. TestTheMessageBodyIsWrittenByteForByte, fourteen rows, killed by two mutants (a TrimSpace and a ToValidUTF8 in Entry). Its invalid-UTF-8 rows construct their Message directly, deliberately, for the same reason DEC-C1's form encoding is kept."
+
+in_progress:
   - id: 6c-2
     name: "Event emission"
     tasks: [T040]
     issues: [41]
     also_discharges: [98, 110, 111]
-    state: blocked-on-6c-1
-    note: >-
-      T040 plus the Recorder seam and the adapter. Carries #41's four acceptance riders, #98 boxes
-      1-3, #110 (nameOf can hand the recovered panic value to the Recorder - about ten lines, and
-      deferring to T073 ships a known-invisible failure for four more batches), and #111 via DEC-D3.
-    open_question: >-
-      error_type is T056 (batch 8) and does not exist yet; SinkResult.Reason is two constants today.
-      6c-2 must decide whether to emit error_type from those constants now or omit it until T056 -
-      and say which. Similarly FR-068's message-on-error body is T071 (batch 10): recommend emitting
-      no message field at all, only message_len, and stating that FR-068 is knowingly unmet until
-      then rather than letting it read as an oversight.
+    branch: sgykfjsm/batch-6c2-event-emission-2
+    commit: 1420095
+    owner: Codex
+    state: reviewed-and-published-awaiting-merge
+    review_pr: 121
+    review_verdict: passed-with-notes
+    review_required_findings: []
+    review_code_verdict: passed
+    review_cycle: 1
+    review_nonblocking_findings: [CON-102]
+    published_code_commit: 1420095
+    remote_head_at_publication_verification: 5c30ce5
+    pushed: true
+    pr_description_verified: true
+    fix_dispositions: {COR-001: fixed, CON-001: fixed, CON-002: fixed}
+    fix_validation: "make check passed; all three focused regression mutants rejected"
+    fix_receipt: "/Users/shige/.agents/review-runs/sgykfjsm__miko-post/20260911T004422Z-c992f78b/fix-01/receipt.yaml"
+    review_run_state: "/Users/shige/.agents/review-runs/sgykfjsm__miko-post/20260911T004422Z-c992f78b"
+    prerequisites_met: true
+    validation: "1420095: make check and uncached full race suite passed; post/app coverage100.0%, logging99.3%"
+    mutants_run: 32
+    mutants_survived_by_design: 2
+    shape: >-
+      post.Recording/post.Recorder declared in internal/post (DEC-D2), the mapping onto
+      logging.Event in internal/app/recorder.go, wired at internal/cli/run.go through
+      app.NewService(settings, app.NewRecording(logger)). post.New takes a third parameter and
+      tolerates nil. sinkRecord arbitrates one start and one finish per sink under a mutex, with the
+      recorder called while it is held so a losing goroutine cannot emit a finish before the
+      winner's start.
+    decisions_taken:
+      - id: DEC-E1
+        question: >-
+          #98 box 1 needs path on obsidian_append_started, which precedes Send, while a
+          non-reporting sink's start must not be held back waiting for a report that never comes.
+          How does the orchestrator tell the two apart once Targeter's getter is gone?
+        decision: >-
+          post.Targeter is deleted and replaced by two things. post.ReportTarget(ctx, path) carries
+          the value per call, and post.TargetReporting is a declaration interface with one empty
+          method, ReportsTarget(), which the orchestrator type-asserts and never invokes. A
+          declaring sink's start event is held until the report arrives; a non-declaring sink's is
+          emitted before Send. A declaring sink that then reports nothing still gets its start,
+          emitted by sinkRecord ahead of its finish.
+        why: >-
+          The value cannot come from a method, which is what #111 is: a Sink is built once and
+          serves every post, so any getter reports the sink's most recent target. But the
+          orchestrator still needs one bit of type information, because the ordering decision has
+          to be made before Send is entered. A marker method is unusual in Go and is the honest
+          shape here - what is being declared is a behaviour of Send, not a value.
+        alternatives_rejected: >-
+          Requiring every sink to call ReportTarget (even with "") removes the marker but edits the
+          merged telegram sink to report nothing, and makes correctness rest on a convention rather
+          than the type system. Emitting the start before Send for everyone and putting path only on
+          the two later records leaves #98 box 1 open and needs a contract amendment.
+        costs: >-
+          A method whose body is empty and which nothing calls, which reads oddly until the doc
+          comment is read. A sink that declares and then never reports gets its start late rather
+          than never, which is the fallback rather than the design.
+      - id: DEC-E2
+        question: >-
+          error_type is required on a failure and T056 owns the classification. Emit a two-value
+          stand-in now, or omit the field until T056?
+        decision: >-
+          Emit it. post.ErrorType(SinkResult) returns "timeout" or "failed" from the same
+          errors.Is(err, context.DeadlineExceeded) predicate reasonFor uses, and a test asserts the
+          two partition failures identically so the log and the terminal cannot disagree about one
+          failure. T056 widens the set.
+        why: >-
+          An absent field is a query that silently returns nothing, which is the harm events.go's
+          own comment is written about. A widening vocabulary is ordinary versioning and the
+          contract already calls the event set a minimum; a query written today for "timeout" keeps
+          working. Deriving both from one predicate is what stops the interim value drifting from
+          the display reason it has to agree with.
+      - id: DEC-E3
+        question: >-
+          A panicking Sink.Name resolves to the "unknown" sentinel, and the event vocabulary is
+          keyed by sink name - so #110's recovered value has no lifecycle record to ride on. Where
+          does it go?
+        decision: >-
+          nameOf returns it as SinkAttempt.NameErr, wrapped in the same panicError a panicking Send
+          produces, and the adapter reports it on the post's terminal record in the error field.
+          The same route carries a sink name with no registered events. The terminal record's own
+          name and level still track AllSucceeded, so the exit status and the log agree.
+        why: >-
+          The alternatives both cost more than the case is worth. Adding vocabulary
+          (sink_unattributable, or three of them) bloats a contract whose value is a small stable
+          set, for a bug case. Adding a field to SinkResult guesses at T073's shape, which #110
+          itself warns against. The terminal record is the one record always written, so a
+          diagnostic there is awkwardly placed and reaches the operator, which beats correct and
+          absent.
+        note: >-
+          This is also what closes the silent-drop hole: without it, a post with a panicking Name
+          produced no records for that sink and said nothing about it, which is the failure shape
+          five previous batches were caught by.
+    found_and_fixed_outside_the_batch:
+      - id: LOG-LEVEL
+        what: >-
+          internal/logging emitted level as "INFO"/"ERROR" for every logger with Options.Redact
+          populated - which app.OpenLogger always does, so every real run since 6c-1.
+          replaceAttrRedacting ran scrub before renameBuiltin; slog.Level implements fmt.Stringer,
+          so scrub's Stringer arm stringified the level and renameBuiltin's type assertion to
+          slog.Level then failed, so the lowercasing never happened.
+          contracts/log-events.md admits only "info" and "error", and
+          internal/logging/logger_test.go's own lowercase test passed because it configures no
+          credential - the one shape no front door produces.
+        why_in_scope: >-
+          T040's records cannot satisfy the contract's level field without it, and it is a
+          three-line reordering. Found by this batch's first end-to-end read of real records.
+        fix: >-
+          renameBuiltin runs first, then scrub. Pinned by
+          TestLevelStaysLowercaseWithACredentialConfigured, which arms Redact and asserts both the
+          lowercase level and that the scrub still redacts - so the fix cannot be "the scrub no
+          longer runs".
+    inherited_obligations_discharged:
+      - id: DEC-D2-mandatory
+        how: >-
+          TestTheAdapterProducesEveryOrchestratorReachableEvent compares app.ProducibleEvents()
+          against logging.AllEvents() in both directions, with the three formatting-fallback names
+          listed as deferred to T063 and their owner named. Killed by a mutant removing the telegram
+          lifecycle from the adapter's table.
+      - id: CON-007
+        how: >-
+          TestTheObsidianSinkIsBuiltFromItsOwnSettings now reads the vault instead of asking the
+          sink where it went, with a pre-assertion that the vault is empty first so the check is
+          proven capable of failing. Stronger than the Targeter version: a sink built from the zero
+          ObsidianSettings resolves relative to the working directory, which is how a mutation run
+          in this repo once left a stray note inside a source package.
+      - id: adapter-fidelity
+        how: >-
+          Every adapter test drives a whole post through a real logging.Logger and reads the bytes
+          back off disk, decoding one line at a time so FR-064's self-containment fails rather than
+          being reassembled. duration_ms is asserted numerically against a sink held 120ms, which
+          is the assertion that separates milliseconds from nanoseconds.
+      - id: leak-fixture-must-be-proven-leaky
+        how: >-
+          TestTheBotTokenNeverReachesARecordThroughSinkResultErr t.Fatalf's unless the *url.Error
+          fixture's own rendering contains the sentinel, before asserting the log does not. The
+          typed-nil and panicking-render fixtures are proven dangerous the same way, by asserting
+          the unguarded call panics.
+    open_questions_answered:
+      - "error_type: emitted now, two values, one predicate shared with reasonFor (DEC-E2)"
+      - "message: not emitted at all; FR-068 recorded as knowingly unmet until T071, in tasks.md and in contracts/log-events.md"
 blockers: []
 
 time_sensitive:
@@ -602,6 +753,7 @@ time_sensitive:
       converts seconds to a time.Duration.
     deadline: before the first front door converts the setting (T036)
   - issue: 110
+    resolved_in: 6c-2
     note: >-
       A panic from Sink.Name is discarded, so FR-071 can never record it. The value is gone before
       T073 could use it, so closing this needs a change in nameOf itself.
@@ -616,11 +768,13 @@ time_sensitive:
       does the construction, both in batch 6. Corrected during the batch-5 review (CON-001).
     deadline: before batch-6 (T039)
   - issue: 41
+    resolved_in: 6c-2
     note: >-
       T040 must construct the logger with Options.Redact carrying the resolved bot token, or the
       chokepoint scrub is inert. Applies to whichever task first builds the Options.
     deadline: before batch-6 (T040)
   - issue: 98
+    resolved_in: 6c-2
     note: >-
       Decision on note-event ownership. The part that bound batch 5 is met: Sink is still exactly
       two methods, so the additive Targeter interface remains possible. Targeter itself, the path
@@ -632,22 +786,9 @@ time_sensitive:
     deadline: before tagging v0.1.0
 
 next_best_action: >-
-  Review the Batch 6c-1 branch (sgykfjsm/batch-6c-us1-front-door), then implement 6c-2 (T040, issue
-  #41, plus #98 boxes 1-3, #110 and #111 via DEC-D3).
+  Merge PR #121 when authorized; the reviewed implementation is published and its
+  description verified. CON-102 is a non-blocking T053 evidence-annotation follow-up.
 
-  6c-1 is committed but NOT pushed and has no PR; the run was authorised to commit only. Its
-  proposed PR title and body are in the batch report.
-
-  Three things 6c-2 inherits from 6c-1 rather than from the original plan. The composition root is
-  internal/app, so the Recorder adapter goes there and not in cmd/mp. internal/app/layering_test.go
-  now fails the build if internal/post acquires any internal import, so DEC-D2 is enforced rather
-  than remembered. And internal/cli/run.go is where a front door's run sequence lives, so whatever
-  T040 needs the front door to pass in has one place to be added.
-
-  Two issue-admin items #104's acceptance still owes and 6c-1 could not close: #113 must be closed
-  as a duplicate of #104, and #104 must record that Telegram's handling of a percent-encoded
-  invalid byte was never verified against the live service. Also: issue #37's body still names
-  internal/post/build.go.
 
 review_followups_filed:
   filed_at: 2026-09-07
@@ -724,7 +865,7 @@ batch_6_split:
     - {id: 6a, name: "Obsidian daily-note sink", tasks: [T027, T030, T031, T032], issues: [28, 31, 32, 33], package: internal/sink/obsidian, surface: filesystem, pr: 112, state: merged, squashed_as: 69e17e3}
     - {id: 6b, name: "Telegram sink", tasks: [T028, T033, T034, T035], issues: [29, 34, 35, 36], package: internal/sink/telegram, surface: HTTP, pr: 116, state: merged, squashed_as: 13705e0}
     - {id: 6c-1, name: "US1 front door and wiring", tasks: [T029, T036, T037, T038, T039], issues: [30, 37, 38, 39, 40], also_discharges: [104, 107, 109, 114], packages: [internal/app, internal/cli, cmd/mp], surface: "process, exit status", state: implemented-not-reviewed, requires: [6a, 6b], requires_met: true, branch: sgykfjsm/batch-6c-us1-front-door}
-    - {id: 6c-2, name: "Event emission", tasks: [T040], issues: [41], also_discharges: [98, 110, 111], packages: [internal/post, internal/app], surface: "log records", state: blocked-on-6c-1, requires: [6c-1]}
+    - {id: 6c-2, name: "Event emission", tasks: [T040], issues: [41], also_discharges: [98, 110, 111], packages: [internal/post, internal/app, internal/logging, internal/sink/obsidian, internal/cli], surface: "log records", state: implemented-not-reviewed, requires: [6c-1], requires_met: true, branch: sgykfjsm/batch-6c2-event-emission}
   6c_owns: [107, 41, 98, 109, 110, 111]
   6c_blocker: >-
     T036 places build.go in internal/post, which cannot compile: the sink packages import
@@ -779,6 +920,15 @@ touched_files:
   - cmd/mp/main.go
   - cmd/mp/main_test.go
   - internal/logging/logger_test.go
+  - internal/post/recorder.go
+  - internal/post/recorder_test.go
+  - internal/post/target.go
+  - internal/post/sink.go
+  - internal/app/recorder.go
+  - internal/app/recorder_test.go
+  - internal/app/export_test.go
+  - internal/sink/obsidian/sink.go
+  - specs/001-dual-sink-quick-post/contracts/log-events.md
   - internal/sink/obsidian/sink_test.go
   - internal/sink/telegram/sink_test.go
   - specs/001-dual-sink-quick-post/spec.md
@@ -792,4 +942,4 @@ assumptions:
     The batch decomposition above is re-derived by run-batch-cycle's triage step each run; it is
     recorded here for orientation, not as a binding plan.
 
-last_updated: 2026-09-09
+last_updated: 2026-09-11

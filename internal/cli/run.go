@@ -51,7 +51,14 @@ func Run(invocation Invocation, out, errOut io.Writer) int {
 
 	logger := app.OpenLogger(settings, logging.SourceCLI)
 
-	outcome := app.NewService(settings).Post(message)
+	// The recording is built from the logger and handed to the service, which
+	// is the whole of this front door's part in T040: the event vocabulary is
+	// internal/logging's, the mapping onto it is internal/app's, and the
+	// orchestrator emits through an interface that knows about neither. What
+	// this line owns is that the two are connected at all — a service built
+	// without one posts identically and records nothing, and nothing in the
+	// output would say so.
+	outcome := app.NewService(settings, app.NewRecording(logger)).Post(message)
 
 	// Closed before the report is assembled, not in a defer. A deferred Close
 	// would run after everything had been printed, so a failure to flush and

@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"sync"
 	"time"
 
 	"github.com/sgykfjsm/miko-post/internal/config"
@@ -109,14 +108,6 @@ type Sink struct {
 	// now is the clock, replaceable by tests. The zero value is not useful, so
 	// New installs time.Now; see export_test.go for how a test substitutes it.
 	now func() time.Time
-
-	// mu guards target.
-	//
-	// Target is read by the orchestrator after Send returns while other posts
-	// may still be running: a GUI window outlives its submission (FR-028), so
-	// one Sink serves more than one post over its life.
-	mu     sync.Mutex
-	target string
 }
 
 // New builds the sink from its settings.
@@ -130,36 +121,23 @@ func New(settings config.ObsidianSettings) *Sink {
 // Name identifies this sink (post.Sink).
 func (s *Sink) Name() string { return SinkName }
 
-// Target reports the note this sink most recently resolved and wrote to
-// (post.Targeter, issue #98).
+// ReportsTarget declares that Send reports the note it resolved through
+// post.ReportTarget (post.TargetReporting, issue #98).
 //
-// It returns what Send actually used rather than re-deriving it, which is the
-// trap #98 exists to document: a Target that called time.Now itself would
-// disagree with Send across local midnight, and the log would then name a file
-// the post did not touch.
+// The orchestrator holds this sink's start event until that report arrives, so
+// obsidian_append_started carries the note path rather than only the two records
+// that follow the write. A failure the user cannot locate is most of a failure
+// they cannot act on, and the append that fails hardest — a vault on a mount
+// that has gone away — fails before there is anything but the path to report.
 //
-// One caveat this design has, recorded rather than hidden, and stated more
-// carefully than it was at first. A Sink is constructed once and serves every
-// post, so two overlapping posts both write this field. It holds whichever post
-// *started* last — setTarget runs at the top of Send, before any I/O — so the
-// stale window is not a moment after Send returns: it opens the instant a later
-// post enters Send and lasts for the whole of that post's open and write, which
-// on a stalled mount is unbounded. Across local midnight that means a completed
-// post can read a path naming a note it never touched, which is the SC-008
-// reconstruction failure this interface exists to prevent.
-//
-// Nothing here can close it: post.Sink is deliberately two methods (issue #98's
-// own acceptance requires that), so Send has no way to hand its path back per
-// call. This is a shape problem, not a synchronisation one — the mutex prevents
-// a data race and cannot make the value per-post. Recorded as issue #111 for
-// T040, which is where the value is consumed and where a per-post carrier could
-// be introduced.
-func (s *Sink) Target() string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	return s.target
-}
+// Never called. The type assertion is the whole content: what the orchestrator
+// needs is the declaration, and the value travels per call because a value
+// returned from a method here could only ever be the *sink's* last note. One
+// Sink serves every post — a GUI window outlives its submission (FR-028) — so a
+// field holding the note was read by a completed post while a later one had
+// already overwritten it, which across local midnight named a different file
+// (issue #111). That is what this method replaces.
+func (s *Sink) ReportsTarget() {}
 
 // Send appends the message to today's note (FR-044 – FR-051).
 //
@@ -187,7 +165,15 @@ func (s *Sink) Send(ctx context.Context, message post.Message) error {
 	at := s.now()
 
 	path := DailyNotePath(s.settings.DailyNoteDir, s.settings.FilenameFormat, at)
-	s.setTarget(path)
+
+	// Reported before the context check and before any I/O, so the
+	// orchestrator can name the note whatever happens next — including a
+	// deadline that had already expired when Send was entered, which is a
+	// failure whose record is useless without the path (decision DEC-D3).
+	// The value goes to the caller of this Send and to no other post: it
+	// travels on ctx rather than on this Sink, which is what makes it
+	// per-post rather than per-sink (issue #111).
+	post.ReportTarget(ctx, path)
 
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("appending to %s: %w", path, err)
@@ -490,12 +476,4 @@ func (s *Sink) diagnose(path string, err error) error {
 	}
 
 	return fmt.Errorf("opening %s for appending: %w", path, err)
-}
-
-// setTarget records the note this post resolved.
-func (s *Sink) setTarget(path string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	s.target = path
 }

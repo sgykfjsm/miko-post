@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/sgykfjsm/miko-post/internal/config"
 )
@@ -219,6 +220,9 @@ func ResolvePath(configured string) (string, error) {
 // Logger owns the log destination for a process. It has no logging methods on
 // purpose; see Post.
 type Logger struct {
+	queueMu sync.Mutex
+	queue   *recordQueue
+
 	handler slog.Handler
 	writer  *safeWriter
 	build   []slog.Attr
@@ -499,7 +503,7 @@ func buildAttrs(opts Options) []slog.Attr {
 
 // Post returns a logger bound to one post's correlation identifier.
 //
-// This is the only way to obtain something that can emit a record, and it is
+// Post and PostAsync both require a correlation identifier, which is
 // why Logger itself has no Info or Error. contracts/log-events.md marks
 // message_id present on *every* record, and an attribute that callers are
 // merely asked to remember is one they will eventually forget — producing a
@@ -531,6 +535,38 @@ func (l *Logger) Post(messageID string) *PostLogger {
 	return &PostLogger{logger: slog.New(l.handler.WithAttrs(attrs)), writer: l.writer}
 }
 
+// PostAsync binds the same record format and correlation identity as Post, but
+// emits through one bounded queue shared by this logger. The caller must keep
+// attribute values immutable until Flush or Close; the adapter uses scalar
+// values only. Event timestamps are captured at admission, not at disk write.
+func (l *Logger) PostAsync(messageID string) *PostLogger {
+	p := l.Post(messageID)
+	p.queue = l.recordQueue()
+	return p
+}
+
+func (l *Logger) recordQueue() *recordQueue {
+	l.queueMu.Lock()
+	defer l.queueMu.Unlock()
+	if l.queue == nil {
+		l.queue = newRecordQueue(l.writer.close)
+	}
+	return l.queue
+}
+
+// Flush waits at most 250ms for previously admitted asynchronous records.
+// A timeout or full queue permanently discards further records and is reported
+// by Degraded. Neither delivery nor its per-sink timers wait here.
+func (l *Logger) Flush() error {
+	l.queueMu.Lock()
+	q := l.queue
+	l.queueMu.Unlock()
+	if q == nil {
+		return nil
+	}
+	return q.flush()
+}
+
 // Degraded reports that diagnostics are not reaching disk, or nil when they
 // are (FR-076).
 //
@@ -545,6 +581,10 @@ func (l *Logger) Post(messageID string) *PostLogger {
 func (l *Logger) Degraded() *Degradation {
 	if l.openErr != nil {
 		return &Degradation{Path: l.path, Err: l.openErr}
+	}
+
+	if err := l.Flush(); err != nil {
+		return &Degradation{Path: l.path, Err: err}
 	}
 
 	if err := l.writer.firstErr(); err != nil {
@@ -569,21 +609,18 @@ func (l *Logger) Degraded() *Degradation {
 // path.
 func (l *Logger) Path() string { return l.path }
 
-// Close releases the log file.
+// Close stops admission, drains queued records and releases an owned log file.
+// It waits at most 250ms. A stalled write or close becomes a degradation rather
+// than holding the front door open. The worker retains ownership of the handle
+// and releases it if the stalled operation eventually returns; queued records
+// are discarded after timeout. A supplied Writer is never closed.
 //
-// A writer supplied through Options.Writer is left alone even when it happens
-// to implement io.Closer: this package did not open it and cannot know whether
-// the caller is done with it. Closing a discarding logger is a no-op, so a
-// deferred Close is correct on whatever Open returned.
-//
-// Idempotent, because a deferred Close plus an explicit one is the ordinary
-// shape and the second call must not become an error a front door has to
-// special-case. The handle is released and dropped inside safeWriter's own
-// lock, which also means a straggler write racing Close is discarded rather
-// than latching a "file already closed" degradation — spending FR-076's one
-// warning on the shutdown itself would be worse than losing the record.
+// Repeated calls do not close the handle twice. After a queue failure they
+// return the same degradation immediately; after successful cleanup they
+// return its result. Synchronous Post calls retain their existing write behavior;
+// the production adapter uses PostAsync so sink deadlines never wait for I/O.
 func (l *Logger) Close() error {
-	return l.writer.close()
+	return l.recordQueue().close()
 }
 
 // PostLogger emits records for one post.
@@ -593,6 +630,8 @@ func (l *Logger) Close() error {
 // would put a third value into a field that consumers filter on, and a level
 // nobody reads is a record nobody sees.
 type PostLogger struct {
+	queue *recordQueue
+
 	logger *slog.Logger
 
 	// writer is the same safeWriter the handler writes through, held so that a
@@ -630,6 +669,16 @@ func (p *PostLogger) Error(event Event, attrs ...slog.Attr) {
 // timeouts. slog's JSON handler ignores the context; this passes the one that
 // stays valid regardless.
 func (p *PostLogger) log(level slog.Level, event Event, attrs []slog.Attr) {
+	at := time.Now()
+	if p.queue != nil {
+		copied := append([]slog.Attr(nil), attrs...)
+		p.queue.submit(func() { p.emit(at, level, event, copied) })
+		return
+	}
+	p.emit(at, level, event, attrs)
+}
+
+func (p *PostLogger) emit(at time.Time, level slog.Level, event Event, attrs []slog.Attr) {
 	// A panic anywhere below is caught and turned into a degradation.
 	//
 	// FR-076's first duty is that diagnostics never change what the post does,
@@ -650,7 +699,9 @@ func (p *PostLogger) log(level slog.Level, event Event, attrs []slog.Attr) {
 		}
 	}()
 
-	p.logger.LogAttrs(context.Background(), level, string(event), reserved(attrs)...)
+	record := slog.NewRecord(at, level, string(event), 0)
+	record.AddAttrs(reserved(attrs)...)
+	_ = p.logger.Handler().Handle(context.Background(), record)
 }
 
 // reserved drops caller attributes that would collide with a key this package
@@ -809,13 +860,28 @@ func isReservedKey(key string) bool {
 // rewritten into the record's own identity keys.
 func replaceAttrRedacting(secrets []string) func([]string, slog.Attr) slog.Attr {
 	return func(groups []string, a slog.Attr) slog.Attr {
-		a = scrub(a, secrets)
-
-		if len(groups) > 0 {
-			return a
+		// The rename runs first, and the order is load bearing rather than
+		// arbitrary.
+		//
+		// It used to run last, and that silently broke the level field for
+		// every logger with a credential configured — which is every real run,
+		// because app.OpenLogger always arms Redact. slog.Level implements
+		// fmt.Stringer, so scrub's Stringer arm converted the level attribute
+		// to the string "INFO" before renameBuiltin could see it; its type
+		// assertion to slog.Level then failed and the lowercasing never
+		// happened. contracts/log-events.md admits only "info" and "error", so
+		// a consumer filtering level == "error" got nothing from a real log
+		// while every test in this package passed — none of them populated
+		// Redact and read the level in the same run.
+		//
+		// Renaming first hands scrub the already-lowercased string, which it
+		// scans harmlessly, and leaves the timestamp and event untouched for
+		// the same reasons as before.
+		if len(groups) == 0 {
+			a = renameBuiltin(a)
 		}
 
-		return renameBuiltin(a)
+		return scrub(a, secrets)
 	}
 }
 
@@ -911,12 +977,13 @@ func renameBuiltin(a slog.Attr) slog.Attr {
 //
 // The mutex is not redundant with slog's. slog's JSON handler holds its own
 // lock across the write, so Write is already serialised against itself — but
-// firstErr is called from the front door while sinks are still posting, and
-// that read races the write without this. Close is in the same critical
-// section for the same reason.
+// Close must serialize with writes to avoid closing a live handle. Error
+// state uses a separate mutex: querying degradation must not acquire a lock
+// held by a stalled destination.
 type safeWriter struct {
 	mu     sync.Mutex
 	target io.Writer
+	errMu  sync.Mutex
 	err    error
 
 	// owned is the destination this package opened and may close, and is nil
@@ -945,8 +1012,8 @@ func (s *safeWriter) Write(p []byte) (int, error) {
 		err = fmt.Errorf("wrote %d of %d bytes", n, len(p))
 	}
 
-	if err != nil && s.err == nil {
-		s.err = err
+	if err != nil {
+		s.latch(err)
 	}
 
 	if 0 < n && n < len(p) {
@@ -981,8 +1048,8 @@ func (s *safeWriter) Write(p []byte) (int, error) {
 // reached a write, and because the first reason is the one kept: FR-076 allows
 // one warning, so a later cause has nothing to add.
 func (s *safeWriter) latch(err error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.errMu.Lock()
+	defer s.errMu.Unlock()
 
 	if s.err == nil {
 		s.err = err
@@ -991,8 +1058,8 @@ func (s *safeWriter) latch(err error) {
 
 // firstErr returns the first write failure, or nil.
 func (s *safeWriter) firstErr() error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.errMu.Lock()
+	defer s.errMu.Unlock()
 
 	return s.err
 }

@@ -504,3 +504,236 @@ adapter can produce equals the orchestrator-reachable subset of `AllEvents()` �
 unmapped event silently never fires. Two open questions to answer rather than default: whether
 `error_type` is emitted from today's two `Reason` constants or omitted until T056, and whether the
 `message` field is omitted entirely until T071 with only `message_len` recorded.
+
+## Batch 6c-1 — the US1 front door (PR #120, squashed as `f757707`, 2026-09-10)
+
+Merged `passed-with-notes` after one review cycle and two fix passes. The squashed tree is
+byte-identical to the reviewed tip `22ca3da` (both tree `d4f4cb57`). Closed #30, #37, #38, #39, #40,
+#107, #109, #114, #117; advanced #104; filed #119.
+
+**The first batch here whose decisions were written down before the code.** DEC-D1 through DEC-D4
+were recorded in `state.yaml` with their rationale, rejected alternatives and costs before
+implementation started — the concrete fix for the bookkeeping failure that had recurred in three
+consecutive batches. It held: the contract reviewer judged each decision against the code rather
+than the record, and found none overreaching.
+
+**Two review findings were the same shape, and it is a shape worth naming.** `mp -c <non-regular
+path>` never returned — a FIFO hung with no output, no timeout and no exit status, and `/dev/zero`
+reached ~1.9 GB RSS in a second. `internal/logging` had refused exactly this for the *log* path since
+Batch 4, with a comment recording that a FIFO there "made Open never return". The guard existed; the
+counterpart didn't. Separately, the batch made a comment false in `internal/sink/telegram/sink.go` —
+a file it never opened — because its own new `MaxTimeoutSeconds` ceiling falsified a sentence saying
+validation "bounds it only from below", while the contract it *did* write asserted the correction had
+already been made. **Both are the same failure: a fact established in one place and not carried to
+the place that already depended on it.** Worth a habit — when a batch changes a fact, grep for who
+asserts it.
+
+**Two unfailable assertions were caught during authorship rather than a batch later**, which is new.
+One asserted `Contains(err, "a directory")`, which `os.ReadFile`'s own EISDIR text already satisfies,
+so it passed with the guard deleted. One keyed off `"bot_token"`, which the required-when-enabled
+problem satisfies for a different reason on different input. Both now assert their rule's own clause
+— text nothing but the new code writes. The check that found them is cheap and should be routine:
+**for each new assertion, ask what text or state would satisfy it without the fix present.**
+
+**A coordinator error worth recording, because a memory did not prevent it.** The PR was opened with
+`Closes #30 (T029), #37 (T036), #38 …` on one line, and GitHub registered only the first — the
+identical defect found as CON-001 in Batch 6a, which already had a memory written about it. It was
+caught because `closingIssuesReferences` is checked after every PR open rather than trusted from the
+body; without that, five issues would have stayed open after merge. The verification habit saved it,
+the memory did not. The lesson is not "remember harder" — it is that a check at the point of action
+beats a note recalled at the point of writing.
+
+**The honest hole, filed as #119.** No test drives two destinations both succeeding, and as written
+none can: `telegram.Sink.baseURL` is unexported and `cli.Run` has no seam. The `sinks[:1]` mutant was
+killed only by the partial-failure test — by a *failing* Telegram — with `internal/app` and
+`internal/cli` both passing it. The issue's acceptance is the mutant, not a test's existence.
+
+**What 6c-2 inherits.** T040, the `Recorder` seam, the adapter, #41's four riders, #98 boxes 1–3,
+#110, and #111 via DEC-D3. Four obligations are recorded in `state.yaml`, the load-bearing one being
+that `internal/logging`'s event-name test cannot see the adapter, so an unmapped event would silently
+never fire unless 6c-2 asserts the producible set against `AllEvents()`.
+
+## Batch 6c-2 — event emission (T040, branch `sgykfjsm/batch-6c2-event-emission`, 2026-09-10)
+
+Implemented and validated; not yet reviewed. `make check` clean, 100.0% statement coverage in
+`internal/post` and `internal/app`, 99.5% in `internal/logging` (unchanged). Discharges T040 and
+closes #41, #98, #110 and #111. Thirty-two mutants built, one surviving by design.
+
+**The shape is DEC-D2's, and the boundary held.** `post.Recording` and `post.Recorder` are
+domain-shaped interfaces declared in `internal/post`; the mapping onto `logging.Event` and the whole
+field vocabulary live in `internal/app/recorder.go`. `internal/post` still imports no other internal
+package, and `internal/app/layering_test.go` is what says so rather than three PR bodies. The cost
+DEC-D2 predicted is real and was paid where it said to pay it: every adapter test drives a whole post
+through a real `logging.Logger` and reads the bytes back off disk, decoding one line at a time so
+FR-064's self-containment fails rather than being reassembled by a lenient reader.
+
+**`post.Targeter` is gone (DEC-D3), and the replacement needed one decision the decision did not
+cover.** `post.ReportTarget(ctx, path)` carries the note per call, so the value never leaves the
+goroutine running the post — that is #111 closed by construction rather than by synchronisation, and
+the sink lost its mutex and its field along with the getter. What DEC-D3 did not say is how the
+orchestrator knows *whether to wait* for a report before emitting a sink's start event, and it has to
+know before `Send` is entered. `post.TargetReporting` answers it with one empty method nobody calls.
+A marker method is unusual in Go; the alternatives were worse. Making every sink call
+`ReportTarget(ctx, "")` removes the marker but edits the merged telegram sink to report nothing and
+moves correctness from the type system onto a convention — which is exactly what #115 is filed about.
+
+**Two fields were judgement calls, and both are recorded in three places rather than one.**
+`error_type` is emitted now with two values, from the same `errors.Is(err,
+context.DeadlineExceeded)` predicate `reasonFor` uses, with a test asserting the two partition
+failures identically — so the log and the terminal cannot describe one failure differently, and T056
+widens the set rather than redefining it. An absent field would have been a saved query that
+silently returns nothing, which is the harm `events.go`'s own comment is written about. `message` is
+emitted nowhere at all, and FR-068 is recorded as knowingly unmet until T071 in `tasks.md` and in a
+new section of `contracts/log-events.md` — so a reader finds a scheduled gap rather than inferring
+an oversight.
+
+**#110 closed without adding vocabulary, and it took three attempts to see why that was the
+constraint.** The recovered `Name` panic now survives as `SinkAttempt.NameErr`, wrapped in the same
+`panicError` a panicking `Send` produces. It cannot ride on that sink's lifecycle records, and the
+reason is structural rather than aesthetic: a panicking `Name` resolves to the `unknown` sentinel,
+and the event names are keyed by sink name, so **there are no records for such a sink at all**. That
+is the finding worth keeping — the adapter's honest answer for an unmapped sink name was going to be
+"emit nothing", which is the silent-drop shape five previous batches were caught by. Both the panic
+and the missing vocabulary are now named in the post's terminal record, whose own name and level
+still track `AllSucceeded` so the exit status and the log agree.
+
+**One defect outside the batch, found by the first end-to-end read of real records.**
+`internal/logging` emitted `level` as `"INFO"`/`"ERROR"` for every logger with `Options.Redact`
+populated — which `app.OpenLogger` always does, so every run of the shipped binary since 6c-1.
+`replaceAttrRedacting` ran `scrub` before `renameBuiltin`; `slog.Level` implements `fmt.Stringer`, so
+the scrub's Stringer arm stringified the level and the rename's type assertion to `slog.Level` then
+failed. `contracts/log-events.md` admits only `info` and `error`, and a consumer filtering `level ==
+"error"` got nothing. The package's own `TestLevelIsExactlyInfoOrError` passed throughout, because it
+configures no credential — **the one configuration no front door produces.** The lesson generalises
+past this bug: a test that exercises a component in a shape its callers never use can be green while
+the shipped behaviour is wrong, and 100% statement coverage says nothing about it. Fixed by
+reordering, pinned by a test that arms `Redact` and asserts both the level *and* that the scrub still
+fires, so the fix cannot decay into "the scrub was removed".
+
+**Two unfailable guards were caught by mutation rather than by reading.** Removing `sinkRecord`'s
+second-finish guard survived the suite, because `run` calls `finish` once per sink and nothing else
+can — so the guard was correct, load-bearing for a change a later task might make, and completely
+unexercised. Removing `guard`'s nil-recorder check survived too, because `guarded`'s own recover
+absorbs the nil method call: two guards in series, where neither one's test can tell which is doing
+the work — the shape `app.go`'s `SinkTimeout` comment already warns about. Both are now pinned by
+direct unit tests of the types rather than through a post, which is the difference between a
+documented intention and an asserted one. **The check that found them is cheap: build the mutant for
+every guard, not for every branch.**
+
+**What 6c-2 leaves for the next batch.** US1 is complete. Batch 7 is US2 (T041–T051, the Fyne GUI)
+and needs the `fyne/v2` pin, the last third of #4. #119 is untouched and still open: no test drives
+two destinations both succeeding, and `cli.Run` still has no sink seam — this batch changed
+`NewService`'s signature in that same function without closing it, deliberately, because a seam is
+its own decision.
+
+
+## 2026-09-11 — Codex takeover
+
+User requested takeover from Claude Code. This checkout is on
+`sgykfjsm/batch-6c2-event-emission-2`, with implementation committed as `124abea`.
+Orca lists this Codex terminal and an idle setup shell in this checkout; no Claude
+terminal is attached here. Other checkouts were not stopped or modified.
+`make check` passed (formatting, vet, race-enabled tests). Corrected stale current
+state claiming the implementation was uncommitted. Preserved the existing Claude
+integration installation timestamp change. No implementation changes made.
+Next action: structured review of Batch 6c-2 at `124abea`. Prior coverage and mutation
+figures are inherited evidence and were not rerun during takeover.
+
+
+## 2026-09-11 — Batch 6c-2 staged review
+
+Reviewed PR #121, base f757707 → head 124abea, review-only. Contract valid;
+correctness inspected all 22 changed files/hunks; the independent adversarial
+stage confirmed the diagnostic-blocking defect. Verdict: request-changes.
+
+Required findings: COR-001 / ADV-001 (synchronous logger blocks delivery and
+bypasses timeout completion), CON-001 / COR-002 (missing integrated emitted
+message_id/path overlap test), CON-002 (terminal failure field contract ambiguity).
+A real logger with a controlled blocked Writer reproduced blocking at four event
+stages past 350 ms with a 10 ms sink timeout; the start stall changed the outcome.
+No physical stalled mount or live Telegram service was used.
+
+Fresh make check passed on the exact snapshot. Coverage reproduced: post 100%,
+app 100%, logging 99.5%. Historical mutations were not rerun. #110's specific
+acceptance is supported; #41/#98/#111 remain open pending corrections. No fixes,
+commits, pushes, PR updates, or issue mutations. Existing local edits preserved.
+
+Review report and reproduction: /Users/shige/.agents/review-runs/sgykfjsm__miko-post/20260911T004422Z-c992f78b
+Next action: explicitly authorized correction pass, then full staged rereview.
+
+
+## 2026-09-11 — Authorized Batch 6c-2 correction pass
+
+User invoked fix-review-findings for COR-001, CON-001 and CON-002. Verified HEAD
+124abea and preserved pre-existing state edits and Claude setup timestamp.
+Reproduced all four blocked-writer cases before correction.
+
+COR-001 / ADV-001: production recording now uses PostAsync and one ordered,
+bounded logger worker. Flush/Close wait at most 250 ms, the queue holds 256 pending
+entries, and error-state reads no longer wait behind the writer lock. Timeout or
+saturation permanently disables this logger's queue, drops pending records and
+warns. An in-flight write can land late; one worker/handle remains until it returns.
+Normal errors retain existing recovery. Timestamps are captured at admission;
+crash-time queue loss and delayed cleanup are documented in the log contract.
+
+CON-001 / COR-002: integrated Service.Post tests share a real Obsidian sink across
+midnight and force B to complete before A appends, then decode JSONL and match each
+start/finish path to its returned ID and actual note. Includes a failed B append.
+CON-002: clarified sink-only error_type and detailed errors, with DEC-E3's terminal
+identity diagnostic exception; tests reject ordinary aggregate failure fields.
+
+Validation: make check passed (fmt/vet/full race suite). Focused liveness, queue
+ordering/timestamp, saturation, timeout, late cleanup and close-stall tests passed.
+Three temporary mutants were rejected: synchronous production logging, shared latest
+target, and aggregate error_type. Mutants never changed the working checkout.
+
+All three dispositions are fixed, pending full staged rereview. No issues closed,
+PR changes, commits or pushes. Receipt: /Users/shige/.agents/review-runs/sgykfjsm__miko-post/20260911T004422Z-c992f78b/fix-01/receipt.yaml
+Next action: full review of the updated uncommitted Batch 6c-2 diff.
+
+
+## 2026-09-11 — Commit and full Batch 6c-2 rereview
+
+User requested commit, checks, and review. Committed corrections and project-state
+updates as 1420095 (`fix: isolate diagnostic writes and verify post correlation`).
+Preserved the unrelated Claude integration timestamp. No push.
+
+make check passed after commit. Fresh uncached go test -race -count=1 ./... passed
+on the archived exact commit. Coverage: post/app100.0%, logging99.3%. Correctness
+review inspected all114hunks/26files and independently reran five relevant packages;
+it passed without findings. Contract is valid. The built-in fresh adversarial
+launcher hit its thread limit; recorded that abandoned attempt, then ran a fresh
+ephemeral read-only Codex CLI reviewer with only the packet/contract/raw validation.
+It passed without findings; it verified23non-state file blobs, inspected applicable
+risk lanes, and did not independently rerun tests.
+
+Original COR-001/CON-001/CON-002 are resolved. Overall request-changes is now limited
+to publication requirement CON-101: PR121 still describes remote124abea and needs
+current queue/completion/validation wording before publishing1420095. Prepared a
+local body draft. CON-102 (stale T053 evidence annotation) is non-blocking and left
+to its owning documentation/batch workflow. No issue closures or PR mutations.
+
+Cycle-1 report: /Users/shige/.agents/review-runs/sgykfjsm__miko-post/20260911T004422Z-c992f78b/cycle-01/integrated.yaml
+PR draft: /Users/shige/.agents/review-runs/sgykfjsm__miko-post/20260911T004422Z-c992f78b/cycle-01/pr-body-draft.md
+Next action: authorized publication of reviewed commit and accurate PR body, then
+verify remote state. These post-review state updates remain uncommitted.
+
+
+## 2026-09-11 — Publish review corrections and post-review notes
+
+User authorized committing state notes, pushing, and updating the PR description.
+Committed post-review notes as5c30ce5, then fast-forward pushed1420095 and5c30ce5 to
+PR121's existing branch sgykfjsm/batch-6c2-event-emission. The local takeover branch
+now tracks that remote branch. The unrelated Claude installation timestamp remains
+uncommitted.
+
+Updated PR121 from the prepared body, removing draft language and documenting the
+reviewed implementation, queue limits, current validation, selected issue acceptance,
+and exclusions. Read back the remote head and exact body and verified that changes
+since the tested1420095 are project-state documentation only. CON-101 is resolved;
+current disposition passed-with-notes. CON-102 remains a non-blocking T053 annotation
+follow-up, noted in the PR; no new issue or task closure is needed for publication.
+No merge or direct issue closure was performed. This entry records publication and
+will accompany the final documentation-only push.
+
+Next action: merge PR121 when authorized.
