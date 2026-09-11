@@ -12,25 +12,6 @@ import (
 	"github.com/oklog/ulid/v2"
 )
 
-// Display reasons this batch can produce.
-//
-// contracts/cli-interface.md and FR-029 require Reason to come from a fixed
-// set, and T056 implements that set in reason.go. These two are the subset
-// FR-015 forces on this batch: a sink that exceeds its own deadline has to
-// yield a failure result here, and a result with an empty Reason would give
-// both front doors nothing to show between this batch and T056.
-//
-// Neither is derived from the sink's error, and that is the invariant T056
-// inherits rather than a temporary shortcut. FR-017 and FR-029 split Reason
-// from Err precisely because an error chain carries a URL, a header or a
-// credential: a *url.Error from a Telegram transport failure has the bot token
-// in its URL field. Reason is the only half a front door may print, so it can
-// only ever be a constant chosen by this package.
-const (
-	reasonTimedOut = "request timed out"
-	reasonFailed   = "delivery failed"
-)
-
 // unknownSinkName stands in when a sink's own Name() cannot be obtained.
 //
 // Name() is sink code and can panic like any other, so the result for a sink
@@ -591,24 +572,6 @@ func (s *Service) deliver(record *sinkRecord, name string, sink Sink, message Me
 	}
 
 	return SinkResult{Name: name, Success: true}
-}
-
-// reasonFor picks the display reason for a sink's error.
-//
-// T056 replaces this with the full classification in reason.go. The shape it
-// has to keep is that the result is chosen from constants in this package and
-// never built from err: see the comment on reasonTimedOut.
-//
-// The deadline case is distinguished now because FR-015 is one of this batch's
-// requirements and "the sink took too long" is the one failure the orchestrator
-// causes rather than observes. errors.Is rather than a comparison, because a
-// sink that wraps the context error on its way out still timed out.
-func reasonFor(err error) string {
-	if errors.Is(err, context.DeadlineExceeded) {
-		return reasonTimedOut
-	}
-
-	return reasonFailed
 }
 
 // identifier returns this post's correlation identifier, falling back to the

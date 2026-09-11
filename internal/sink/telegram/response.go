@@ -60,6 +60,9 @@ func readResponseBody(body io.Reader) ([]byte, error) {
 // the one failure mode this batch's tests exist to rule out.
 var errContradictoryStatus = errors.New("the body reported ok with a non-success HTTP status")
 
+// errMissingOK distinguishes an absent or null required boolean from a refusal.
+var errMissingOK = errors.New("the reply omitted a boolean ok field")
+
 // apiResponse is the envelope every Bot API method answers with.
 //
 // Three fields, because three are what the contract needs: `ok` decides
@@ -68,8 +71,9 @@ var errContradictoryStatus = errors.New("the body reported ok with a non-success
 // nothing in this feature uses the sent message's id, and a field nobody reads
 // is a field that can quietly acquire a meaning.
 type apiResponse struct {
-	OK          bool   `json:"ok"`
-	ErrorCode   int    `json:"error_code"`
+	OK        *bool `json:"ok"`
+	ErrorCode int   `json:"error_code"`
+	// Description is optional; null, like omission, means no diagnostic text.
 	Description string `json:"description"`
 }
 
@@ -150,15 +154,16 @@ type APIError struct {
 	// could not be decoded, because it is the field T040 must log.
 	HTTPStatus int
 
-	// Code is the body's `error_code`. Zero when the body did not decode.
+	// Code is the body's `error_code`. Zero when decoding or required ok
+	// validation failed, or when error_code was absent or null.
 	Code int
 
 	// Description is the body's `description`. Empty when the body did not
-	// decode, or when Telegram sent none.
+	// decode, required ok validation failed, or when Telegram sent none.
 	Description string
 
 	// cause is why the body could not be trusted, when that is the reason this
-	// error exists: a decode failure, or errContradictoryStatus.
+	// error exists: a decode failure, a missing boolean ok, or errContradictoryStatus.
 	//
 	// Unexported so that %#v renders it as a pointer address rather than
 	// walking into it — the same mechanism config.Secret relies on to keep a
@@ -188,7 +193,7 @@ func (e *APIError) Error() string {
 		e.HTTPStatus, e.Code, e.Description)
 }
 
-// Unwrap exposes the decode or contradiction cause to errors.Is.
+// Unwrap exposes the decode, missing-field or contradiction cause to errors.Is.
 //
 // nil when Telegram gave a clean refusal, which is the common case: there is no
 // underlying error there, only Telegram's answer.
@@ -208,6 +213,7 @@ func (e *APIError) Unwrap() error { return e.cause }
 //   - A body that does not decode is a failure regardless of status, including
 //     a 200. An empty body, an HTML error page, and a truncated JSON object all
 //     land here.
+//   - Missing or null `ok` is an untrusted envelope, not an explicit refusal.
 //   - `ok == false` is a failure regardless of status, and its decoded fields
 //     are carried through. Telegram answers a refusal with a 4xx, but the
 //     status is not what the contract keys off; `ok` is.
@@ -243,7 +249,11 @@ func decodeResponse(status int, body []byte, token string) error {
 		return &APIError{HTTPStatus: status, cause: err}
 	}
 
-	if !payload.OK {
+	if payload.OK == nil {
+		return &APIError{HTTPStatus: status, cause: errMissingOK}
+	}
+
+	if !*payload.OK {
 		return &APIError{
 			HTTPStatus:  status,
 			Code:        payload.ErrorCode,

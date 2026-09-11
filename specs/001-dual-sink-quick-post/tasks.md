@@ -191,20 +191,53 @@ neither can be retrofitted later without rewriting every story.
 
 ### Tests for User Story 3
 
-- [ ] T052 [P] [US3] Write a timeout test asserting a hanging sink yields a timeout failure at its configured limit while the other sink completes and reports its **real** outcome, in `internal/post/service_test.go` (FR-015, SC-011)
+- [x] T052 [P] [US3] Write a timeout test asserting a hanging sink yields a timeout failure at its configured limit while the other sink completes and reports its **real** outcome, in `internal/post/service_test.go` (FR-015, SC-011)
   - **Already delivered by the orchestrator batch (T026).** `TestABlockingSinkYieldsATimeoutAndDoesNotStallItsSibling` asserts exactly this, including that the blocked sink's `Err` wraps `context.DeadlineExceeded` and that the post does not spend two timeouts. US3 is a verification pass: confirm it still holds once real sinks exist, and add SC-011's end-to-end measurement if that needs a running binary.
-- [ ] T053 [P] [US3] Write a both-sinks-fail test asserting both failures are reported and both are logged, neither hidden behind the other, in `internal/post/service_test.go` (FR-014, FR-070)
+- [x] T053 [P] [US3] Write a both-sinks-fail test asserting both failures are reported and both are logged, neither hidden behind the other, in `internal/post/service_test.go` (FR-014, FR-070)
   - **Half delivered by the orchestrator batch (T026).** The `both fail` subtest of `TestBothSinksRunAndBothResultsAreReported` covers the *reported* half, and FR-014 is satisfied. The *logged* half — FR-070's "logging must not stop after the first error" — has no assertion anywhere yet and cannot until T040 emits events. That half is what US3 still owes.
-- [ ] T054 [P] [US3] Write a `-race` test asserting a slow-failing sink cannot cancel or alter a concurrently running sibling, in `internal/post/service_test.go` (constitution principle I)
+- [x] T054 [P] [US3] Write a `-race` test asserting a slow-failing sink cannot cancel or alter a concurrently running sibling, in `internal/post/service_test.go` (constitution principle I)
   - **Already delivered by the orchestrator batch (T026).** `TestOneSinkFailingDoesNotCancelItsSibling` has the sibling observe its own context after its peer has failed, and the suite runs under `-race` via `make check`. It is the only test that dies to a shared-cancellable-parent mutant, so it is the load-bearing one for principle I. US3 is a verification pass.
 
 ### Implementation for User Story 3
 
-- [ ] T055 [US3] Apply each sink's overall timeout as its own independent context, converting expiry into a failure result rather than an abort of the post, in `internal/post/service.go` (FR-015)
+- [x] T055 [US3] Apply each sink's overall timeout as its own independent context, converting expiry into a failure result rather than an abort of the post, in `internal/post/service.go` (FR-015)
   - **Already implemented by the orchestrator batch (T025).** Both halves had to land together: FR-015 states them in one sentence, and a Service that let an expiry abort the post would have breached FR-014 on the day it shipped rather than in this phase. `Service.deliver` derives each context from `context.Background()` and converts expiry into a failure result. US3 is a verification pass.
-- [ ] T056 [US3] Implement error classification producing short, safe display reasons from a fixed set (`request timed out`, `permission denied`, `chat not found`, …) while retaining the detailed error for the log, in `internal/post/reason.go` (FR-017, FR-029)
-- [ ] T057 [US3] Include the resolved diagnostic log path in user-facing failure output from **both** front doors, in `internal/cli/render.go` and `internal/gui/result.go` (FR-063, SC-003)
-- [ ] T058 [US3] Ensure partial success is visible from both front doors — a succeeded sink is reported alongside a failed one — in `internal/cli/render.go` and `internal/gui/result.go` (FR-062, SC-002)
+- [x] T056 [US3] Implement error classification producing short, safe display reasons from a fixed set (`request timed out`, `permission denied`, `chat not found`, …) while retaining the detailed error for the log, in `internal/post/reason.go` (FR-017, FR-029)
+- [x] T057 [US3] Include the resolved diagnostic log path in user-facing failure output from **both** front doors, in `internal/cli/render.go` and `internal/gui/result.go` (FR-063, SC-003)
+- [x] T058 [US3] Ensure partial success is visible from both front doors — a succeeded sink is reported alongside a failed one — in `internal/cli/render.go` and `internal/gui/result.go` (FR-062, SC-002)
+
+**Historical Batch 8 cycle 0 outcome (2026-09-11): request-changes.** T056 remains open: COR-001
+(independently ADV-001) found that omitted/null `ok` in a Telegram error envelope
+receives a specific category. Require a valid explicit refusal and add regression
+coverage before marking T056 complete. No review fix was applied. The other six
+selected tasks passed verification.
+
+**Batch 8 cycle 1 acceptance (2026-09-11): passed.** COR-001/ADV-001 was fixed,
+regressions reproduced before the fix and passed afterward, and all three review
+stages passed. T056 is now complete; the cycle 0 record above is superseded.
+
+**Batch 8 verification (2026-09-11).** T052/T054/T055 reuse the existing
+orchestrator timeout and independence tests under `make check` (`-race`). The accepted
+DEC-A1 backstop still permits the configured deadline plus 250 ms grace; Batch 8
+introduces no timeout-policy change. `TestRealSinksRemainIndependent` additionally
+runs the real HTTP and filesystem sinks through the core, disk logger and CLI renderer:
+both succeed, either fails, both fail, and chat hangs while the note is written.
+T053's logged half was subsequently delivered by Batch 6c-2's
+`TestAFailedPostWritesTheFailureFields` in `internal/app/recorder_test.go`; this batch
+strengthens that test to assert both specific error classifications and preserves its
+checks for both detailed diagnostics. The earlier “no assertion anywhere yet” note
+above describes the orchestrator batch's historical state.
+
+T056 now lives in `internal/post/reason.go`; Telegram exposes known identities via
+`APIError.Is` in `internal/sink/telegram/reason.go`, preserving the core's package
+boundary. Classification retains the original diagnostic error, introduces no error
+wrapper, and selects display/log strings from constants. Service-produced successes
+have nil Err; consumers use Success as authoritative for manually constructed values.
+T057/T058 already had production renderers; `TestWindowReportsBothCoreOutcomes` and
+the real-sink CLI matrix verify both failure directions, both failures, safe reasons,
+resolved log paths and aggregate status. No production GUI/CLI change was needed.
+No live Telegram delivery, native GUI interaction or Intel Mac run was performed in
+Batch 8; the GUI rendering/status coverage is headless and the HTTP server is local.
 
 **Checkpoint**: Sink independence is demonstrated, not merely intended.
 

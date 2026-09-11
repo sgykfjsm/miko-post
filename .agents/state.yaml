@@ -734,14 +734,15 @@ completed:
     open_questions_answered:
       - "error_type: emitted now, two values, one predicate shared with reasonFor (DEC-E2)"
       - "message: not emitted at all; FR-068 recorded as knowingly unmet until T071, in tasks.md and in contracts/log-events.md"
-in_progress:
   - id: 7
     name: US2 GUI
     tasks: [T041, T042, T043, T044, T045, T046, T047, T048, T049, T050, T051]
     issues: [42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52]
-    partial_tasks: [T003]
+    additionally_completed_tasks: [T003]
     branch: sgykfjsm/batch-7-cycle
-    state: reviewed-uncommitted
+    state: merged
+    merged_at: 2026-09-11T05:01:15Z
+    squashed_as: 6f40dada0f92df828251dd4ee746b34772f593f0
     review_verdict: passed
     prior_review_verdict: request-changes
     review_cycle: 1
@@ -769,12 +770,42 @@ in_progress:
       Dismissal during a post hides the window but waits for all sink outcomes and
       logger close before process exit. Settings-error UI remains T082; logging
       degradation UI and richer classification remain in their assigned later batches.
-    publication_notes: >-
+    historical_publication_notes: >-
       GitHub issues remain open. T003 is complete because go.sum is committed in
       9c3e47f. The existing Claude manifest timestamp is unrelated and
       was preserved. Project-state bookkeeping is separate from the review target.
+in_progress:
+  - id: 8
+    name: US3 sink independence
+    tasks: [T052, T053, T054, T055, T056, T057, T058]
+    issues: [53, 54, 55, 56, 57, 58, 59]
+    branch: sgykfjsm/batch-8-cycle
+    state: ready-to-publish
+    committed: false
+    pushed: false
+    pull_request: null
+    prepared_pr_body: .agents/batch-8-pr-body.md
+    review_mode: review-and-fix
+    prior_review_verdict: request-changes
+    review_verdict: passed
+    review_cycle: 1
+    review_stages: {contract: valid, correctness: pass, adversarial: pass}
+    review_required_findings: []
+    resolved_review_findings: [COR-001, ADV-001]
+    deduplicated_findings: {COR-001: [ADV-001]}
+    review_fix_passes: 1
+    review_contract_satisfied: true
+    tracking_reconciliation_pending: []
+    tracked_completed_tasks: [T052, T053, T054, T055, T056, T057, T058]
+    tracked_open_tasks: []
+    review_run_state: /Users/shige/.agents/review-runs/sgykfjsm__miko-post/20260911T055009Z-f2faa64e
+    validation: "make check passed; native darwin/arm64 production build passed"
+    validation_gaps: [live-Telegram, native-GUI-interaction-in-batch8, Intel-Mac]
+    scope_notes: >-
+      Adds safe error identity classification while preserving diagnostics. Verifies prior
+      sink independence and CLI/GUI rendering, with real local HTTP/filesystem tests and
+      headless GUI outcomes. No timeout-policy, retry, GUI lifecycle or config change.
 blockers: []
-
 
 time_sensitive:
   - issue: 114
@@ -827,7 +858,7 @@ time_sensitive:
     deadline: before tagging v0.1.0
 
 next_best_action: >-
-  Publish the reviewed Batch 7 change and prepared PR when publication is authorized.
+  Publish the reviewed Batch 8 branch as a draft PR; T052–T058 tracking is reconciled.
 
 
 review_followups_filed:
@@ -915,70 +946,29 @@ batch_6_split:
     internal package.
 
 remaining_batches:
-  - {id: 7, name: "US2 GUI", tasks: "T041-T051", pins: "fyne/v2@v2.8.1", state: reviewed-uncommitted}
-  - {id: 8, name: "US3 sink independence", tasks: "T052-T058"}
+  - {id: 8, name: "US3 sink independence", tasks: "T052-T058", state: ready-to-publish}
   - {id: 9, name: "US4 formatting rescue", tasks: "T059-T064"}
   - {id: 10, name: "US5 diagnostics", tasks: "T065-T074"}
   - {id: 11, name: "US6 settings resolution", tasks: "T075-T083"}
   - {id: 12, name: "Polish and gates", tasks: "T084-T091"}
 
 touched_files:
-  - internal/gui/
-  - cmd/mp/main.go
-  - cmd/mp/main_test.go
-  - internal/config/secret.go
-  - internal/config/paths.go
-  - internal/config/settings.go
-  - internal/config/load.go
-  - internal/config/validate.go
-  - internal/config/credential.go
-  - internal/config/export_test.go
-  - testdata/config/
-  - go.mod
-  - go.sum
-  - specs/001-dual-sink-quick-post/contracts/config-schema.md
-  - specs/001-dual-sink-quick-post/data-model.md
-  - specs/001-dual-sink-quick-post/plan.md
-  - specs/001-dual-sink-quick-post/tasks.md
-  - internal/post/result.go
-  - internal/logging/events.go
-  - internal/logging/logger.go
-  - internal/logging/events_test.go
-  - internal/logging/logger_test.go
-  - internal/logging/logger_unix_test.go
-  - internal/logging/export_test.go
+  - internal/post/reason.go
+  - internal/post/reason_test.go
   - internal/post/service.go
-  - internal/post/service_test.go
-  - internal/post/message.go
-  - internal/post/message_test.go
-  - internal/app/doc.go
-  - internal/app/app.go
-  - internal/app/app_test.go
-  - internal/app/layering_test.go
-  - internal/cli/cli.go
-  - internal/cli/render.go
-  - internal/cli/run.go
-  - internal/cli/export_test.go
-  - internal/cli/cli_test.go
-  - cmd/mp/main.go
-  - cmd/mp/main_test.go
-  - internal/logging/logger_test.go
   - internal/post/recorder.go
-  - internal/post/recorder_test.go
-  - internal/post/target.go
-  - internal/post/sink.go
-  - internal/app/recorder.go
+  - internal/post/result.go
+  - internal/sink/telegram/response.go
+  - internal/sink/telegram/reason.go
+  - internal/sink/telegram/reason_test.go
+  - internal/sink/telegram/independence_test.go
   - internal/app/recorder_test.go
-  - internal/app/export_test.go
-  - internal/sink/obsidian/sink.go
+  - internal/gui/result_test.go
+  - specs/001-dual-sink-quick-post/tasks.md
   - specs/001-dual-sink-quick-post/contracts/log-events.md
-  - internal/sink/obsidian/sink_test.go
-  - internal/sink/telegram/sink_test.go
-  - specs/001-dual-sink-quick-post/spec.md
-  - specs/001-dual-sink-quick-post/contracts/cli-interface.md
-  - specs/001-dual-sink-quick-post/contracts/gui-interface.md
-  - specs/001-dual-sink-quick-post/contracts/telegram-sink.md
-  - .specify/memory/constitution.md
+  - .agents/batch-8-cycle.md
+  - .agents/batch-8-review.md
+  - .agents/batch-8-pr-body.md
 
 assumptions:
   - >-
