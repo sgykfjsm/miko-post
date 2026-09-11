@@ -464,27 +464,23 @@ func TestTheBinaryResolvesTheDefaultSettingsAndLogPaths(t *testing.T) {
 	}
 }
 
-// TestTheBinaryRefusesToPretendTheWindowExists pins the gap US2 fills.
-//
-// No message arguments means the window (FR-002), and the window is T041 – T051
-// in batch 7. Until then the run must say so and exit 1: exiting 0 would report
-// success for a capture that never happened, and that is the outcome class this
-// whole program is shaped to avoid.
-func TestTheBinaryRefusesToPretendTheWindowExists(t *testing.T) {
+// Startup settings rejection precedes construction of any native window. The
+// interactive route is exercised by the headless GUI suite and desktop checks.
+func TestWindowStartupRejectsInvalidDefaultSettings(t *testing.T) {
 	w := newWorld(t, telegramDisabled)
-
+	path := filepath.Join(w.home, "config", "miko-post", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("unknown = true\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	got := run(t, w.home)
-
-	if got.status != 1 {
-		t.Fatalf("status = %d, want 1\nstdout: %s\nstderr: %s", got.status, got.stdout, got.stderr)
+	if got.status != 1 || !strings.Contains(got.stderr, "unknown") {
+		t.Fatalf("invalid settings: %+v", got)
 	}
-
-	if !strings.Contains(got.stderr, "not implemented") {
-		t.Errorf("stderr = %q, want it to say the window is unimplemented", got.stderr)
-	}
-
 	if names := w.notes(t); len(names) != 0 {
-		t.Errorf("the window path posted something: %v", names)
+		t.Fatalf("startup contacted sink: %v", names)
 	}
 }
 

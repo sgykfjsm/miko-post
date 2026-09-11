@@ -737,3 +737,109 @@ No merge or direct issue closure was performed. This entry records publication a
 will accompany the final documentation-only push.
 
 Next action: merge PR121 when authorized.
+
+
+## 2026-09-11 — Batch 7 implementation and review start
+
+User invoked run-batch-cycle for Batch 7. Verified PR #121 merged as 9287366 and
+selected T041–T051/#42–#52 plus the final Fyne pin. No selected issue was safely
+closable without implementation. Added the focused Fyne window, shared submission,
+results/timers, native macOS activity observer and process dispatch, with headless
+race tests. Saturated large timer settings before duration multiplication.
+
+make check and native arm64 build passed; temporary-vault UI checks confirmed
+newline/submit, source:gui diagnostics, success/failure auto-close exit 0/1 and
+keypress/background-click retention. Focus-only regain could not be independently
+established through accessibility Raise; real IME and Intel Mac also unverified.
+No live Telegram call was made. Initial test-harness failures were corrected
+(Fyne TypeOnCanvas bypasses focus, test Window.Clipboard returns fresh instances,
+and the test driver does not tolerate closing the same window twice).
+
+Prepared a local PR description and immutable review packet under
+/tmp/mp-batch7-packet. Started review-only contract/correctness/adversarial cycle 0;
+coordinator state is /Users/shige/.agents/review-runs/sgykfjsm__miko-post/20260911T022010Z-8e1ba8b0.
+No commit, push, remote PR or closure. T003 remains open pending the required go.sum
+commit. Preserved the unrelated Claude manifest timestamp. Archived the previous
+project snapshot and retained prior decisions in state.yaml.
+
+Next action: finish the staged review and obey its terminal verdict.
+
+
+## 2026-09-11 — Batch 7 staged review complete: request-changes
+
+Fresh contract, correctness, and adversarial agents completed cycle 0 against the
+same verified 14-file worktree target. Contract is valid. Correctness inspected
+all changed hunks and reran make check plus uncached GUI/cmd race tests; adversarial
+traced native observer lifetime, AppKit shutdown, cancellation, concurrency,
+configuration, disclosure and durability, with uncached GUI race validation.
+Neither behavioral stage established a code defect. Both remain inconclusive for
+the required native focus-only regain acceptance check. CON-001 requires the
+checked T049 task to reflect that gap or for the check to be completed.
+
+Verdict: request-changes. Review-only mode, zero fix passes. No source/task fix,
+commit, push, remote PR, or issue closure followed the review. #50 remains open
+pending focus evidence, #4 pending committed go.sum; other selected issues remain
+open through review/publication. No post-review non-code closure was justified.
+The unrelated Claude manifest timestamp remains untouched.
+
+Integrated report:
+/Users/shige/.agents/review-runs/sgykfjsm__miko-post/20260911T022010Z-8e1ba8b0/integrated.yaml
+The immutable packet and prepared PR description are archived under its input/
+subdirectory. .agents/batch-7-cycle.md records triage and the concrete resume step.
+
+Next action: complete native focus-only validation and reconcile T049, then rerun
+staged review before publication. Do not start Batch 8 yet.
+
+
+## 2026-09-11 — T049 native focus-only revalidation passed; cycle1 review started
+
+User requested another T049 verification followed by rereview. Built the unchanged
+production binary and a passive test-only AppKit observer via DYLD_INSERT_LIBRARIES.
+The observer generates no input/focus changes and returns every event unchanged;
+it records a superset of production input plus actual key-window notifications and
+isKeyWindow/visibility snapshots. An idle control auto-exited after45.091s, code0.
+
+Cross-app automation reintroduced mouse input into the target and was discarded.
+A standard About panel instead produced actual main-window key loss, then AXRaise
+with the application active produced actual key gain without additional target
+input. Success and failure retained results25.647s and44.603s beyond the45s delay,
+then manual Esc returned0 and1. Read-only trace verification passes all three cases.
+This is actual window focus regain, not a separately isolated cross-app switch.
+
+Updated only tasks.md's evidence annotation and a new native validation note;
+all13 prior production/test/dependency hashes unchanged. Fresh uncached GUI/cmd
+race tests and native build passed. Native source needed no fix. Raw evidence,
+observer source, verifier and exact binary are in review cycle-01/input/native-validation.
+Preserved cycle0 integrated report under cycle-00/integrated.yaml. Started fresh
+cycle1 contract review on target fingerprint d1589bed2fd21ce3d048b70676b87a5ab482be282f784e727cd01cb6d8c5cdc5.
+No commit, push, remote PR or issue closure. Next: finish staged rereview.
+
+
+## 2026-09-11 — T049 native proof accepted; Batch 7 rereview passed
+
+Cycle 1 contract, correctness and adversarial reviewers independently accepted the
+unchanged production implementation and native proof. All 15 reviewed files / 17
+hunks inspected; native raw verifier and fresh GUI/cmd race tests passed. CON-001
+resolved. Final integrated verdict: passed, no required findings. Initial failed
+review and discarded cross-app trial remain preserved. State and cycle summary
+now reflect acceptance; work remains uncommitted and unpublished, issues open.
+Next: publish reviewed Batch 7 when authorized.
+
+User separately authorized registering a future GUI background-image feature.
+Inspected all 110 existing issues for overlap; none matched. Created #122
+(https://github.com/sgykfjsm/miko-post/issues/122): random image from a configured
+directory at GUI launch, faint under the dark appearance. Opacity, layout, formats
+and fallback details remain design decisions. Implementation deferred, outside
+Batch 7. No production/spec implementation change for this new request.
+
+## 2026-09-11 — Batch 7 commit and push
+
+Using the explicitly requested commit-and-pr workflow, committed the reviewed
+Batch 7 work as `9c3e47f` (`feat: add GUI quick-post window`) and pushed
+`sgykfjsm/batch-7-cycle` to origin. This also satisfies T003's committed
+`go.sum` condition, so T003 was checked. No open PR existed for the branch;
+draft PR creation remained the next step.
+
+Created draft PR #123 at https://github.com/sgykfjsm/miko-post/pull/123 with the
+Batch 7 implementation, validation evidence, T003 completion, and disclosed
+out-of-scope limits. No issue was closed.

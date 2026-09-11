@@ -15,6 +15,7 @@ import (
 	"os"
 
 	"github.com/sgykfjsm/miko-post/internal/cli"
+	"github.com/sgykfjsm/miko-post/internal/gui"
 )
 
 // main is the program's only os.Exit, and the only statement that reaches it is
@@ -53,13 +54,7 @@ func dispatch(argv []string, out, errOut io.Writer) int {
 	}
 
 	if invocation.Mode == cli.ModeWindow {
-		// FR-002's window is US2 (T041 – T051, batch 7). Until it exists this
-		// says so and exits 1, rather than posting nothing and exiting 0, which
-		// would report success for a capture that never happened.
-		fmt.Fprintln(errOut, "mp: the windowed interface is not implemented yet; "+
-			"pass a message to post from the command line")
-
-		return cli.ExitFailure
+		return gui.Run(errOut)
 	}
 
 	return cli.Run(invocation, out, errOut)
