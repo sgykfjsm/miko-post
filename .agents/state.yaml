@@ -850,14 +850,27 @@ completed:
     resolved_review_findings: [COR-001]
     review_required_findings: []
     validation_gaps: [real-IME-composition, Intel-Mac]
-in_progress:
+  # Batch 10a, merged 2026-09-16.
   - id: 10a
+    state: merged
+    squashed_as: 0e3df5ec524df20e0d1d46b4572e11dbe83e810a
+    merged_at: 2026-09-16T14:32:40Z
+    review_verdict: passed-with-notes
+    review_cycles: 2
+    review_fix_passes: 3
+    review_stages: {contract: valid, correctness: pass, adversarial: findings-none-blocking}
+    review_required_findings: []
+    merge_verification: >-
+      The squashed tree 0e3df5e equals the reviewed tip 73d9c57 (both tree a26e21c), so what
+      landed on main is byte-identical to what the third review cycle examined.
+    review_run_state: /Users/shige/.agents/review-runs/sgykfjsm__miko-post/20260916T030000Z-3be7358f
+    validation: "make check, native darwin/arm64 build, 99.5% internal/logging coverage vs a re-measured 99.3% baseline, 32-bit cross-compile vet, 28 batch mutants + 16 correction-pass mutants"
+    validation_gaps: [Intel-Mac, non-darwin-runtime, 32-bit-execution, real-multi-day-old-log]
     name: Lossless log rotation
     tasks: [T065, T068, T069, T070]
     issues: [66, 69, 70, 71]
     branch: sgykfjsm/batch-10-diagnostics-2
     base: 17073829398aa540b6a8ea56a0155b0e30880dfc
-    state: implemented-under-review
     committed: true
     pushed: true
     commits: [f3ab572e8b9c4d1b6eb72db7e6942831bfccdb12, 333799a]
@@ -874,7 +887,6 @@ in_progress:
     pull_request: 126
     opened_at_head: f3ab572e8b9c4d1b6eb72db7e6942831bfccdb12
     prepared_pr_body: .agents/batch-10a-pr-body.md
-    review_verdict: not-final
     followups_filed:
       filed_at: 2026-09-16
       authorized_by: user
@@ -1068,6 +1080,8 @@ in_progress:
           which name DEC-ADV-006 in their doc comments and point here;
           .agents/batch-10a-pr-body.md; .agents/work-log.md
 
+in_progress: []
+
 blockers: []
 
 time_sensitive:
@@ -1121,13 +1135,14 @@ time_sensitive:
     deadline: before tagging v0.1.0
 
 next_best_action: >-
-  Batch 10a lossless log rotation (T065, T068-T070; issues 66, 69-71) is implemented on
-  sgykfjsm/batch-10-diagnostics-2 and opened as PR #126 at f3ab572. Two review correction passes
-  sit on top of that head and are UNCOMMITTED in the worktree, so #126 does not show them and its
-  description is stale. The review verdict is not final. Next: commit and push the correction
-  passes, update the PR description, finish the staged review of #126 and merge it, then implement
-  Batch 10b (T066, T067, T071-T074) using .agents/batch-10-plan.md. The four tasks are marked [x]
-  in tasks.md but their issues stay open until #126 merges.
+  Batch 10a is merged as 0e3df5e (PR #126, passed-with-notes) and its follow-ups are filed as
+  #127-#130. Next: implement Batch 10b (T066, T067, T071-T074; issues 67, 68, 72-75) using
+  .agents/batch-10-plan.md, based on merged main 0e3df5e. Two housekeeping items first, neither
+  blocking: issues 66 and 69-71 are complete and merged but still open on GitHub, as are the
+  batch-8/9 issues before them, so a closure sweep is overdue; and #75 (T074) now carries a
+  review note that internal/gui never calls Logger.Degraded(), which means FR-076 yields zero
+  warnings on the GUI front door today - that is 10b's work, and it is the single most valuable
+  thing in the batch.
 
 
 review_followups_filed:
