@@ -348,6 +348,9 @@ func (p PostingSettings) validate(found *problems) {
 }
 
 func (g GUISettings) validate(found *problems) {
+	if g.BackgroundImageDir != "" && !filepath.IsAbs(g.BackgroundImageDir) {
+		found.addf("gui.background_image_dir must be an absolute path or empty")
+	}
 	// Zero is allowed for both: it means close as soon as the result is
 	// rendered, which is a legitimate preference, unlike a negative delay.
 	if g.SuccessCloseSeconds < 0 {

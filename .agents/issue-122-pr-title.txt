@@ -1,0 +1,1 @@
+feat: add a subtle random GUI background from a configured directory

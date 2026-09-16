@@ -574,14 +574,7 @@ func TestTheBotTokenNeverReachesARecordThroughSinkResultErr(t *testing.T) {
 func TestTheAdapterProducesEveryOrchestratorReachableEvent(t *testing.T) {
 	t.Parallel()
 
-	// The three names this batch deliberately does not produce, with the task
-	// that owns each. A name added to logging without being either mapped here
-	// or listed here fails this test.
-	notYetProduced := map[logging.Event]string{
-		logging.EventTelegramMarkdownFailed:     "T063, the formatting-fallback sequence (FR-039)",
-		logging.EventTelegramPlaintextSucceeded: "T063, the formatting-fallback sequence (FR-039)",
-		logging.EventTelegramPlaintextFailed:    "T063, the formatting-fallback sequence (FR-039)",
-	}
+	notYetProduced := map[logging.Event]string{}
 
 	produced := app.ProducibleEvents()
 
@@ -980,5 +973,53 @@ func TestTheRecordingIsWiredIntoTheServiceItBuilds(t *testing.T) {
 	if got, want := filepath.Dir(text(t, started, "path")), settings.Sink.Obsidian.DailyNoteDir; got != want {
 		t.Errorf("obsidian_append_started carries a path under %q, want the configured vault %q",
 			got, want)
+	}
+}
+
+type formattingSink struct{ err error }
+
+func (s formattingSink) Name() string { return "telegram" }
+func (s formattingSink) Send(ctx context.Context, _ post.Message) error {
+	post.ReportFormatting(ctx, post.FormattingAttempt{Err: &telegram.APIError{HTTPStatus: 400, Code: 400, Description: "can't parse entities"}, Duration: 12 * time.Millisecond})
+	post.ReportFormatting(ctx, post.FormattingAttempt{Plain: true, Err: s.err, Duration: 23 * time.Millisecond})
+	return s.err
+}
+func TestFormattingEventsAreCorrelatedAndOrdered(t *testing.T) {
+	for _, fail := range []bool{false, true} {
+		t.Run(fmt.Sprint(fail), func(t *testing.T) {
+			settings, path := loggedSettings(t)
+			var err error
+			if fail {
+				err = &telegram.APIError{HTTPStatus: 403, Code: 403, Description: "Forbidden " + settings.Sink.Telegram.BotToken.Reveal()}
+			}
+			records := postThrough(t, settings, path, formattingSink{err: err})
+			final, plain, terminal := "telegram_send_succeeded", "telegram_plaintext_succeeded", "request_completed"
+			if fail {
+				final, plain, terminal = "telegram_send_failed", "telegram_plaintext_failed", "request_completed_with_error"
+			}
+			want := []string{"message_received", "telegram_send_started", "telegram_markdown_failed", plain, final, terminal}
+			if !slices.Equal(eventsOf(records), want) {
+				t.Fatalf("events=%v", eventsOf(records))
+			}
+			for _, r := range records {
+				if r["message_id"] != records[0]["message_id"] || r["source"] != "cli" {
+					t.Fatalf("correlation=%v", r)
+				}
+			}
+			if records[2]["duration_ms"] != float64(12) || records[3]["duration_ms"] != float64(23) || records[2]["http_status"] != float64(400) || records[2]["level"] != "error" {
+				t.Fatalf("attempt fields=%v", records)
+			}
+			if fail {
+				if records[3]["error_type"] != "permission_denied" || records[3]["http_status"] != float64(403) {
+					t.Fatalf("failure fields=%v", records[3])
+				}
+			} else if records[3]["level"] != "info" {
+				t.Fatal("success level")
+			}
+			raw, _ := os.ReadFile(path)
+			if strings.Contains(string(raw), settings.Sink.Telegram.BotToken.Reveal()) {
+				t.Fatal("token leaked")
+			}
+		})
 	}
 }

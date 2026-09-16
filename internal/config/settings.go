@@ -99,8 +99,11 @@ type PostingSettings struct {
 	SinkTimeoutSeconds int `toml:"sink_timeout_seconds"`
 }
 
-// GUISettings configures the window's auto-close behaviour (FR-026).
+// GUISettings configures window appearance and auto-close behaviour (FR-026).
 type GUISettings struct {
+	// BackgroundImageDir optionally supplies a subtle startup background (#122).
+	BackgroundImageDir string `toml:"background_image_dir"`
+
 	// SuccessCloseSeconds is the delay before the window closes itself after
 	// a fully successful post. Zero means close immediately, which is why the
 	// bound is >= 0 rather than > 0.

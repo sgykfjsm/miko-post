@@ -556,6 +556,7 @@ func (s *Service) deliver(record *sinkRecord, name string, sink Sink, message Me
 	// it only for declared reporters — would make the declaration decide
 	// correctness rather than only ordering.
 	ctx = WithTargetReporter(ctx, record.start)
+	ctx = WithFormattingReporter(ctx, record.formatting)
 
 	// A sink that reports a destination has its start event emitted at the
 	// report, from inside Send, so the record carries the path (issue #98).

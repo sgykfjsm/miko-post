@@ -67,11 +67,13 @@ missing field reads as a scheduled gap rather than as a defect.
 
 `message_len` and `message_bytes` **are** emitted, on `message_received`, as R-010 defines them.
 
-The three formatting-fallback names are not produced by any code path yet (**T063**). That is
-asserted rather than assumed: `internal/app`'s recorder test compares the set of names the adapter
-can produce against `logging.AllEvents()` and lists exactly those three as deferred, so a name added
-to the vocabulary and never mapped fails the build rather than becoming a query that silently
-returns nothing.
+T063 emits the three formatting-fallback events through a per-call context reporter and
+an optional `post.FormattingRecorder` extension. They share the post ID and sink name,
+carry each attempt's duration, and precede the overall Telegram outcome. Failures carry
+`error_type`, `error`, and `http_status` when available. A failed rescue retains both
+attempt errors, with classification and HTTP status following the final attempt. Late
+reports after the orchestrator's terminal sink record are suppressed. The adapter's
+vocabulary test now requires all registered names to be producible.
 
 `path` is on the three `obsidian_append_*` events and on no others. The sink reports the note it
 resolved through `post.ReportTarget` from inside `Send`, before any I/O, and the orchestrator holds

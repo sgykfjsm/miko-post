@@ -116,6 +116,7 @@ shared rule in `internal/config/validate.go` so a third timeout key cannot acqui
 
 | Key | Type | Default | Validation |
 |---|---|---|---|
+| `background_image_dir` | string | `""` | Empty or absolute directory path; see [GUI background](../../../docs/gui-background.md) (#122) |
 | `success_close_seconds` | int | `15` | >= 0 (FR-026) |
 | `error_close_seconds` | int | `30` | >= 0 (FR-026) |
 
