@@ -126,8 +126,8 @@ shared rule in `internal/config/validate.go` so a third timeout key cannot acqui
 |---|---|---|---|
 | `format` | string | `"jsonl"` | `"jsonl"` only in v0.1 |
 | `path` | string | `""` | **Empty means the default state path** (FR-056) |
-| `rotate_size_mib` | int | `10` | > 0 (FR-072) |
-| `rotate_after_days` | int | `7` | > 0 (FR-072) |
+| `rotate_size_mib` | int | `10` | > 0 (FR-072); no upper bound at load time — see below |
+| `rotate_after_days` | int | `7` | > 0 (FR-072); no upper bound at load time — see below |
 | `message_on_error_only` | bool | `true` | Governs FR-068 |
 | `stack_trace` | bool | `true` | Governs FR-071 |
 | `include_version` | bool | `true` | Governs FR-066 |
@@ -136,6 +136,18 @@ shared rule in `internal/config/validate.go` so a third timeout key cannot acqui
 **Default log path** (FR-065): `$XDG_STATE_HOME/miko-post/app.jsonl`, falling back to
 `~/.local/state/miko-post/app.jsonl` when the variable is unset or empty. A non-empty
 `logging.path` overrides it.
+
+**The rotation thresholds are bounded only from below** (FR-072). `config.Validate` checks
+that each is greater than zero and nothing caps either, so a value near the integer limit
+reaches the code that converts it. `internal/logging` therefore clamps both at the
+conversion — `rotate_size_mib` to bytes and `rotate_after_days` to a `time.Duration` —
+because the unclamped multiplication wraps negative, and a negative threshold is not an
+inert one: rotation compares `>=`, so every single write would rotate and the log would
+become a directory of one-record files. Clamped, an absurd setting means "effectively
+never", which is the direction that loses nothing. No issue owns a load-time upper bound
+for these two keys, so this clamp is the only guard; it is not an interim measure waiting
+on one (compare `sink.telegram.http_timeout_seconds`, whose clamp was interim because #114
+owned the load-time fix).
 
 ## Not configurable (FR-057, constitution principle V)
 

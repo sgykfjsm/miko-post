@@ -850,7 +850,203 @@ completed:
     resolved_review_findings: [COR-001]
     review_required_findings: []
     validation_gaps: [real-IME-composition, Intel-Mac]
-in_progress: []
+in_progress:
+  - id: 10a
+    name: Lossless log rotation
+    tasks: [T065, T068, T069, T070]
+    issues: [66, 69, 70, 71]
+    branch: sgykfjsm/batch-10-diagnostics-2
+    base: 17073829398aa540b6a8ea56a0155b0e30880dfc
+    state: implemented-under-review
+    committed: false
+    pushed: false
+    committed_through: f3ab572e8b9c4d1b6eb72db7e6942831bfccdb12
+    publication_note: >-
+      committed and pushed are false because they describe the tree that was reviewed, not the
+      batch's first commit. f3ab572 is committed, pushed and opened as PR #126; both review
+      correction passes on top of it - including the one production behaviour change in
+      internal/logging/rotate.go open() - are uncommitted in the worktree and exist on no remote.
+      What #126 currently shows is therefore not what was reviewed, and its description is stale.
+      Committing, pushing and updating the PR are the coordinator's pre-merge actions, not the
+      fix pass's.
+    pull_request: 126
+    opened_at_head: f3ab572e8b9c4d1b6eb72db7e6942831bfccdb12
+    prepared_pr_body: .agents/batch-10a-pr-body.md
+    review_verdict: not-final
+    review_mode: review-and-fix
+    review_fix_passes: 3
+    tracked_completed_tasks: [T065, T068, T069, T070]
+    remaining_10b: [T066, T067, T071, T072, T073, T074]
+    validation: >-
+      make check (gofmt, vet, full -race suite) and a native darwin/arm64 build; internal/logging at
+      99.5% statement coverage; 28 mutants killed in the batch and 16 more across the
+      three review correction passes - 9 in the first, all re-verified as killed during the second,
+      6 in the second (three createdAt substitutions, a createdAt pinned to now(), the removal
+      of safeWriter.close's target clearing, and a forced write error proving the writer-layer
+      close race test reports a prompt FAIL instead of hanging to the go test timeout), and 1 in
+      the third (Open installing a discarding safeWriter, which the Logger-layer close-race test
+      could not previously detect and now fails on). The third pass also re-verified the two
+      mutants its changes bear on: removing safeWriter.close's target clearing is still killed
+      12/12 under -race, and w.createdAt = info.ModTime() is still killed on APFS;
+      GOOS=linux GOARCH=386/arm/mips/mipsle go vet ./internal/logging/ clean
+    validation_gaps: [Intel-Mac, non-darwin-platform, real-multi-day-old-log, 32-bit-execution]
+    not_fixed_here: >-
+      Four items. (1) Two mp processes sharing one log path: after a rotation the older
+      process keeps appending to the archived file, and each writer's size counter is per-process.
+      (2) A symlinked logging.path: rotation renames the link itself. (3) safeWriter's
+      truncated-line repair re-entering the rotation predicate: the recovery newline is a second
+      Write, so it is measured against both thresholds again and can itself rotate, landing in the
+      new active file while the fragment it was meant to terminate stays in the archive. (4) The
+      behavioural remedy for the open question DEC-ADV-006 below - making FR-072's age trigger
+      meaningful on builds where creation time falls back to ModTime. Only the question is
+      recorded in this batch; answering it is out of scope. All four are lossless and delete
+      nothing, so FR-074 holds, and all four need a product decision about what the log promises.
+      To be filed separately; disclosed in the PR body as not addressed. This field has twice been
+      shorter than work-log.md: it listed two items where the work log listed three (finding
+      CON-003), and then three where the work log listed four (finding CON-009).
+    decisions_taken:
+      - id: DEC-F1
+        question: >-
+          Batch 4 recorded that the rotating writer would be plugged into logging.Options.Writer
+          from outside. Should it be?
+        decision: >-
+          No. Rotation is built inside logging.Open, which owns the handle for the first file and
+          for every one after a rotation. Options.Writer keeps its meaning and now documents that a
+          writer supplied there is never rotated.
+        why: >-
+          Options.Writer bypasses openLogFile, so anything plugged in there has to re-implement the
+          non-regular-file refusal, O_APPEND, FR-075's directory creation and FR-076's degradation
+          reporting - once per front door, and internal/gui would be the second. Inside the package
+          they are discharged once, for every handle. This supersedes the premise of the Batch 4
+          acceptance note on issue #69 (finding CON-006): its three boxes are discharged by
+          construction rather than by three new guards - open calls openLogFile for the first handle
+          and after every rotation, openLogFile refuses a FIFO before opening and uses O_APPEND and
+          never O_TRUNC, and rotatingWriter.file is a bare *os.File with no bufio anywhere under
+          internal/, so the os.Exit durability property batch 4 measured is unchanged. The issue
+          itself is left as written; the correction is in the PR body and here.
+        recorded_in: "internal/logging/logger.go Options.Writer and Options.RotateSizeMiB"
+        supersedes_in_part: ADV-D-002
+      - id: DEC-F2
+        question: >-
+          How is the rotated name reserved when two rotations can land in the same clock second?
+        decision: >-
+          By creating it with O_CREATE|O_EXCL and renaming the active log onto that placeholder,
+          appending -1, -2, ... until a create succeeds; never by asking whether the name exists and
+          then renaming onto it.
+        why: >-
+          Stat-then-rename is a check-then-act on a path any other process - a second mp, a backup
+          tool - can fill in between, and losing that race silently overwrites a rotated log, which
+          is the one outcome FR-074 and constitution principle VI forbid. O_EXCL makes the claim and
+          the check the same syscall, so two racing rotations are handed two different names. The
+          search is bounded at 1000 attempts because it runs inside a log write and FR-076's first
+          duty is that diagnostics never block a post.
+        recorded_in: "internal/logging/rotate.go claimName"
+      - id: DEC-F3
+        question: >-
+          rotate_size_mib and rotate_after_days have no upper bound. Where is the overflow caught?
+        decision: >-
+          At the conversion, inside internal/logging, and contracts/config-schema.md now records
+          that this clamp is the only guard rather than an interim one.
+        why: >-
+          config.Validate bounds both keys from below only, so a value near the integer limit
+          reaches the conversion and the multiplication wraps negative - which does not disable
+          rotation, it rotates on every write. Same shape as DEC-C3, but not the same situation:
+          DEC-C3's clamp was interim because #114 was open and owned the load-time bound, and that
+          deferral was written into tasks.md and contracts/telegram-sink.md when it was made. No
+          issue owns a load-time upper bound for these two keys - #109 and #114 did own numeric
+          upper bounds and are both closed and scoped to the timeout keys, and #101 is about
+          bounding the size of a validation error message, not numeric ranges. A user-visible bound
+          in internal/config is out of this batch.
+        recorded_in: >-
+          internal/logging/rotate.go rotateSizeBytes and rotateAge;
+          specs/001-dual-sink-quick-post/contracts/config-schema.md [logging]
+      - id: DEC-F4
+        question: >-
+          FR-072 measures the active log's age from "the active log file's creation time captured
+          when the file is opened". The first review correction pass made open() override that for
+          a zero-byte file, dating it from the process clock instead. Is that inside the
+          requirement, and where is it written down?
+        decision: >-
+          It stays, narrowed to a file of exactly zero bytes, and it is recorded here rather than
+          by editing spec.md. A file that already holds records keeps the filesystem's answer,
+          which is FR-072's literal text and is what lets a genuinely old non-empty log rotate on
+          the first write after a restart.
+        why: >-
+          dueForRotation subtracts two independent time sources and nothing keeps them together: a
+          log directory on a network mount whose server clock runs days behind, or a darwin volume
+          reporting a non-zero but nonsensical Birthtimespec, makes a file created a microsecond
+          ago already past the threshold. A rotation then does not clear its own trigger - the
+          replacement is born expired, the next write rotates it too, and every record becomes its
+          own file behind a zero-byte archive. That unbounded shape is what FR-074 and constitution
+          principle VI keep the log out of. The override costs nothing measurable because the file
+          is empty: it holds no records whose age could be misreported, and rotating it would
+          archive nothing.
+        authority: >-
+          A-011, which makes the timestamp substituted for a creation time a planning decision that
+          does not change FR-072's intent. This EXTENDS A-011 rather than narrowing it, and the
+          record should say so: A-011's precondition is a platform that "does not expose" a
+          creation time, whereas darwin here exposes one that is merely implausible, and A-011
+          sanctions "the oldest available timestamp", whereas w.now() is the newest one available.
+          It is narrower only in SCOPE - a file of exactly zero bytes, where there is no recorded
+          content to date. What makes the extension sound is that it keeps the property A-011's
+          substitution was chosen for: research.md R-006 resolves A-011 with a ModTime fallback
+          whose whole defence is that it is not EARLIER than the creation time, so the measured age
+          is never overstated and the log never rotates early. "Not earlier" is therefore this
+          project's established reading of A-011's intent, and w.now() on an empty file satisfies
+          it - unconditionally, where the ModTime fallback only satisfies it absent a
+          preserved-timestamp copy or a restore from backup (finding ADV-007). Because the
+          extension preserves that intent and the file it applies to holds no records whose age
+          could be misreported, it is recorded here rather than by editing spec.md. An earlier
+          version of this field called the substitution "narrower than the one A-011 anticipates",
+          which is the wrong word for a substitution in the opposite direction from the one A-011
+          names (finding CON-010).
+        accepted_consequence: >-
+          A pre-existing, genuinely old, EMPTY log no longer rotates on its first write: it is
+          simply appended to. Nothing is lost, because a rotation would have archived zero bytes.
+          Disclosed in the PR body.
+        pinned_by: >-
+          TestRotateCannotFireRepeatedlyOnAFileItJustCreated (the empty-file branch) and
+          TestReopeningANonEmptyLogDatesItFromTheFileAndNotTheClock (the non-empty branch, which
+          fails if open dates a pre-existing log earlier or later than the file does)
+        recorded_in: "internal/logging/rotate.go open (the w.size == 0 branch) and dueForRotation"
+    open_questions:
+      - id: DEC-ADV-006
+        status: open
+        standing: >-
+          Recorded here, alongside DEC-F1..F4, because two shipped source files name this id in
+          their doc comments and will outlive .agents/. It is an OPEN QUESTION and not a decision
+          taken: nothing has been decided, and the entry exists so the id resolves to something.
+        raised_in: "batch 10a, second review correction pass (finding ADV-006); defined here by the third (finding CON-009)"
+        question: >-
+          On every build where creationTime resolves to ModTime - all non-darwin GOOS, and darwin
+          on a volume that records no birth time (SMB, NFS, exFAT) - should FR-072's age trigger be
+          made meaningful, by reading a real creation time (statx on Linux, the Windows Sys() path)
+          or by stamping the open time in a sidecar file beside the log? Or is
+          "darwin with a recorded birth time" the accepted support boundary for rotate_after_days?
+        why_it_is_open: >-
+          The handle is O_APPEND and createdAt is captured once per open, so on those builds the
+          age is measured from the previous open rather than from the log's real age. mp's CLI
+          front door opens, posts and exits, so a user who posts more often than rotate_after_days
+          never sees the age condition fire from the CLI at all. The long-lived GUI session is the
+          exception that keeps the description honest - internal/gui/run.go opens one Logger for
+          the life of the window, so a session left open longer than rotate_after_days does fire
+          the trigger, measured from session start (finding ADV-008).
+        not_a_defect: >-
+          A-011 sanctions the substitution and research.md R-006 resolves A-011 with exactly this
+          ModTime fallback, so the shipped behaviour is inside the plan rather than a deviation
+          from it. Nothing is lost either way: rotate_size_mib still bounds the file and no record
+          is deleted, truncated or overwritten (FR-074). What is at stake is only whether
+          rotate_after_days means what its name says on those builds.
+        options_and_costs:
+          - "Accept the boundary. Costs one user-visible caveat in contracts/config-schema.md and nothing else. Leaves rotate_after_days inert for every non-darwin user."
+          - "statx on Linux plus a Windows Sys() path. Two more build-tagged files, a kernel and filesystem floor to document, and still no answer for SMB, NFS or exFAT."
+          - "A sidecar open-time stamp beside the log. Portable and exact, but it is a second file to create, read, keep in step with every rotation, and reason about when it is missing, stale or unwritable - on the diagnostics path, which FR-076 forbids from blocking a post."
+        deliberately_not_answered_in: 10a
+        remedy_listed_in: "not_fixed_here item (4)"
+        cited_by: >-
+          internal/logging/birthtime_other.go and internal/logging/birthtime_darwin.go, both of
+          which name DEC-ADV-006 in their doc comments and point here;
+          .agents/batch-10a-pr-body.md; .agents/work-log.md
 
 blockers: []
 
@@ -905,7 +1101,13 @@ time_sensitive:
     deadline: before tagging v0.1.0
 
 next_best_action: >-
-  Implement Batch 10a lossless log rotation (T065, T068-T070; issues 66, 69-71) using .agents/batch-10-plan.md on sgykfjsm/batch-10-diagnostics.
+  Batch 10a lossless log rotation (T065, T068-T070; issues 66, 69-71) is implemented on
+  sgykfjsm/batch-10-diagnostics-2 and opened as PR #126 at f3ab572. Two review correction passes
+  sit on top of that head and are UNCOMMITTED in the worktree, so #126 does not show them and its
+  description is stale. The review verdict is not final. Next: commit and push the correction
+  passes, update the PR description, finish the staged review of #126 and merge it, then implement
+  Batch 10b (T066, T067, T071-T074) using .agents/batch-10-plan.md. The four tasks are marked [x]
+  in tasks.md but their issues stay open until #126 merges.
 
 
 review_followups_filed:
@@ -948,6 +1150,12 @@ batch_4_review_notes:
         T068-T070: this batch's own objective is "never panicking, never blocking a post", and
         Options.Writer is where rotation's rename/stat/reopen logic will live.
       recorded_in: "internal/logging/logger.go PostLogger.log"
+      superseded_in_part: >-
+        By DEC-F1 (batch 10a), and only the last clause. Rotation's rename/stat/reopen logic does
+        not live behind Options.Writer: it is internal/logging/rotate.go, reached from logging.Open,
+        and Options.Writer is now documented as the way to opt out of rotation. The decision itself
+        is unaffected, because the reason to recover was never the rotating writer - it is that any
+        writer a caller supplies can panic.
     - id: ADV-D-001
       question: "where the bot-token scrub lives"
       decision: >-
@@ -999,6 +1207,8 @@ remaining_batches:
 
 touched_files:
   - .agents/archive/project-status-before-batch-9.md
+  - .agents/batch-10-plan.md
+  - .agents/batch-10a-pr-body.md
   - .agents/batch-9-cycle.md
   - .agents/batch-9-pr-body.md
   - .agents/batch-9-pr-title.txt
@@ -1016,6 +1226,8 @@ touched_files:
   - docs/design.ja.md
   - docs/design.md
   - docs/gui-background.md
+  - internal/app/app.go
+  - internal/app/app_test.go
   - internal/app/recorder.go
   - internal/app/recorder_test.go
   - internal/config/background_test.go
@@ -1025,6 +1237,14 @@ touched_files:
   - internal/gui/background_limits_test.go
   - internal/gui/background_test.go
   - internal/gui/window.go
+  - internal/logging/birthtime_darwin.go
+  - internal/logging/birthtime_darwin_test.go
+  - internal/logging/birthtime_other.go
+  - internal/logging/logger.go
+  - internal/logging/rotate.go
+  - internal/logging/rotate_size_clamp_64bit_test.go
+  - internal/logging/rotate_test.go
+  - internal/logging/rotate_unix_test.go
   - internal/post/formatting.go
   - internal/post/service.go
   - internal/sink/telegram/fallback_test.go
@@ -1056,11 +1276,21 @@ backlog_additions:
     scope: Explicitly requested separately from Batch 9; original Batch 7 deferral preserved as history
 
 next_batch_preparation:
-  branch: sgykfjsm/batch-10-diagnostics
+  branch: sgykfjsm/batch-10-diagnostics-2
+  branch_note: >-
+    Preparation recorded sgykfjsm/batch-10-diagnostics and that name is still in the plan's own
+    "immediate next action". The branch that was created, pushed and opened as PR #126 is
+    sgykfjsm/batch-10-diagnostics-2; the name above is the real one.
   base: 17073829398aa540b6a8ea56a0155b0e30880dfc
   plan: .agents/batch-10-plan.md
   selected: 10a
   tasks: [T065, T068, T069, T070]
   issues: [66, 69, 70, 71]
-  state: prepared-not-implemented
+  state: implemented-under-review
+  state_note: >-
+    This said prepared-not-implemented, which was true when written and false at head: the same
+    commit that recorded it also marks T065/T068-T070 [x] in tasks.md. See in_progress 10a for the
+    implementation record; next_batch_preparation now describes the batch that is in flight, and
+    the next preparation to run is 10b's.
+  pull_request: 126
   remaining_10b: [T066, T067, T071, T072, T073, T074]

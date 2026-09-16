@@ -171,6 +171,28 @@ func (w *rotatingWriter) open() error {
 	w.size = info.Size()
 	w.createdAt = creationTime(info)
 
+	// An empty file is dated from the clock the age comparison uses, not from
+	// the one the filesystem answers with.
+	//
+	// dueForRotation subtracts two independent time sources, and nothing keeps
+	// them together: a log directory on a network mount whose server clock runs
+	// days behind, or a darwin volume reporting a non-zero but nonsensical
+	// Birthtimespec, makes a file created a microsecond ago already older than
+	// the threshold. Without this, a rotation does not clear its own trigger —
+	// the replacement is born expired, so the next write rotates it too, and
+	// every single record becomes its own file behind a zero-byte archive. That
+	// is unbounded, and it is the shape FR-074 and constitution principle VI
+	// keep the log out of.
+	//
+	// It costs nothing because the file is empty: there are no records whose
+	// age this could misreport, and rotating an empty log would archive
+	// nothing. A file that already holds records keeps the filesystem's answer,
+	// which is what lets a genuinely old log rotate on the first write after a
+	// restart (FR-072, R-006, A-011).
+	if w.size == 0 {
+		w.createdAt = w.now()
+	}
+
 	return nil
 }
 
@@ -186,6 +208,11 @@ func (w *rotatingWriter) open() error {
 // arrive here with one is a caller that did not set it — the tests, and any
 // front door with a wiring bug — and for those "do not rotate" is the answer
 // that loses nothing, where "rotate on every write" would shred the log.
+//
+// The age condition subtracts one clock from another, and the two are only
+// comparable because open says so: it dates an empty file from this same now(),
+// so a file this writer just created cannot already be expired however
+// implausible a creation time the filesystem reports. See open.
 func (w *rotatingWriter) dueForRotation() bool {
 	oversize := w.maxSize > 0 && w.size >= w.maxSize
 	expired := w.maxAge > 0 && w.now().Sub(w.createdAt) >= w.maxAge

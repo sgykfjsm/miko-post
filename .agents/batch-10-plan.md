@@ -45,6 +45,14 @@ Run implement-next-batch (or run-batch-cycle) for **Batch 10a** on
 `sgykfjsm/batch-10-diagnostics`, based on merged main 1707382. Keep 10b and
 unrelated backlog fixes out of its PR.
 
+**Done.** Batch 10a is implemented on `sgykfjsm/batch-10-diagnostics-2` and opened as
+PR #126; the review verdict is not yet final. The paragraph above is left exactly as the
+plan wrote it, and the correction is here rather than in place: it names
+`sgykfjsm/batch-10-diagnostics`, and no branch of that name was ever created. Preserving
+what the plan actually said is the point of this note — an in-place edit would leave the
+note describing a discrepancy a reader could no longer see. The next action is to finish
+reviewing and merge #126, then run 10b.
+
 ## Non-PR closure candidates
 T072 and T074 have substantial prior implementation, but require acceptance
 verification before closure. T067 has prior CLI evidence; verify all required

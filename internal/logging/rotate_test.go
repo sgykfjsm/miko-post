@@ -48,16 +48,28 @@ func (c *fixedClock) set(t time.Time) {
 // flakyStat fails the nth call to stat the freshly opened active file, which is
 // how the branches that cannot be reached through a real filesystem — a handle
 // whose size and creation time cannot be read — are exercised.
+//
+// failFrom, when positive, fails that call and every one after it. A hiccup and
+// a persistent failure are different tests: the first recovers on the next
+// write, while the second is the one that reopens the file for every record, so
+// it is the only way to see what the refusal path forgets to release.
 type flakyStat struct {
-	mu    sync.Mutex
-	calls int
-	fail  map[int]error
+	mu          sync.Mutex
+	calls       int
+	fail        map[int]error
+	failFrom    int
+	failFromErr error
 }
 
 func (f *flakyStat) stat(file *os.File) (os.FileInfo, error) {
 	f.mu.Lock()
 	f.calls++
 	err := f.fail[f.calls]
+
+	if err == nil && f.failFrom > 0 && f.calls >= f.failFrom {
+		err = f.failFromErr
+	}
+
 	f.mu.Unlock()
 
 	if err != nil {
@@ -107,6 +119,22 @@ func read(t *testing.T, path string) string {
 	}
 
 	return string(data)
+}
+
+// sizeOf reports the current size of path, or 0 if it cannot be measured.
+//
+// It takes no *testing.T on purpose: its caller runs on a spawned goroutine,
+// where t.Fatalf is illegal, and every use is a "has anything landed yet?"
+// probe where a missing file and an empty one mean the same thing. A rotation
+// racing the probe answers 0 for the fresh active file, which only delays the
+// answer to the next record.
+func sizeOf(path string) int64 {
+	info, err := os.Stat(path)
+	if err != nil {
+		return 0
+	}
+
+	return info.Size()
 }
 
 func write(t *testing.T, w *rotatingWriter, s string) {
@@ -207,14 +235,22 @@ func TestRotateSizeCountsWhatWasAlreadyOnDisk(t *testing.T) {
 	}
 }
 
-// TestRotateAgeTriggerFiresIndependentlyOfSize pins FR-072's second condition.
-// The file is one byte long, so only age can explain the rotation.
+// TestRotateAgeTriggerFiresIndependentlyOfSize pins FR-072's second condition
+// and where its boundary actually falls. The file is one byte long, so only age
+// can explain the rotation.
+//
+// The threshold is rotateAge(7) and the boundaries below are written in literal
+// hours, deliberately. An assertion stated as a multiple of dayDuration puts the
+// constant under test on both sides of the comparison and agrees with any value
+// of it: dayDuration could become 23 hours — turning "rotate_after_days = 7"
+// into a rotation every 6 days 23 hours — with every such assertion still
+// passing. Seven days is 168 hours here or the test is wrong.
 func TestRotateAgeTriggerFiresIndependentlyOfSize(t *testing.T) {
 	dir, path := logDir(t)
 
 	clock := &fixedClock{now: time.Now()}
 
-	w, err := openRotating(path, rotationOptions{maxAge: 7 * dayDuration, now: clock.Now})
+	w, err := openRotating(path, rotationOptions{maxAge: rotateAge(7), now: clock.Now})
 	if err != nil {
 		t.Fatalf("open the rotating writer: %v", err)
 	}
@@ -227,22 +263,198 @@ func TestRotateAgeTriggerFiresIndependentlyOfSize(t *testing.T) {
 		t.Fatalf("rotated before the age threshold: %v", got)
 	}
 
-	// Exactly at the threshold: the comparison is >=, so this rotates.
-	clock.set(w.createdAt.Add(7 * dayDuration))
+	// One nanosecond under seven literal days: still the same file. This is the
+	// half a shortened day fails, because a short day makes the file expire
+	// here.
+	clock.set(w.createdAt.Add(7*24*time.Hour - time.Nanosecond))
 
 	write(t, w, "b")
+
+	if got := archives(t, dir, path); len(got) != 0 {
+		t.Fatalf("rotated a nanosecond before seven days: %v", got)
+	}
+
+	// Exactly at the threshold: the comparison is >=, so this rotates. This is
+	// the half a lengthened day fails.
+	clock.set(w.createdAt.Add(7 * 24 * time.Hour))
+
+	write(t, w, "c")
 
 	rotated := archives(t, dir, path)
 	if len(rotated) != 1 {
 		t.Fatalf("archives = %v, want exactly one", rotated)
 	}
 
-	if got := read(t, filepath.Join(dir, rotated[0])); got != "a" {
-		t.Fatalf("archive = %q, want %q", got, "a")
+	if got := read(t, filepath.Join(dir, rotated[0])); got != "ab" {
+		t.Fatalf("archive = %q, want %q", got, "ab")
 	}
 
-	if got := read(t, path); got != "b" {
-		t.Fatalf("new active log = %q, want %q", got, "b")
+	if got := read(t, path); got != "c" {
+		t.Fatalf("new active log = %q, want %q", got, "c")
+	}
+}
+
+// backdatedInfo is the real file's FileInfo with a creation time the filesystem
+// could not plausibly have produced.
+//
+// Sys returns nil so that darwin takes creationTime's documented fallback to
+// ModTime rather than reading a Birthtimespec this type cannot forge; the test
+// below therefore measures the same thing on every platform.
+type backdatedInfo struct {
+	os.FileInfo
+
+	modTime time.Time
+}
+
+func (b backdatedInfo) ModTime() time.Time { return b.modTime }
+func (b backdatedInfo) Sys() any           { return nil }
+
+// TestRotateCannotFireRepeatedlyOnAFileItJustCreated pins that a rotation
+// clears its own trigger.
+//
+// The age condition subtracts two clocks that nothing keeps together: the
+// process clock on one side and whatever the filesystem recorded on the other.
+// Put the first far enough ahead of the second — a log directory on a network
+// mount whose server clock is days behind, a darwin volume reporting a non-zero
+// but nonsensical birth time — and a file created a microsecond ago is already
+// expired, so every write rotates, the log becomes one file per record, and the
+// first archive is zero bytes. Nothing about the size trigger can do this,
+// because a rotation always empties the file.
+//
+// Here the stat seam reports every freshly opened file as thirty days old
+// against a seven-day threshold, which is the worst case rather than a likely
+// one. One rotation is correct: the seeded records are genuinely there and
+// genuinely old. A second would be the unbounded case.
+func TestRotateCannotFireRepeatedlyOnAFileItJustCreated(t *testing.T) {
+	dir, path := logDir(t)
+
+	if err := os.WriteFile(path, []byte("from an earlier run\n"), logFilePerm); err != nil {
+		t.Fatalf("seed the log: %v", err)
+	}
+
+	clock := &fixedClock{now: time.Now()}
+
+	backdate := func(file *os.File) (os.FileInfo, error) {
+		info, err := file.Stat()
+		if err != nil {
+			return nil, err
+		}
+
+		return backdatedInfo{FileInfo: info, modTime: clock.Now().Add(-30 * 24 * time.Hour)}, nil
+	}
+
+	w, err := openRotating(path, rotationOptions{maxAge: rotateAge(7), now: clock.Now, stat: backdate})
+	if err != nil {
+		t.Fatalf("open the rotating writer: %v", err)
+	}
+
+	t.Cleanup(func() { _ = w.Close() })
+
+	const writes = 5
+
+	for i := range writes {
+		write(t, w, fmt.Sprintf("record-%d\n", i))
+	}
+
+	rotated := archives(t, dir, path)
+	if len(rotated) != 1 {
+		t.Fatalf("%d writes produced %d archives (%v); a rotation did not clear its own trigger", writes, len(rotated), rotated)
+	}
+
+	// The one archive holds the records that were actually old. An archive of
+	// zero bytes is the signature of the defect: a file rotated before anything
+	// was written to it.
+	if got := read(t, filepath.Join(dir, rotated[0])); got != "from an earlier run\n" {
+		t.Fatalf("archive = %q, want the seeded records", got)
+	}
+
+	// And every record written afterwards is in the active log, in order.
+	var want strings.Builder
+
+	for i := range writes {
+		fmt.Fprintf(&want, "record-%d\n", i)
+	}
+
+	if got := read(t, path); got != want.String() {
+		t.Fatalf("active log = %q, want %q", got, want.String())
+	}
+}
+
+// TestReopeningANonEmptyLogDatesItFromTheFileAndNotTheClock pins the half of
+// FR-072's age condition that nothing else in this package can fail on: the
+// "too old" direction.
+//
+// Every other age assertion here either uses an empty file — whose createdAt
+// open() deliberately overwrites with now(), so the filesystem's answer is not
+// observable through it at all — or seeds a genuinely old file and asserts that
+// it rotates, which an arbitrarily early value satisfies just as well. Without
+// this test `w.createdAt = creationTime(info)` can be replaced by the zero time
+// or by the Unix epoch with the whole package still green, and the cost of that
+// is not theoretical: mp is a short-lived CLI, so every run reopens the log, and
+// a log dated in 1970 is archived on the first write of every run. The user
+// ends up with one file per post and an active log that is always empty.
+//
+// Both halves are load-bearing. The first pins that open() does not date a
+// pre-existing log *earlier* than the file says; the second pins that it does
+// not date it *later*, which is what a createdAt pinned to now() for every file
+// would do — the age trigger would then never fire at all. The reference for
+// both is the file's own recorded timestamp rather than w.createdAt, because an
+// assertion phrased in terms of the value under test agrees with any value of
+// it.
+//
+// What is not observable here is the difference between a real creation time
+// and ModTime: on every platform but darwin creationTime *is* ModTime, so no
+// portable test can tell the two apart. That half is
+// TestOpenDatesAPreExistingLogFromItsBirthTimeAndNotItsModificationTime in
+// birthtime_darwin_test.go.
+func TestReopeningANonEmptyLogDatesItFromTheFileAndNotTheClock(t *testing.T) {
+	dir, path := logDir(t)
+
+	// A log left behind by an earlier run, created a moment ago. Not empty, so
+	// open() keeps the filesystem's answer instead of the clock's.
+	if err := os.WriteFile(path, []byte("from a run a moment ago\n"), logFilePerm); err != nil {
+		t.Fatalf("seed the log: %v", err)
+	}
+
+	seeded, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat the seeded log: %v", err)
+	}
+
+	clock := &fixedClock{now: time.Now()}
+
+	w, err := openRotating(path, rotationOptions{maxAge: rotateAge(7), now: clock.Now})
+	if err != nil {
+		t.Fatalf("open the rotating writer: %v", err)
+	}
+
+	t.Cleanup(func() { _ = w.Close() })
+
+	write(t, w, "after the restart\n")
+
+	if got := archives(t, dir, path); len(got) != 0 {
+		t.Fatalf("a log created moments ago was archived on the first write after a restart: %v", got)
+	}
+
+	// Seven literal days after the file was written, and not after the writer
+	// was opened: the creation time is never later than the modification time,
+	// so this instant is at or past the threshold for the real answer and short
+	// of it for anything dated from the open.
+	clock.set(seeded.ModTime().Add(7 * 24 * time.Hour))
+
+	write(t, w, "a week later\n")
+
+	rotated := archives(t, dir, path)
+	if len(rotated) != 1 {
+		t.Fatalf("archives = %v, want exactly one once the seeded log is seven days old", rotated)
+	}
+
+	if got := read(t, filepath.Join(dir, rotated[0])); got != "from a run a moment ago\nafter the restart\n" {
+		t.Fatalf("archive = %q, want the seeded log and the record that followed it", got)
+	}
+
+	if got := read(t, path); got != "a week later\n" {
+		t.Fatalf("new active log = %q, want only the record written after the rotation", got)
 	}
 }
 
@@ -703,6 +915,195 @@ func TestRotateKeepsTheArchiveWhenTheReplacementCannotBeOpened(t *testing.T) {
 	}
 }
 
+// closeUnderneath closes the writer's active handle behind its back, so that
+// the writer's own close of it fails.
+//
+// This is the only way to reach the close-failure paths from a test, and it is
+// not a contrived failure. (*os.File).Close reports the deferred write error a
+// buffered filesystem discovered after the write returned — ENOSPC, EIO, a
+// disconnected network mount — which means the records the writer already
+// counted as logged may never have reached the platter. That is precisely the
+// case FR-076 owes the user its one warning for, so it must not be swallowed.
+// os.ErrClosed is the portable stand-in: a second close reports it everywhere,
+// where filling a disk inside a unit test does not.
+func closeUnderneath(t *testing.T, w *rotatingWriter) {
+	t.Helper()
+
+	if w.file == nil {
+		t.Fatal("the writer has no active file to close")
+	}
+
+	if err := w.file.Close(); err != nil {
+		t.Fatalf("close the active handle underneath the writer: %v", err)
+	}
+}
+
+// TestRotateReportsAFailedCloseOfTheArchivedFile pins that the close of the
+// file a rotation just archived is reported and not dropped. Everything else
+// about the rotation succeeded — the archive is on disk and the new active log
+// is open — so a discarded close error is a rotation that looks perfect while
+// the archived records may be incomplete.
+func TestRotateReportsAFailedCloseOfTheArchivedFile(t *testing.T) {
+	dir, path := logDir(t)
+
+	w, err := openRotating(path, rotationOptions{maxSize: 1})
+	if err != nil {
+		t.Fatalf("open the rotating writer: %v", err)
+	}
+
+	t.Cleanup(func() { _ = w.Close() })
+
+	write(t, w, "a")
+	closeUnderneath(t, w)
+
+	n, err := w.Write([]byte("b"))
+	if !errors.Is(err, os.ErrClosed) {
+		t.Fatalf("Write = %v, want it to carry the archived file's close failure", err)
+	}
+
+	// And the failure is reported *alongside* the work that succeeded, not
+	// instead of it: the record still lands and the archive is still there.
+	if n != 1 {
+		t.Fatalf("wrote %d bytes, want the record written despite the close failure", n)
+	}
+
+	rotated := archives(t, dir, path)
+	if len(rotated) != 1 {
+		t.Fatalf("archives = %v, want exactly one", rotated)
+	}
+
+	if got := read(t, path); got != "b" {
+		t.Fatalf("new active log = %q, want %q", got, "b")
+	}
+}
+
+// TestRotateReportsEveryReasonAWriteFailed pins that a Write which failed for
+// more than one reason reports all of them. Three things go wrong here at once:
+// the archived file's close fails, the reopen inside the rotation fails, and
+// the retry the Write makes afterwards fails too.
+//
+// Each is a different repair. A caller told only that the log could not be
+// reopened will look at the directory; one told only that a close failed will
+// look at the disk. FR-076 spends a single warning, so that warning has to
+// carry every reason there was.
+func TestRotateReportsEveryReasonAWriteFailed(t *testing.T) {
+	dir, path := logDir(t)
+
+	sentinel := errors.New("no stat for you")
+	// Call 1 is the initial open. Every call after it fails, which covers both
+	// the reopen inside rotate and the retry Write makes straight after it.
+	flaky := &flakyStat{failFrom: 2, failFromErr: sentinel}
+
+	w, err := openRotating(path, rotationOptions{maxSize: 1, stat: flaky.stat})
+	if err != nil {
+		t.Fatalf("open the rotating writer: %v", err)
+	}
+
+	t.Cleanup(func() { _ = w.Close() })
+
+	write(t, w, "a")
+	closeUnderneath(t, w)
+
+	n, err := w.Write([]byte("b"))
+	if err == nil {
+		t.Fatal("a rotation that failed three ways reported no error")
+	}
+
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("error = %v, want it to carry the reason the log could not be reopened", err)
+	}
+
+	if !errors.Is(err, os.ErrClosed) {
+		t.Fatalf("error = %v, want it to carry the archived file's close failure as well", err)
+	}
+
+	if n != 0 {
+		t.Fatalf("wrote %d bytes to a writer with no active file", n)
+	}
+
+	rotated := archives(t, dir, path)
+	if len(rotated) != 1 {
+		t.Fatalf("archives = %v, want the rotated records kept", rotated)
+	}
+
+	if got := read(t, filepath.Join(dir, rotated[0])); got != "a" {
+		t.Fatalf("archive = %q, want %q", got, "a")
+	}
+}
+
+// TestCloseFailureReachesTheFrontDoor pins the last few feet of the same path:
+// a close that reports a deferred write error has to become something the user
+// sees, through both surfaces a front door consults. Logger.Close is what a
+// caller checks on the way out, and Degraded is FR-076's one warning.
+func TestCloseFailureReachesTheFrontDoor(t *testing.T) {
+	// rotatingWriterOf reaches the writer Open built, which is the only way to
+	// arrange a failing close on a Logger's own handle.
+	rotatingWriterOf := func(t *testing.T, logger *Logger) *rotatingWriter {
+		t.Helper()
+
+		w, ok := logger.writer.owned.(*rotatingWriter)
+		if !ok {
+			t.Fatalf("the logger owns a %T, not a rotating writer", logger.writer.owned)
+		}
+
+		return w
+	}
+
+	t.Run("Logger.Close reports it", func(t *testing.T) {
+		_, path := logDir(t)
+
+		logger := Open(Options{Path: path, Source: SourceCLI, RotateSizeMiB: 1})
+
+		logger.Post("post-1").Info(EventMessageReceived)
+
+		closeUnderneath(t, rotatingWriterOf(t, logger))
+
+		if err := logger.Close(); !errors.Is(err, os.ErrClosed) {
+			t.Fatalf("Logger.Close = %v, want the failed close reported", err)
+		}
+	})
+
+	t.Run("a rotation's failed close becomes the one warning", func(t *testing.T) {
+		dir, path := logDir(t)
+
+		// Already past the 1 MiB threshold, so the first record rotates.
+		if err := os.WriteFile(path, make([]byte, 2<<20), logFilePerm); err != nil {
+			t.Fatalf("seed an oversized log: %v", err)
+		}
+
+		logger := Open(Options{Path: path, Source: SourceCLI, RotateSizeMiB: 1})
+
+		t.Cleanup(func() { _ = logger.Close() })
+
+		closeUnderneath(t, rotatingWriterOf(t, logger))
+
+		logger.Post("post-1").Info(EventMessageReceived)
+
+		degraded := logger.Degraded()
+		if degraded == nil {
+			t.Fatal("a rotation whose close failed raised no warning")
+		}
+
+		if !errors.Is(degraded.Err, os.ErrClosed) {
+			t.Fatalf("warning = %q, want it to carry the close failure", degraded.Warning())
+		}
+
+		if degraded.Path != path {
+			t.Fatalf("warning names %q, want the log path %q", degraded.Path, path)
+		}
+
+		// The rotation itself still succeeded, so the record is on disk and the
+		// archive is intact: this is a warning about durability, not a loss.
+		if got := archives(t, dir, path); len(got) != 1 {
+			t.Fatalf("archives = %v, want exactly one", got)
+		}
+
+		if !strings.Contains(read(t, path), `"event":"message_received"`) {
+			t.Fatal("the record was dropped when the archived file's close failed")
+		}
+	})
+}
+
 // TestOpenRotatingRefusesAFileItCannotMeasure pins that a handle whose size and
 // creation time are unreadable degrades rather than becoming a log that grows
 // without bound because neither condition can ever fire.
@@ -729,8 +1130,18 @@ func TestOpenRotatingRefusesAFileItCannotMeasure(t *testing.T) {
 }
 
 // TestOpenRotatingRefusesANonRegularPath pins that rotation inherits the
-// package's refusal rather than reimplementing the open: a FIFO at the log path
-// blocks inside open(2) and would stop the post dead.
+// package's refusal rather than reimplementing the open: openRotating goes
+// through openLogFile, so usableAsLog's check guards the rotating writer's
+// first handle and every one it opens after a rotation, and the error names
+// what is actually at the path.
+//
+// A directory and not a FIFO, deliberately. What is under test is which code
+// path openRotating takes, and a directory is the one non-regular file every
+// platform can create in a test. The kind that motivated the guard — a named
+// pipe, where os.OpenFile blocks inside open(2) until a reader attaches and the
+// post never runs at all — is covered by mode in
+// TestUsableAsLogAllowsWhatCanBeAppendedTo and end to end against a deadline by
+// TestOpenDoesNotBlockOnANonRegularFile in logger_unix_test.go.
 func TestOpenRotatingRefusesANonRegularPath(t *testing.T) {
 	dir, _ := logDir(t)
 
@@ -830,6 +1241,283 @@ func TestRotatingWriterIsSafeUnderConcurrentWrites(t *testing.T) {
 	}
 }
 
+// TestRotatingWriterCloseRacingAWriteIsWrittenOrRefused is the other half of
+// the race coverage, and the half that is the production arrangement rather
+// than a hypothetical one: recordQueue's worker calls safeWriter.close, which
+// closes this writer, while a PostLogger goroutine may still be emitting.
+// Close is idempotent and final when nothing else is running
+// (TestRotatingWriterCloseIsIdempotentAndFinal) and writes are safe against
+// each other when Close is not (the test above); neither says what happens when
+// the two overlap.
+//
+// The property is that a write racing Close lands or is refused, and nothing in
+// between: no panic, no write against a closed handle, and no record counted as
+// written that is not on disk. The accounting at the end is what makes that
+// checkable — a refused write must contribute nothing, and an accepted one must
+// contribute exactly one line.
+func TestRotatingWriterCloseRacingAWriteIsWrittenOrRefused(t *testing.T) {
+	dir, path := logDir(t)
+
+	// A small threshold so rotation is running concurrently with the close too:
+	// rotate is the part that swaps the handle, and it is where an unlocked
+	// close would be caught.
+	w, err := openRotating(path, rotationOptions{maxSize: 64})
+	if err != nil {
+		t.Fatalf("open the rotating writer: %v", err)
+	}
+
+	const (
+		writers = 8
+		records = 20
+	)
+
+	var (
+		wg       sync.WaitGroup
+		mu       sync.Mutex
+		accepted int
+	)
+
+	// The writers start together, and the close is released by the first write
+	// that lands rather than by the same signal. Released together, the close
+	// usually won outright and the test asserted nothing; released after a
+	// write has been accepted, it is guaranteed to overlap a writer that is
+	// still going.
+	var (
+		start     = make(chan struct{})
+		writing   = make(chan struct{})
+		announce  sync.Once
+		announced = func() { announce.Do(func() { close(writing) }) }
+	)
+
+	for i := range writers {
+		wg.Add(1)
+
+		go func() {
+			defer wg.Done()
+
+			// The closer is released on every exit path, not only the one that
+			// accepts a write. announced is a sync.Once, so in a healthy run
+			// this defer does nothing and the close still overlaps a writer
+			// that is still going. It matters when no write is ever accepted —
+			// a full disk, a revoked mount, an EIO, or a regression returning
+			// something other than os.ErrClosed: every writer then takes a
+			// t.Errorf branch and returns, wg.Wait proceeds, and without this
+			// the closer stays parked on writing forever while the main
+			// goroutine blocks on closed. The recorded failure would never be
+			// printed; the package would die on the `go test` timeout with a
+			// goroutine dump instead, which diagnoses nothing.
+			defer announced()
+
+			<-start
+
+			for j := range records {
+				line := fmt.Sprintf("writer-%d-record-%d\n", i, j)
+
+				n, err := w.Write([]byte(line))
+
+				switch {
+				case err == nil:
+					if n != len(line) {
+						t.Errorf("accepted write reported %d of %d bytes", n, len(line))
+
+						return
+					}
+
+					mu.Lock()
+					accepted++
+					mu.Unlock()
+
+					announced()
+				case errors.Is(err, os.ErrClosed):
+					if n != 0 {
+						t.Errorf("refused write reported %d bytes written", n)
+
+						return
+					}
+				default:
+					t.Errorf("write racing close: %v", err)
+
+					return
+				}
+			}
+		}()
+	}
+
+	closed := make(chan error, 1)
+
+	go func() {
+		<-writing
+
+		closed <- w.Close()
+	}()
+
+	close(start)
+	wg.Wait()
+
+	if err := <-closed; err != nil {
+		t.Fatalf("close racing writes: %v", err)
+	}
+
+	// Close is still idempotent and still final afterwards.
+	if err := w.Close(); err != nil {
+		t.Fatalf("second close: %v", err)
+	}
+
+	if _, err := w.Write([]byte("after\n")); !errors.Is(err, os.ErrClosed) {
+		t.Fatalf("write after the racing close: %v, want os.ErrClosed", err)
+	}
+
+	var total int
+
+	for _, name := range append(archives(t, dir, path), filepath.Base(path)) {
+		total += strings.Count(read(t, filepath.Join(dir, name)), "\n")
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	if total != accepted {
+		t.Fatalf("%d writes were accepted but %d records are on disk", accepted, total)
+	}
+}
+
+// TestLoggerCloseRacingAStragglingRecordNeverWritesToAClosedHandle is the same
+// property at the layer that actually arranges it. recordQueue's worker owns
+// the close, the front door calls Logger.Close on every exit path, and a sink
+// goroutine that is still finishing has a PostLogger in hand.
+//
+// The lock order is what is being pinned: safeWriter.mu is held across both the
+// forward and the close, and rotatingWriter.mu is only ever taken under it, so
+// there is no arrangement in which a record reaches a handle the close has
+// already released. A latched os.ErrClosed is exactly what that looks like when
+// it goes wrong, and it would otherwise surface to the user as FR-076's one
+// warning describing the shutdown rather than a problem.
+//
+// Post and not PostAsync, and that choice is the test rather than a detail of
+// it. PostAsync only enqueues: recordQueue runs a single worker that drains
+// q.jobs and calls closeWriter only after that range loop ends, so an
+// asynchronous record and the close are strictly ordered on one goroutine and
+// cannot overlap by construction. Written that way, this test passes with the
+// guard below deleted, which makes it a test of nothing. Post emits on the
+// caller's own goroutine, so the forward and the close are two goroutines
+// contending for safeWriter.mu, which is the arrangement the guard exists for.
+// The production adapter uses PostAsync, but Post is public API and a front
+// door that calls it gets no protection from the queue's ordering.
+func TestLoggerCloseRacingAStragglingRecordNeverWritesToAClosedHandle(t *testing.T) {
+	dir, path := logDir(t)
+
+	logger := Open(Options{Path: path, Source: SourceCLI, RotateSizeMiB: 1})
+
+	const posts = 8
+
+	var wg sync.WaitGroup
+
+	// The writers start together; the close is released by the first record
+	// known to have reached the file, not by the same signal. Released
+	// together, Logger.Close can win outright — safeWriter.close clears target,
+	// so all 160 Posts are then discarded silently, firstErr() is nil because no
+	// write ever reached a handle, and the loop over the file below iterates
+	// nothing. The test would pass having asserted that a logger which threw
+	// every record away did not corrupt anything. That is the same failure
+	// TestRotatingWriterCloseRacingAWriteIsWrittenOrRefused documents above, and
+	// this is the same fix: a close released only after a record has landed is
+	// guaranteed to overlap writers that are still going, and the landed-record
+	// assertion after the join turns a vacuous run into a FAIL.
+	var (
+		start     = make(chan struct{})
+		writing   = make(chan struct{})
+		announce  sync.Once
+		announced = func() { announce.Do(func() { close(writing) }) }
+	)
+
+	for i := range posts {
+		wg.Add(1)
+
+		go func() {
+			defer wg.Done()
+
+			// Released on every exit path, not only the one that lands a
+			// record. If nothing ever lands the closer would otherwise park on
+			// writing forever while the main goroutine waits on closed, and the
+			// failure this test exists to report would arrive as a package-wide
+			// `go test` timeout instead — the hang COR-007 fixed in the sibling.
+			defer announced()
+
+			<-start
+
+			landed := false
+
+			for j := range 20 {
+				logger.Post(fmt.Sprintf("post-%d-%d", i, j)).
+					Info(EventMessageReceived, slog.String("message", strings.Repeat("x", 4096)))
+
+				// Post emits on this goroutine through a bare *os.File with no
+				// buffering, so a non-empty log is proof the record reached the
+				// handle rather than a discarding writer. Checked until the
+				// first one lands, then never again: this is inside the hot
+				// loop the close has to overlap.
+				if !landed && sizeOf(path) > 0 {
+					landed = true
+
+					announced()
+				}
+			}
+		}()
+	}
+
+	closed := make(chan error, 1)
+
+	go func() {
+		<-writing
+
+		closed <- logger.Close()
+	}()
+
+	close(start)
+	wg.Wait()
+
+	// A flush timeout is this logger's documented behaviour when the close has
+	// to wait for a destination the writers are hammering, and it says nothing
+	// about the race; any other error does. errRecordQueueFull is not tolerated,
+	// because nothing is admitted to the queue on this path — seeing it would
+	// mean the test had stopped exercising the synchronous emission it is for.
+	if err := <-closed; err != nil && !errors.Is(err, errRecordFlushTimeout) {
+		t.Fatalf("Logger.Close racing emission: %v", err)
+	}
+
+	if err := logger.writer.firstErr(); errors.Is(err, os.ErrClosed) {
+		t.Fatalf("a straggling record was written to a closed handle: %v", err)
+	}
+
+	// And whatever did land is still one whole JSON object per line: a record
+	// interleaved with the close would be a truncated one.
+	landed := 0
+
+	for _, name := range append(archives(t, dir, path), filepath.Base(path)) {
+		for _, line := range strings.Split(strings.TrimSuffix(read(t, filepath.Join(dir, name)), "\n"), "\n") {
+			if line == "" {
+				continue
+			}
+
+			landed++
+
+			var record map[string]any
+			if err := json.Unmarshal([]byte(line), &record); err != nil {
+				t.Fatalf("line in %s is not a JSON object: %v", name, err)
+			}
+		}
+	}
+
+	// The two assertions above are both satisfied by a log nothing was ever
+	// written to, so this one has to be positive. The close cannot begin until
+	// a record has landed, so an empty log means either that the release order
+	// broke or that emission stopped reaching the handle at all — in both cases
+	// everything above asserted nothing and the run must be red, not green.
+	if landed == 0 {
+		t.Fatal("no record reached the log: the assertions above passed vacuously")
+	}
+}
+
 // TestRotatedFilesKeepTheLogPermissions pins that an archive is no more
 // readable than the active log, which carries the user's own message bodies.
 func TestRotatedFilesKeepTheLogPermissions(t *testing.T) {
@@ -861,45 +1549,64 @@ func TestRotatedFilesKeepTheLogPermissions(t *testing.T) {
 // the clamp. config.Validate bounds both keys from below only, so a value near
 // the integer limit reaches these functions, and an unclamped multiplication
 // wraps negative — which does not disable rotation, it makes every write rotate.
+//
+// Every expectation here is a literal. A table written in bytesPerMiB or
+// dayDuration restates the implementation and passes whatever those constants
+// say; written out, one MiB is 1048576 bytes and one day is 24 hours or the
+// conversion is wrong.
+//
+// The largest inputs the clamp distinguishes need an int wider than 32 bits to
+// write down, so the size clamp's own boundary lives in
+// rotate_size_clamp_64bit_test.go and the rest of this file stays compilable
+// everywhere internal/logging builds.
 func TestRotateThresholdConversion(t *testing.T) {
 	t.Run("size", func(t *testing.T) {
 		cases := map[int]int64{
-			0:                         0,
-			-1:                        0,
-			1:                         1 << 20,
-			10:                        10 << 20,
-			int(maxRotateSizeMiB):     maxRotateSizeMiB * bytesPerMiB,
-			int(maxRotateSizeMiB) + 1: math.MaxInt64,
-			math.MaxInt64:             math.MaxInt64,
+			0:  0,
+			-1: 0,
+			1:  1048576,
+			10: 10485760,
 		}
 
 		for mib, want := range cases {
 			if got := rotateSizeBytes(mib); got != want {
 				t.Errorf("rotateSizeBytes(%d) = %d, want %d", mib, got, want)
 			}
-
-			if got := rotateSizeBytes(mib); got < 0 {
-				t.Errorf("rotateSizeBytes(%d) wrapped to %d, which rotates on every write", mib, got)
-			}
 		}
 	})
 
 	t.Run("age", func(t *testing.T) {
 		cases := map[int]time.Duration{
-			0:                           0,
-			-1:                          0,
-			1:                           dayDuration,
-			7:                           7 * dayDuration,
+			0:  0,
+			-1: 0,
+			1:  24 * time.Hour,
+			7:  168 * time.Hour,
+			// The clamp's boundary. maxRotateAfterDays fits an int on every
+			// platform this builds on — it is about a hundred thousand days —
+			// so unlike the size clamp it needs no separate file.
 			int(maxRotateAfterDays):     time.Duration(maxRotateAfterDays) * dayDuration,
 			int(maxRotateAfterDays) + 1: time.Duration(math.MaxInt64),
-			math.MaxInt64:               time.Duration(math.MaxInt64),
 		}
 
 		for days, want := range cases {
 			if got := rotateAge(days); got != want {
 				t.Errorf("rotateAge(%d) = %v, want %v", days, got, want)
 			}
+		}
+	})
 
+	t.Run("no setting an int can hold wraps negative", func(t *testing.T) {
+		// The wrap is the reason the clamp exists, and a negative threshold is
+		// not an inert one: dueForRotation compares >=, so it rotates on every
+		// write. math.MaxInt rather than math.MaxInt64 so this runs as written
+		// on a 32-bit int too, where it is still the largest reachable setting.
+		for _, mib := range []int{1, 1 << 20, math.MaxInt / 2, math.MaxInt - 1, math.MaxInt} {
+			if got := rotateSizeBytes(mib); got < 0 {
+				t.Errorf("rotateSizeBytes(%d) wrapped to %d, which rotates on every write", mib, got)
+			}
+		}
+
+		for _, days := range []int{1, 365, math.MaxInt / 2, math.MaxInt - 1, math.MaxInt} {
 			if got := rotateAge(days); got < 0 {
 				t.Errorf("rotateAge(%d) wrapped to %v, which rotates on every write", days, got)
 			}
@@ -910,8 +1617,8 @@ func TestRotateThresholdConversion(t *testing.T) {
 		dir, path := logDir(t)
 
 		w, err := openRotating(path, rotationOptions{
-			maxSize: rotateSizeBytes(math.MaxInt64),
-			maxAge:  rotateAge(math.MaxInt64),
+			maxSize: rotateSizeBytes(math.MaxInt),
+			maxAge:  rotateAge(math.MaxInt),
 		})
 		if err != nil {
 			t.Fatalf("open the rotating writer: %v", err)

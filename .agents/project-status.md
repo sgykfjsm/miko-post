@@ -7,15 +7,23 @@ correctness and adversarial review after fixes, combined make check and native
 arm64 build. GitHub reported no CI checks; no new test run was needed for the
 identical merge tree. Prior native/live-service validation limits remain in the reports.
 
-Batch 10 is prepared on `sgykfjsm/batch-10-diagnostics` from merged main.
-See [batch-10-plan.md](batch-10-plan.md): 10a covers lossless log rotation
-(T065, T068–T070 / #66, #69–#71); 10b follows with message capture, traces and
-verification of existing counts/degradation behavior. No next-batch code is implemented.
-No preparation blocker is identified; rotation race/failure handling needs design
-attention during implementation. Batches 11–12 remain later work.
+Batch 10a — lossless log rotation (T065, T068–T070 / #66, #69–#71) — is implemented on
+`sgykfjsm/batch-10-diagnostics-2` from merged main and opened as PR #126. Its review
+verdict is not final, and three review correction passes are applied on top of the opened
+head (the third is the last the review loop permits). Both are uncommitted: #126 still shows f3ab572 only, and its description is stale.
+See [batch-10-plan.md](batch-10-plan.md). 10b (T066–T067, T071–T074: message capture,
+traces and verification of existing counts/degradation behavior) is not started and stays
+out of #126. Rotation race and partial-failure handling was the identified design risk and
+is what the review has been examining. Batches 11–12 remain later work.
 
-Next: implement Batch 10a using the prepared plan, then perform three-stage review.
+An earlier version of this file said Batch 10 was prepared on `sgykfjsm/batch-10-diagnostics`
+and that no next-batch code was implemented. Both were true when written; neither is true
+of the current tree, and the branch of that name was never created.
 
-Merge and planning records are the only new changes. The unrelated pre-existing
-Claude manifest edit remains excluded. Issues #60–#65 and #122 remain open pending
-separate issue cleanup; the PR merge did not auto-close them. Feature closeout is premature.
+Next: finish the staged review of PR #126 and merge it, then implement Batch 10b.
+
+Batch 10a's rotation code and tests are the new changes on top of the merge and planning
+records. The unrelated pre-existing Claude manifest edit remains excluded. Issues #60–#65
+and #122 remain open pending separate issue cleanup; the PR merge did not auto-close them.
+#66 and #69–#71 stay open until #126 merges, although their tasks are marked complete in
+`tasks.md`. Feature closeout is premature.
