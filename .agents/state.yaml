@@ -875,6 +875,24 @@ in_progress:
     opened_at_head: f3ab572e8b9c4d1b6eb72db7e6942831bfccdb12
     prepared_pr_body: .agents/batch-10a-pr-body.md
     review_verdict: not-final
+    followups_filed:
+      filed_at: 2026-09-16
+      authorized_by: user
+      issues:
+        - {number: 127, subject: "Decision: what rotation promises when two mp processes share one log path", sources: [ADV-001, ADV-002, DEC-ADV-A], kind: decision}
+        - {number: 128, subject: "Decision: rotate_after_days never fires where no birth time exists", sources: [ADV-006, DEC-ADV-006], kind: decision}
+        - {number: 129, subject: "safeWriter's truncated-line repair re-enters the rotation predicate", sources: [COR-006-cycle0], kind: edge-case}
+        - {number: 130, subject: "No issue owns a load-time upper bound for the two rotation keys", sources: [CON-001], kind: ownership-gap}
+      comments:
+        - {issue: 75, subject: "internal/gui never calls Degraded(), so FR-076 yields zero warnings there today - T074's remaining work, not a 10a regression", sources: [ADV-cycle2-observation]}
+        - {issue: 70, subject: "T069 is implemented; the ModTime-fallback consequence is carried to #128", sources: [ADV-006]}
+      not_filed:
+        - {id: COR-009, reason: "fixed in correction pass 3 - the darwin test now skips rather than failing on a volume that cannot express a birth/mtime gap"}
+        - {id: COR-007, reason: "fixed in correction pass 3 - the close-race test reports instead of hanging"}
+        - {id: ADV-005, reason: "duplicate of COR-007, same defect found independently"}
+        - {id: ADV-004, reason: "duplicate of COR-001, same surviving mutant found independently; fixed in correction pass 1"}
+        - {id: CON-010, reason: "fixed in correction pass 3 - DEC-F4 now says it extends A-011 and appears in the PR body's Decisions section"}
+        - {id: COR-008, reason: "review tooling, not the batch: cycle-1 reviewers hashed the diff bytes directly instead of using the domain-tagged fingerprint script; coordinator bytes verified stable throughout"}
     review_mode: review-and-fix
     review_fix_passes: 3
     tracked_completed_tasks: [T065, T068, T069, T070]
