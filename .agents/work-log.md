@@ -962,3 +962,10 @@ confirmed. Valid git-generated publication patches now reverse-check successfull
 - Publication uses one PR with separate feature and documentation commits, following the skill's existing-branch policy. Earlier separate-PR preparation remains useful scope history.
 - Preserved history; no issue closed. Existing combined make check/native build and both fresh three-stage review passes remain the implementation validation; publication adds diff whitespace and state consistency checks.
 - Next: obtain acceptance and merge #125 before Batch 10.
+
+### 2026-09-16 — Merge Batch 9 and prepare Batch 10
+- User accepted PR #125 and authorized merge. Verified clean/mergeable status and exact reviewed head 7bb43d1; no remote CI checks were listed.
+- Squash merged #125 as 17073829398aa540b6a8ea56a0155b0e30880dfc, fetched main, and verified identical trees. No implementation retesting was required.
+- Created sgykfjsm/batch-10-diagnostics from merged main, preserving the unrelated Claude manifest edit; removed main upstream tracking to avoid accidental push targeting main.
+- Triaged ten US5 tasks/issues into 10a rotation and 10b post diagnostics. Prepared .agents/batch-10-plan.md; no code or task completion changes.
+- Issues remain open; no issue closure was performed. Next: implement Batch 10a, then three-stage review.

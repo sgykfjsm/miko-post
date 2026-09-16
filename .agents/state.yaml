@@ -813,10 +813,12 @@ completed:
     tasks: [T059, T060, T061, T062, T063, T064]
     issues: [60, 61, 62, 63, 64, 65]
     branch: sgykfjsm/batch-9-review-fixes
-    state: draft-pr
+    state: merged
     committed: true
     pushed: true
     pull_request: 125
+    squashed_as: 17073829398aa540b6a8ea56a0155b0e30880dfc
+    merged_at: 2026-09-16T01:50:32Z
     prepared_pr_body: .agents/batch-9-pr-body.md
     review_mode: review-and-fix
     review_verdict: passed
@@ -830,13 +832,15 @@ completed:
     validation_gaps: [live-Telegram]
   - id: issue-122
     name: Subtle random GUI background
-    state: draft-pr
+    state: merged
     source_snapshot: /tmp/miko-122-source
     review_run_state: /Users/shige/.agents/review-runs/sgykfjsm__miko-post/20260911-issue122
     validation: "full make check, native build, native editor/success/failure/black-fallback checks passed"
     committed: true
     pushed: true
     pull_request: 125
+    squashed_as: 17073829398aa540b6a8ea56a0155b0e30880dfc
+    merged_at: 2026-09-16T01:50:32Z
     prepared_pr_body: .agents/issue-122-pr-body.md
     review_mode: review-and-fix
     review_verdict: passed
@@ -901,7 +905,7 @@ time_sensitive:
     deadline: before tagging v0.1.0
 
 next_best_action: >-
-  Obtain acceptance and merge draft PR #125 for Batch 9 and explicitly requested issue #122 before starting Batch 10.
+  Implement Batch 10a lossless log rotation (T065, T068-T070; issues 66, 69-71) using .agents/batch-10-plan.md on sgykfjsm/batch-10-diagnostics.
 
 
 review_followups_filed:
@@ -1042,11 +1046,21 @@ assumptions:
     The batch decomposition above is re-derived by run-batch-cycle's triage step each run; it is
     recorded here for orientation, not as a binding plan.
 
-last_updated: 2026-09-11
+last_updated: 2026-09-16
 
 backlog_additions:
   - issue: 122
     title: GUI random subtle background image from a configured directory
     state: open
-    implementation: draft-pr
+    implementation: merged
     scope: Explicitly requested separately from Batch 9; original Batch 7 deferral preserved as history
+
+next_batch_preparation:
+  branch: sgykfjsm/batch-10-diagnostics
+  base: 17073829398aa540b6a8ea56a0155b0e30880dfc
+  plan: .agents/batch-10-plan.md
+  selected: 10a
+  tasks: [T065, T068, T069, T070]
+  issues: [66, 69, 70, 71]
+  state: prepared-not-implemented
+  remaining_10b: [T066, T067, T071, T072, T073, T074]
