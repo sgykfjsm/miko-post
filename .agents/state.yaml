@@ -858,17 +858,19 @@ in_progress:
     branch: sgykfjsm/batch-10-diagnostics-2
     base: 17073829398aa540b6a8ea56a0155b0e30880dfc
     state: implemented-under-review
-    committed: false
-    pushed: false
-    committed_through: f3ab572e8b9c4d1b6eb72db7e6942831bfccdb12
+    committed: true
+    pushed: true
+    commits: [f3ab572e8b9c4d1b6eb72db7e6942831bfccdb12, 333799a]
+    committed_through: 333799a
     publication_note: >-
-      committed and pushed are false because they describe the tree that was reviewed, not the
-      batch's first commit. f3ab572 is committed, pushed and opened as PR #126; both review
-      correction passes on top of it - including the one production behaviour change in
-      internal/logging/rotate.go open() - are uncommitted in the worktree and exist on no remote.
-      What #126 currently shows is therefore not what was reviewed, and its description is stale.
-      Committing, pushing and updating the PR are the coordinator's pre-merge actions, not the
-      fix pass's.
+      The reviewed tree is now published. f3ab572 is the implementation; 333799a carries all three
+      review correction passes, including the one production behaviour change in
+      internal/logging/rotate.go open() (DEC-F4). PR #126's description was replaced from
+      .agents/batch-10a-pr-body.md at the same time, so the stale cycle-0 text - which wrongly
+      attributed the load-time upper bound to issue #101 - is gone (finding CON-004, discharged by
+      the coordinator; reviewers and fix passes are both barred from pushing).
+      Verified after pushing: PR #126 head is sgykfjsm/batch-10-diagnostics-2, state OPEN, and
+      closingIssuesReferences is empty, so no issue auto-closes on merge.
     pull_request: 126
     opened_at_head: f3ab572e8b9c4d1b6eb72db7e6942831bfccdb12
     prepared_pr_body: .agents/batch-10a-pr-body.md
