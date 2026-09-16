@@ -107,6 +107,12 @@ func NewService(settings config.Settings, recording post.Recording) *post.Servic
 //   - logging.path is handed over as-is. Empty means the resolved default and
 //     logging.Open applies that rule itself (issue #107); resolving it here
 //     would put the trap back for the second front door.
+//   - the two rotation thresholds are handed over in the units the settings
+//     file states them in, because logging.Options takes them that way. It
+//     converts and clamps; a front door that did its own arithmetic would be
+//     the second place a wrapping value had to be caught. Omitting them
+//     entirely is the silent bug this list exists for: the log would grow
+//     without bound and nothing would say so (FR-072).
 //   - include_version and include_git_commit are expressed by supplying the
 //     value or the empty string, which is the contract logging.Options states.
 //     A caller that passed the values unconditionally would stamp every record
@@ -125,11 +131,13 @@ func NewService(settings config.Settings, recording post.Recording) *post.Servic
 // that is discovered to have been off.
 func OpenLogger(settings config.Settings, source logging.Source) *logging.Logger {
 	return logging.Open(logging.Options{
-		Path:       settings.Logging.Path,
-		Source:     source,
-		Redact:     []config.Secret{settings.Sink.Telegram.BotToken},
-		AppVersion: stampedIf(settings.Logging.IncludeVersion, version.Version),
-		GitCommit:  stampedIf(settings.Logging.IncludeGitCommit, version.Commit),
+		Path:            settings.Logging.Path,
+		Source:          source,
+		RotateSizeMiB:   settings.Logging.RotateSizeMiB,
+		RotateAfterDays: settings.Logging.RotateAfterDays,
+		Redact:          []config.Secret{settings.Sink.Telegram.BotToken},
+		AppVersion:      stampedIf(settings.Logging.IncludeVersion, version.Version),
+		GitCommit:       stampedIf(settings.Logging.IncludeGitCommit, version.Commit),
 	})
 }
 

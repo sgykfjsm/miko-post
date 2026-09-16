@@ -273,15 +273,15 @@ Batch 8; the GUI rendering/status coverage is headless and the HTTP server is lo
 
 ### Tests for User Story 5
 
-- [ ] T065 [P] [US5] Write rotation tests covering the size trigger, the age trigger, both conditions evaluated before each write, the `YYYYMMDDhhmmss` suffix, and that no rotated file is ever deleted, in `internal/logging/rotate_test.go` (FR-072 – FR-074)
+- [x] T065 [P] [US5] Write rotation tests covering the size trigger, the age trigger, both conditions evaluated before each write, the `YYYYMMDDhhmmss` suffix, and that no rotated file is ever deleted, in `internal/logging/rotate_test.go` (FR-072 – FR-074)
 - [ ] T066 [P] [US5] Write message-capture tests asserting a fully successful post records no body while a failed post records the original body, in `internal/logging/logger_test.go` (FR-068, SC-008)
 - [ ] T067 [P] [US5] Write a degraded-logging test asserting that with an unwritable log path every sink still runs, real outcomes are reported, the exit status is unchanged, and **exactly one** warning is emitted, in `internal/post/service_test.go` (FR-076, SC-013)
 
 ### Implementation for User Story 5
 
-- [ ] T068 [US5] Implement the rotating writer that captures the active file's creation time at open, tracks size, and evaluates both conditions before every write, renaming the active file with the local-time `YYYYMMDDhhmmss` suffix, in `internal/logging/rotate.go` (FR-072, FR-073, research R-006)
-- [ ] T069 [US5] Implement creation-time lookup via `Birthtimespec` behind a build tag, with a portable `ModTime()` fallback, in `internal/logging/birthtime_darwin.go` and `internal/logging/birthtime_other.go` (FR-072, resolves A-011)
-- [ ] T070 [US5] Implement the rotation-name collision rule appending `-1`, `-2`, … so a rotated file is never overwritten, in `internal/logging/rotate.go` (resolves A-009, constitution principle VI)
+- [x] T068 [US5] Implement the rotating writer that captures the active file's creation time at open, tracks size, and evaluates both conditions before every write, renaming the active file with the local-time `YYYYMMDDhhmmss` suffix, in `internal/logging/rotate.go` (FR-072, FR-073, research R-006)
+- [x] T069 [US5] Implement creation-time lookup via `Birthtimespec` behind a build tag, with a portable `ModTime()` fallback, in `internal/logging/birthtime_darwin.go` and `internal/logging/birthtime_other.go` (FR-072, resolves A-011)
+- [x] T070 [US5] Implement the rotation-name collision rule appending `-1`, `-2`, … so a rotated file is never overwritten, in `internal/logging/rotate.go` (resolves A-009, constitution principle VI)
 - [ ] T071 [US5] Implement the `message_on_error_only` capture rule — omit the body on full success, include it when any sink failed — in `internal/logging/logger.go` (FR-068)
 - [ ] T072 [US5] Record `message_len` as a rune count and `message_bytes` as the UTF-8 byte length on successful posts, in `internal/logging/logger.go` (resolves A-010, FR-068)
 - [ ] T073 [US5] Record stack traces for panics and unexpected errors subject to the `stack_trace` setting, and **never** manufacture a trace for an expected operational error, in `internal/logging/logger.go` (FR-071)

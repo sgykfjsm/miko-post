@@ -1,37 +1,29 @@
 # Project status — miko-post
 
-Updated 2026-09-11. Batches 1–8 are merged; Batch 8 merged as `48fdd6a` (#124).
-Batch 9 / T059–T064 / #60–#65 and the separately requested GUI feature #122 are
-implemented, reviewed, committed and pushed on `sgykfjsm/batch-9-review-fixes`
-in draft PR [#125](https://github.com/sgykfjsm/miko-post/pull/125).
+Updated 2026-09-16. Batches 1–9 and explicitly requested GUI background #122 are
+merged. PR #125 merged as `17073829398aa540b6a8ea56a0155b0e30880dfc`;
+its tree matches reviewed `7bb43d1` exactly. Both scopes passed contract,
+correctness and adversarial review after fixes, combined make check and native
+arm64 build. GitHub reported no CI checks; no new test run was needed for the
+identical merge tree. Prior native/live-service validation limits remain in the reports.
 
-Both scopes passed fresh contract, correctness and adversarial reviews after one
-correction pass each. Batch 9 fixed two validation gaps (COR-001/COR-002): original
-request-deadline equality, rejected reset-deadline mutation, second-request timeout
-and real HTTP→Service→JSONL integration. Issue #122 fixed its COR-001 with decodable
-boundary fixtures; four removed/tightened guard mutations fail. No required finding
-or decision remains. Complete reports: `batch-9-review.md` and `issue-122-review.md`.
+Batch 10a — lossless log rotation (T065, T068–T070 / #66, #69–#71) — is implemented on
+`sgykfjsm/batch-10-diagnostics-2` from merged main and opened as PR #126. Its review
+verdict is not final, and three review correction passes are applied on top of the opened
+head (the third is the last the review loop permits). Both are uncommitted: #126 still shows f3ab572 only, and its description is stale.
+See [batch-10-plan.md](batch-10-plan.md). 10b (T066–T067, T071–T074: message capture,
+traces and verification of existing counts/degradation behavior) is not started and stays
+out of #126. Rotation race and partial-failure handling was the identified design risk and
+is what the review has been examining. Batches 11–12 remain later work.
 
-Batch 9 supplies one trusted formatting-only rescue, original text/destination,
-omitted parse_mode, shared deadline and correlated fallback events. Failed rescue
-retains both diagnostics and classifies by the final attempt. T059–T064 are checked.
-Issue #122 adds optional `gui.background_image_dir`, top-level random PNG/JPEG,
-12% opacity over black, aspect-preserving placement and graceful bounded fallback.
+An earlier version of this file said Batch 10 was prepared on `sgykfjsm/batch-10-diagnostics`
+and that no next-batch code was implemented. Both were true when written; neither is true
+of the current tree, and the branch of that name was never created.
 
-Validation: combined make check and native arm64 build passed; uncached core/app/
-Telegram race tests passed. Native GUI checks verified multilingual editor content,
-success/failure output and black fallback with temporary config/state/vault. No live
-Telegram, real IME-composition or Intel Mac validation is claimed.
+Next: finish the staged review of PR #126 and merge it, then implement Batch 10b.
 
-Durable spec/contracts, English/Japanese design notes and user/developer guides are
-reconciled. Prior status is archived; tasks remain because Batches 10–12 are unfinished.
-Review targets and publication patches are preserved under the external review runs.
-See `change-groups.json` for the separate commit boundaries.
-
-Feature commits: `1cac8b2` (Batch 9) and `5fd39bd` (#122). Documentation follows in
-a separate commit. Publication combines both explicitly requested scopes on the existing
-branch, following commit-and-pr branch policy. No history was rewritten or issue closed.
-The pre-existing Claude manifest edit is preserved and excluded from every group.
-
-Next: obtain acceptance and merge draft PR #125. Batch 10 follows acceptance/merge.
-The feature is not ready for closeout.
+Batch 10a's rotation code and tests are the new changes on top of the merge and planning
+records. The unrelated pre-existing Claude manifest edit remains excluded. Issues #60–#65
+and #122 remain open pending separate issue cleanup; the PR merge did not auto-close them.
+#66 and #69–#71 stay open until #126 merges, although their tasks are marked complete in
+`tasks.md`. Feature closeout is premature.

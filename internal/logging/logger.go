@@ -107,10 +107,15 @@ type Options struct {
 	// Writer, when non-nil, receives the records instead of a file at Path,
 	// and Open touches no part of the filesystem.
 	//
-	// This is the seam the rotating writer plugs into (T068-T070, FR-072 -
-	// FR-074): rotation owns a file's whole lifecycle — deciding before every
-	// write whether to rename and reopen — so it cannot be layered onto a
-	// *os.File this package opened and holds. The tests use the same seam.
+	// This is the test seam, and it is also the only way to opt out of the
+	// rotating writer: rotation belongs to the file this package opens, so a
+	// caller supplying a destination supplies its whole lifecycle. Batch 4 left
+	// this field expecting the rotating writer to be plugged in through it from
+	// outside; T068-T070 built rotation inside Open instead, so that the
+	// non-regular-file refusal, the O_APPEND, FR-075's directory creation and
+	// FR-076's degradation reporting are discharged once by this package for
+	// the file it owns rather than re-implemented by every front door. See
+	// RotateSizeMiB.
 	//
 	// Whatever plugs in here inherits two obligations this package discharges
 	// for the file it opens itself, because setting Writer means openLogFile
@@ -123,10 +128,32 @@ type Options struct {
 	//     (FR-074).
 	//
 	// Neither is enforceable from here. A writer supplied to this field is
-	// trusted with them.
+	// trusted with them, and a writer supplied here is never rotated.
 	//
 	// A supplied Writer is not closed by Close; whoever supplied it owns it.
 	Writer io.Writer
+
+	// RotateSizeMiB and RotateAfterDays are FR-072's two thresholds, carried in
+	// the same units contracts/config-schema.md gives the user so that the one
+	// conversion into bytes and duration — and the one place a wrapping value
+	// is clamped — lives here rather than at each front door. See
+	// rotateSizeBytes and rotateAge.
+	//
+	// Rotation is evaluated before every write, renames the active log with a
+	// local-time YYYYMMDDhhmmss suffix, and never deletes, expires or
+	// compresses anything (FR-073, FR-074).
+	//
+	// A threshold of zero or less disables that trigger rather than meaning
+	// "immediately". config.Validate rejects both keys at zero, so the only
+	// callers that reach here with one are tests and a front door with a wiring
+	// bug; for those, not rotating loses nothing, while rotating on every write
+	// would turn the log into a directory of single-record files. Both unset —
+	// the zero Options — is therefore an ordinary append-only log file, which
+	// is what this package did before rotation existed.
+	//
+	// Ignored entirely when Writer is set.
+	RotateSizeMiB   int
+	RotateAfterDays int
 
 	// Redact are the credentials that must never reach the log, whatever
 	// shape a record carries them in (FR-069, FR-043).
@@ -317,7 +344,15 @@ func Open(opts Options) *Logger {
 
 		logger.path = path
 
-		file, err := openLogFile(path)
+		// The rotating writer and not a bare *os.File, because rotation has to
+		// decide before every write whether to rename and reopen, which it can
+		// only do if it owns the handle (FR-072 - FR-074). It calls openLogFile
+		// itself, for the first file and for every one after it, so the
+		// non-regular-file refusal and the O_APPEND apply to all of them.
+		file, err := openRotating(path, rotationOptions{
+			maxSize: rotateSizeBytes(opts.RotateSizeMiB),
+			maxAge:  rotateAge(opts.RotateAfterDays),
+		})
 		if err != nil {
 			// target stays nil: safeWriter discards, and every method below
 			// keeps working.

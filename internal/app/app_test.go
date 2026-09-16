@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -471,4 +472,103 @@ func TestOpenLoggerUsesTheConfiguredPathAndTheDefaultWhenUnset(t *testing.T) {
 	if err := logger.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
+}
+
+// TestOpenLoggerHonoursTheRotationThresholds is the wiring guard for T068-T070
+// (FR-072). Both thresholds are settings this function has to hand across, and
+// dropping either is invisible: the log keeps recording, the post keeps
+// working, and the file simply grows forever. Each subtest configures one
+// trigger so the other cannot explain the rotation.
+func TestOpenLoggerHonoursTheRotationThresholds(t *testing.T) {
+	// archived returns the rotated files beside the active log.
+	archived := func(t *testing.T, dir, active string) []string {
+		t.Helper()
+
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			t.Fatalf("read the log directory: %v", err)
+		}
+
+		var names []string
+
+		for _, entry := range entries {
+			if entry.Name() != filepath.Base(active) {
+				names = append(names, entry.Name())
+			}
+		}
+
+		return names
+	}
+
+	t.Run("size", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "app.jsonl")
+
+		settings := validSettings(t)
+		settings.Logging.Path = path
+		settings.Logging.RotateSizeMiB = 1
+		// Far out of reach, so only the size threshold can rotate anything.
+		settings.Logging.RotateAfterDays = 3650
+
+		logger := app.OpenLogger(settings, logging.SourceCLI)
+
+		body := strings.Repeat("x", 4096)
+		for i := range 300 {
+			logger.Post("post-"+strconv.Itoa(i)).Info(logging.EventMessageReceived, slog.String("message", body))
+		}
+
+		if err := logger.Close(); err != nil {
+			t.Fatalf("close the logger: %v", err)
+		}
+
+		if got := archived(t, dir, path); len(got) == 0 {
+			t.Fatal("1.2 MiB of records with rotate_size_mib = 1 produced no archive; the setting is not reaching the logger")
+		}
+	})
+
+	t.Run("age", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "app.jsonl")
+
+		if err := os.WriteFile(path, []byte("from a month ago\n"), 0o600); err != nil {
+			t.Fatalf("seed the log: %v", err)
+		}
+
+		// Backdate the file. Setting the modification time earlier than the
+		// creation time moves the creation time with it on darwin, and every
+		// other platform reads the modification time as the creation time
+		// anyway — so this is how old a log looks to the age trigger on both.
+		old := time.Now().Add(-30 * 24 * time.Hour)
+		if err := os.Chtimes(path, old, old); err != nil {
+			t.Fatalf("backdate the log: %v", err)
+		}
+
+		settings := validSettings(t)
+		settings.Logging.Path = path
+		// Far out of reach, so only the age threshold can rotate anything.
+		settings.Logging.RotateSizeMiB = 1024
+		settings.Logging.RotateAfterDays = 7
+
+		logger := app.OpenLogger(settings, logging.SourceCLI)
+
+		logger.Post("post-1").Info(logging.EventMessageReceived)
+
+		if err := logger.Close(); err != nil {
+			t.Fatalf("close the logger: %v", err)
+		}
+
+		rotated := archived(t, dir, path)
+		if len(rotated) != 1 {
+			t.Fatalf("archives = %v, want exactly one: a 30-day-old log with rotate_after_days = 7", rotated)
+		}
+
+		content, err := os.ReadFile(filepath.Join(dir, rotated[0]))
+		if err != nil {
+			t.Fatalf("read the archive: %v", err)
+		}
+
+		if string(content) != "from a month ago\n" {
+			t.Fatalf("archive = %q, want the old log preserved intact", content)
+		}
+	})
 }
