@@ -1128,7 +1128,110 @@ completed:
           internal/logging/birthtime_other.go and internal/logging/birthtime_darwin.go, both of
           which name DEC-ADV-006 in their doc comments and point here;
           .agents/batch-10a-pr-body.md; .agents/work-log.md
-in_progress: []
+in_progress:
+  - id: 10b
+    name: US5 post diagnostics
+    tasks: [T066, T067, T071, T072, T073, T074]
+    issues: [67, 68, 72, 73, 74, 75]
+    branch: sgykfjsm/batch-10b-post-diagnostics
+    base: 0e3df5ec524df20e0d1d46b4572e11dbe83e810a
+    base_note: >-
+      Branched from this worktree's e0a0c39, which is merged main plus the 10a record
+      reconciliation commit. The production base is 0e3df5e; e0a0c39 adds only .agents/ files.
+    state: implemented-not-reviewed
+    committed: false
+    pushed: false
+    pull_request: none
+    prepared_pr_body: .agents/batch-10b-pr-body.md
+    branch_note: >-
+      NOT sgykfjsm/batch-10b-diagnostics. That name was already taken by a pushed branch carrying
+      a competing reconciliation of the 10a merge (commit d057f45, see completed 10a
+      competing_record), checked out in the sibling worktree
+      /Users/shige/orca/workspaces/miko-post/sgykfjsm-batch-10-diagnostics-2 and left untouched.
+      The name collision is what surfaced that branch at all.
+    review_verdict: none
+    delivered:
+      T071: >-
+        message capture in internal/app/recorder.go - the body is held from MessageReceived and
+        attached to every record that reports a failure, with the terminal record as a fallback
+        only when no failure record could carry it (DEC-G1).
+      T072: >-
+        NO CODE CHANGE. message_len and message_bytes already carried R-010's semantics. Verified
+        by three mutants (byte count under message_len, rune count under message_bytes, the two
+        swapped), all killed by the existing TestASuccessfulPostWritesTheContractsRecords, rather
+        than by reading the code and declaring it correct.
+      T073: >-
+        stack traces. debug.Stack() inside internal/post's deferred recover, read back through the
+        new post.Traced interface, recorded subject to stack_trace (DEC-G3, DEC-G4).
+      T074: >-
+        FR-076's warning for the GUI front door, which never called Logger.Degraded() before this
+        batch (issue #75). Once per session, replacing the stale log-path line (DEC-G5, DEC-G6).
+      T066: internal/app/capture_test.go
+      T067: internal/app/degraded_path_test.go, plus internal/gui/degraded_test.go for the GUI half
+    deviations_from_task_text:
+      - >-
+        T067 is in internal/app, not internal/post/service_test.go: the posting core does not
+        import internal/logging and cannot be handed a logger, so "the log could not be opened"
+        is not a condition it can be placed in.
+      - >-
+        T074 did not touch internal/cli/render.go, which the task named. The CLI already emitted
+        the warning correctly through closeAndWarn/warningFor with its own tests; only the GUI half
+        was missing, and adding a second CLI code path to satisfy a file list would be a change
+        with no defect behind it.
+      - >-
+        T073 changed internal/post/service.go, outside its stated file. Unavoidable: recover()
+        returns the panic value only, and the frames are gone by the time any later layer sees the
+        error. SinkAttempt.NameErr's own comment is the precedent for a T073-motivated change at
+        the recovery point.
+    validation: >-
+      make check (gofmt, vet, full -race suite) and a native darwin/arm64 build. internal/app at
+      100.0% of statements, matching its baseline; internal/gui at 73.4% against a 74.2% baseline,
+      the whole difference being one new statement inside Run, which is 0% covered at baseline too.
+      GOOS=linux GOARCH=386/arm/mips/mipsle go vet ./internal/post/ clean; internal/app production
+      code builds clean on 386. 28 mutants built, 27 killed.
+    mutants:
+      built: 28
+      killed: 27
+      survived: 1
+      survivor_disposition: >-
+        keepTrace's explicit `trace == ""` early return. Removing it changed no behaviour and failed
+        no test, because storing "" when nothing is stored is a no-op and the first-wins check
+        already rejects an empty offer once a real trace is held. The guard was DELETED rather than
+        given a test - an unfailable guard in front of a working one is weight with no defect behind
+        it. Both remaining keepTrace mutants (last-wins, no-op) are killed.
+      false_kill_caught: >-
+        The first message_len mutant scored as killed with no test named: replacing
+        utf8.RuneCountInString with len left the utf8 import unused, so the package failed to
+        compile and the runner read a non-zero exit as a kill. Rebuilt as a compiling mutant and
+        genuinely killed. Every subsequent mutant run checks for a build failure before scoring.
+      notable: >-
+        Both "manufacture a trace" mutants are killed - a traceFor falling back to
+        "goroutine 1 [running]:\n" + err.Error(), and a panicError.stack pinned to a plausible
+        constant. FR-071's no-manufactured-trace rule is therefore tested, not asserted. The trace
+        assertion names a frame from the panicking sink rather than checking the field is non-empty,
+        which is what makes both detectable.
+    observed: >-
+      The record shape changed and the pre-existing suite stayed green: failure records gained a
+      message field and nothing noticed, because no existing test asserted field completeness on a
+      failure record. That is the gap T066 closes, and the reason its tests assert presence AND
+      absence rather than values alone.
+    validation_gaps: [Intel-Mac, non-darwin-platform, 32-bit-execution, real-Fyne-session]
+    not_fixed_here: >-
+      Two items. (1) internal/app's test file does not compile for a 32-bit target - app_test.go:265
+      uses int(config.MaxTimeoutSeconds), which overflows a 32-bit int. Pre-existing: app_test.go is
+      byte-identical to 0e3df5e, and it was found only by running 10a's cross-vet gate over this
+      batch's packages. 10a solved the same shape in internal/logging by scoping the 64-bit boundary
+      to its own file. (2) The GUI cannot report a Close failure: logger.Close runs in Run's deferred
+      call, after a.Run returns and the window is gone, so there is no surface left. Degraded()
+      covers the open failure and every failed write, which are the two this front door can report.
+      Both disclosed in the PR body.
+    decisions_taken: [DEC-G1, DEC-G2, DEC-G3, DEC-G4, DEC-G5, DEC-G6, DEC-G7]
+    decisions_recorded_in: .agents/batch-10b-pr-body.md
+    decisions_note: >-
+      Recorded in the PR body's Decisions section, which is prepared BEFORE the commit rather than
+      after. The recurring failure this avoids is an id that reads as authoritative and resolves to
+      nothing; DEC-G1..G7 are all defined where they are cited.
+
 blockers: []
 
 time_sensitive:
@@ -1182,16 +1285,14 @@ time_sensitive:
     deadline: before tagging v0.1.0
 
 next_best_action: >-
-  Implement Batch 10b - US5 post diagnostics: T066, T067, T071 (the message_on_error_only capture
-  rule), T072 (message_len as a rune count, message_bytes as the UTF-8 length), T073 (stack traces
-  subject to the stack_trace setting) and T074 (the single FR-076 warning through the front door in
-  use) - on a fresh branch from merged main 0e3df5ec524df20e0d1d46b4572e11dbe83e810a, using
-  .agents/batch-10-plan.md. Issues 67, 68, 72-75. Two standing notes land inside this batch: issue
-  110 (a panic from Sink.Name is discarded before T073 could record it, so closing it needs a change
-  in nameOf itself) and the observation carried to issue 75 that internal/gui never calls Degraded(),
-  so FR-076 yields zero warnings from the GUI today - that is T074's remaining work, not a 10a
-  regression. Batch 10a is merged and its four issues are closed; nothing is owed on it.
-
+  Review Batch 10b. It is implemented on sgykfjsm/batch-10b-post-diagnostics and NOT yet committed,
+  pushed or opened as a PR; .agents/batch-10b-pr-body.md is prepared. Run the three review stages
+  (contract, correctness, adversarial) against the batch diff, then publish. Two things a reviewer
+  should go at first: DEC-G1's claimBody, where the body lands on every failure record but the
+  terminal record only as a fallback, and DEC-G3's stack capture in internal/post, which is outside
+  T073's stated file. After the review and merge, close #67, #68 and #72-#75 explicitly - the PR
+  body carries no closing keyword, which is exactly what left #66 and #69-#71 open for two days
+  after #126.
 
 review_followups_filed:
   filed_at: 2026-09-07
