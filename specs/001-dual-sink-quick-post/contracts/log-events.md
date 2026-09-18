@@ -53,17 +53,18 @@ by `message_id` for those details. Under DEC-E3, either terminal event may carry
 when a sink's name panicked or has no registered event vocabulary. That diagnostic does
 not change the terminal event's name or level, which still reflects delivery outcomes.
 
-## What is emitted as of T040, and what is still owed
+## What is emitted as of T071-T074, and what is still owed
 
-T040 emits `message_received`, the six sink lifecycle events, and the two terminal events. Three
-entries in the table above are not yet at their final state, and each is recorded here so that a
-missing field reads as a scheduled gap rather than as a defect.
+T040 emits `message_received`, the six sink lifecycle events, and the two terminal events. One
+entry in the table above is not yet at its final state, and it is recorded here so that a missing
+field reads as a scheduled gap rather than as a defect. The other two — `message` and `stack` —
+were delivered by T071 and T073 and are described in their own sections below.
 
 | Field | State after T040 | Owner of the rest |
 |---|---|---|
 | `error_type` | `timeout`, `permission_denied`, `chat_not_found`, `unauthorized`, `rate_limited`, or generic `failed`, selected with the display reason by one classifier | **T056 / Batch 8** adds specific categories; `timeout` and the generic fallback retain their meaning |
-| `message` | **Not emitted at all.** FR-068's capture rule needs `message_on_error_only` and the post's outcome, so no record carries the body yet — including a failure, where SC-008 wants it | **T071** |
-| `stack` | Not emitted. A recovered panic from a sink's `Name` is reported as text on the terminal record (issue #110), which keeps the value rather than the trace | **T073** |
+| `message` | ~~Not emitted at all.~~ **Delivered by T071**; see the message-capture rule below | — |
+| `stack` | ~~Not emitted.~~ **Delivered by T073**; see the traces section below | — |
 
 `message_len` and `message_bytes` **are** emitted, on `message_received`, as R-010 defines them.
 
@@ -89,6 +90,26 @@ With `message_on_error_only = true` (the default):
 - **Any** enabled sink failed → the original message body is recorded, sufficient to reconstruct
   and re-send the post by hand (SC-008).
 
+**Which record carries it (T071).** The body goes on **every record that reports a failure** — each
+`*_failed` sink event and each formatting-fallback failure — because SC-008 asks for a post to be
+re-sendable without consulting any other source, and those are the records that already name the
+destination, the error type and the detail. One record, everything needed.
+
+The terminal `request_completed_with_error` record carries it **only when no failure record could**.
+That happens for a sink whose `Name` panics: it resolves to a sentinel the event vocabulary does not
+cover (issue #110), so no lifecycle record is emitted and the terminal record is the post's only
+record. Without the fallback FR-068 would be unmet for exactly that post; with it applied
+unconditionally, a two-sink post that lost both destinations would carry the user's private text
+three times.
+
+With `message_on_error_only = false` the body is recorded on `message_received` instead — once, on
+the post's intake event — and on no other record. FR-068 constrains only the enabled case, so this
+is a choice: putting it on every record would repeat the body once per destination for no
+reconstruction benefit.
+
+The captured body passes through the same `Options.Redact` scrub as every other field, so a message
+that happens to contain the bot token is redacted rather than leaked (FR-069).
+
 ## Secrets (FR-069, FR-043)
 
 The bot token MUST NEVER appear in any record. Enforced by the `Secret` type (data-model.md) and
@@ -104,6 +125,19 @@ first error.
 Recorded for panics, unexpected errors, and failures where a trace is available and useful,
 subject to `stack_trace`. Expected operational errors — a timeout, a 401, a missing note with
 `create_if_missing = false` — MUST NOT get an artificially manufactured trace.
+
+**How the prohibition is kept (T073).** The stack is captured by `debug.Stack()` inside the deferred
+`recover` in `internal/post`, which is the last moment the frames still exist — `recover()` returns
+the panic value and nothing else. The error then carries it, and `post.Traced` is the only way to
+ask for it. An expected operational error does not implement `Traced`, so there is no code path that
+could manufacture a plausible stack for one: the absence of a trace in the record is the absence of
+a trace in the error.
+
+`stack` appears on the sink's `*_failed` record for a panic in `Send`, and on the terminal record for
+a panic in `Name`, which has no lifecycle record to ride on. Two panics in one post keep the first
+trace: a second full goroutine dump would be kilobytes of near-identical frames, and the `error`
+field already records that both happened. Capture is unconditional and cheap; `stack_trace` governs
+whether the trace is *recorded*.
 
 ## Rotation (FR-072 – FR-075)
 
