@@ -795,7 +795,7 @@ func TestErrorTypeIsEmptyForASuccess(t *testing.T) {
 	}
 }
 
-// TestErrorTypeClassifiesAFailureWithNoError covers the shape no sink produces
+// TestErrorTypeIsSpecificEvenWithNoError covers the shape no sink produces
 // and the contract still requires a value for.
 func TestErrorTypeIsSpecificEvenWithNoError(t *testing.T) {
 	t.Parallel()

@@ -1458,7 +1458,7 @@ in_progress:
           private direction - body recorded always. That is safe only because config.Defaults sets
           it true and both front doors build from loaded settings, which always pass through
           Defaults, and that assumption is asserted rather than assumed by
-          TestDefaultsKeepTheMessageBodyOffSuccessfulRecords. The field mirrors the contract key's
+          TestTheShippedDefaultsRestrictCaptureAndCollectTraces. The field mirrors the contract key's
           name and direction rather than being inverted for a safer zero value: a field that
           disagrees with the key it implements is worse for a reader than a documented zero value.
         recorded_in: "internal/app/recorder.go Recording, NewRecording"

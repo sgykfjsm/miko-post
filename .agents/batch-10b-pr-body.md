@@ -84,7 +84,7 @@ rewrite away from being unreachable — contract finding CON-009.)
   that *begins* mid-session is still reported, on the first post that could have been affected.
 - **DEC-G6** — the warning **replaces** the `Details: <log path>` line rather than joining it.
 - **DEC-G7** — `NewRecording` takes `config.LoggingSettings`, whose zero value is the less private
-  direction; `TestDefaultsKeepTheMessageBodyOffSuccessfulRecords` pins that the shipped default is
+  direction; `TestTheShippedDefaultsRestrictCaptureAndCollectTraces` pins that the shipped default is
   the safe one.
 - **DEC-G8** — **"unexpected errors" yields no `stack`, and that is FR-071 met rather than partly
   delivered.** The requirement qualifies all three of its categories with "where a trace is
