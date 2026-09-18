@@ -1170,6 +1170,12 @@ in_progress:
           the new main once that PR merges, so its own PR carries only its own commits. Until then
           10b's branch still contains e0a0c39 and a PR opened from it would still show four commits.
         con_002_prepared_body: .agents/batch-10a-records-pr-body.md
+        con_002_published: >-
+          PR #131, https://github.com/sgykfjsm/miko-post/pull/131, opened 2026-09-18 from
+          sgykfjsm/batch-10a-records at e0a0c39 against main 0e3df5e. One commit, four files, all
+          under .agents/, mergeable_state clean. closingIssuesReferences verified EMPTY after
+          opening - the body names #66, #69-#71, #126, #60-#65, #115, #118 and #119 and must link
+          none of them, since the four it reports on are already closed.
         fix_pass: 1
       correctness:
         verdict: request-changes
