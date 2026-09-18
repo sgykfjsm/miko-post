@@ -850,18 +850,22 @@ completed:
     resolved_review_findings: [COR-001]
     review_required_findings: []
     validation_gaps: [real-IME-composition, Intel-Mac]
-in_progress:
   - id: 10a
     name: Lossless log rotation
     tasks: [T065, T068, T069, T070]
     issues: [66, 69, 70, 71]
     branch: sgykfjsm/batch-10-diagnostics-2
     base: 17073829398aa540b6a8ea56a0155b0e30880dfc
-    state: implemented-under-review
+    state: merged
     committed: true
     pushed: true
-    commits: [f3ab572e8b9c4d1b6eb72db7e6942831bfccdb12, 333799a]
-    committed_through: 333799a
+    commits:
+      - 55a1ac032a71946c249f4ef6acaa8dbf030c9fa2   # docs: Batch 9 merge and diagnostics-batch preparation
+      - f3ab572e8b9c4d1b6eb72db7e6942831bfccdb12   # feat: the rotation implementation (the head #126 was opened at)
+      - 333799a6b1b1a65c7de62972fddff581f65220c7   # test: the three review correction passes, incl. DEC-F4
+      - 9ba5b5d9ebdea32fb38588d38cea63ff3f455acb   # docs: state.yaml - committed, pushed, re-described
+      - 73d9c575137aab69bcf56d96ecb14362e532be0f   # docs: state.yaml - follow-ups #127-#130
+    committed_through: 73d9c575137aab69bcf56d96ecb14362e532be0f
     publication_note: >-
       The reviewed tree is now published. f3ab572 is the implementation; 333799a carries all three
       review correction passes, including the one production behaviour change in
@@ -874,7 +878,49 @@ in_progress:
     pull_request: 126
     opened_at_head: f3ab572e8b9c4d1b6eb72db7e6942831bfccdb12
     prepared_pr_body: .agents/batch-10a-pr-body.md
-    review_verdict: not-final
+    merged_from_head: 73d9c575137aab69bcf56d96ecb14362e532be0f
+    squashed_as: 0e3df5ec524df20e0d1d46b4572e11dbe83e810a
+    merged_at: 2026-09-16T14:32:40Z
+    merged_by: sgykfjsm
+    merge_note: >-
+      Squash-merged into main. The merged tree is the reviewed tree: 73d9c57 is #126's head at
+      merge and carries all three correction passes. No CI checks were configured on the PR, and
+      no GitHub review was submitted - the staged review ran locally, so GitHub records none.
+      Recorded on 2026-09-18, two days after the fact: nothing wrote the merge down when it
+      happened, and project-status.md, work-log.md and next_best_action all still described #126
+      as open with uncommitted correction passes until then.
+    review_verdict: not-final-at-merge
+    review_run_state: /Users/shige/.agents/review-runs/sgykfjsm__miko-post/20260916T030000Z-3be7358f
+    review_cycles_run: 3   # cycles 0, 1, 2 in the manifest
+    review_fix_passes_applied: 3
+    review_verdict_note: >-
+      No final verdict was ever recorded, and the run manifest is the evidence. Cycle 2 - the one
+      that would have pronounced on the third fix pass - is recorded with contract valid (new
+      findings CON-009, CON-010) and correctness pass (new finding COR-009), but its adversarial
+      stage's attempt 2 is still 'status: running' and no cycle-02 report directory was ever
+      written. The third fix pass then applied six findings, three of them adversarial (ADV-007,
+      ADV-008, ADV-009), so that stage did deliver findings; nothing ever reviewed the tree those
+      fixes produced, which is the tree that merged. Three fix passes is the maximum the loop
+      permits, so the loop ran out of passes rather than reaching a verdict.
+      This is deliberately NOT upgraded to 'passed-with-notes'. The batch is merged and validated
+      and its findings were all addressed - but 'the review pronounced it sound' and 'the review
+      ran out of road with every finding fixed' are different claims, and only the second is
+      supported. Each of the three passes found a test that could not fail on the property it
+      named, so the loop was still yielding real findings when it stopped.
+    competing_record: >-
+      Commit d057f450651f7305ba374bd842bbc1234384d9be on branch sgykfjsm/batch-10b-diagnostics
+      (pushed, never merged to main, checked out in the sibling worktree
+      /Users/shige/orca/workspaces/miko-post/sgykfjsm-batch-10-diagnostics-2) reconciled this same
+      region two minutes after the merge and recorded review_verdict: passed-with-notes,
+      review_cycles: 2, and review_stages.adversarial: findings-none-blocking. That is not
+      supported by the manifest above: there were three cycles, not two, and cycle 2's adversarial
+      stage never completed. Its merge_verification is worth keeping, though, and is adopted here -
+      tree equality is stronger evidence than matching head shas. Resolve before either record is
+      merged to main; they are two independent reconciliations of one event.
+    merge_verification: >-
+      The squashed commit 0e3df5e and the reviewed tip 73d9c57 have the same tree,
+      a26e21c56c2caa1c2100ab61e55341ed7cc654e1, so main carries byte-for-byte what the last
+      correction pass produced. Verified in this worktree on 2026-09-18.
     followups_filed:
       filed_at: 2026-09-16
       authorized_by: user
@@ -896,6 +942,21 @@ in_progress:
     review_mode: review-and-fix
     review_fix_passes: 3
     tracked_completed_tasks: [T065, T068, T069, T070]
+    issues_closed:
+      closed_at: 2026-09-18
+      issues: [66, 69, 70, 71]
+      state_reason: completed
+      how: >-
+        Closed administratively, two days after the merge, each with a comment naming PR #126 and
+        the squash commit 0e3df5e. They did not auto-close: the PR body deliberately said the
+        issues stay open until review and merge, so it carried no closing keyword, and
+        closingIssuesReferences was verified empty before the merge (see publication_note).
+        The prediction was right and nothing acted on it, which is the gap this closure fills.
+      comment_content: >-
+        Each comment records the delivering code and the validation, and carries forward the
+        batch's caveats to where they now live: #69 restates DEC-F1 superseding its own Batch 4
+        acceptance note and names DEC-F4; #70 points at #128 for the ModTime-fallback cost;
+        #71 points at #127 for the shared-log-path limit.
     remaining_10b: [T066, T067, T071, T072, T073, T074]
     validation: >-
       make check (gofmt, vet, full -race suite) and a native darwin/arm64 build; internal/logging at
@@ -1067,7 +1128,7 @@ in_progress:
           internal/logging/birthtime_other.go and internal/logging/birthtime_darwin.go, both of
           which name DEC-ADV-006 in their doc comments and point here;
           .agents/batch-10a-pr-body.md; .agents/work-log.md
-
+in_progress: []
 blockers: []
 
 time_sensitive:
@@ -1121,13 +1182,15 @@ time_sensitive:
     deadline: before tagging v0.1.0
 
 next_best_action: >-
-  Batch 10a lossless log rotation (T065, T068-T070; issues 66, 69-71) is implemented on
-  sgykfjsm/batch-10-diagnostics-2 and opened as PR #126 at f3ab572. Two review correction passes
-  sit on top of that head and are UNCOMMITTED in the worktree, so #126 does not show them and its
-  description is stale. The review verdict is not final. Next: commit and push the correction
-  passes, update the PR description, finish the staged review of #126 and merge it, then implement
-  Batch 10b (T066, T067, T071-T074) using .agents/batch-10-plan.md. The four tasks are marked [x]
-  in tasks.md but their issues stay open until #126 merges.
+  Implement Batch 10b - US5 post diagnostics: T066, T067, T071 (the message_on_error_only capture
+  rule), T072 (message_len as a rune count, message_bytes as the UTF-8 length), T073 (stack traces
+  subject to the stack_trace setting) and T074 (the single FR-076 warning through the front door in
+  use) - on a fresh branch from merged main 0e3df5ec524df20e0d1d46b4572e11dbe83e810a, using
+  .agents/batch-10-plan.md. Issues 67, 68, 72-75. Two standing notes land inside this batch: issue
+  110 (a panic from Sink.Name is discarded before T073 could record it, so closing it needs a change
+  in nameOf itself) and the observation carried to issue 75 that internal/gui never calls Degraded(),
+  so FR-076 yields zero warnings from the GUI today - that is T074's remaining work, not a 10a
+  regression. Batch 10a is merged and its four issues are closed; nothing is owed on it.
 
 
 review_followups_filed:
@@ -1221,7 +1284,7 @@ batch_6_split:
     internal package.
 
 remaining_batches:
-  - {id: 10, name: "US5 diagnostics", tasks: "T065-T074"}
+  - {id: 10b, name: "US5 post diagnostics", tasks: "T066, T067, T071-T074", issues: "67, 68, 72-75", note: "10a (T065, T068-T070) is merged; see completed"}
   - {id: 11, name: "US6 settings resolution", tasks: "T075-T083"}
   - {id: 12, name: "Polish and gates", tasks: "T084-T091"}
 
@@ -1286,7 +1349,7 @@ assumptions:
     The batch decomposition above is re-derived by run-batch-cycle's triage step each run; it is
     recorded here for orientation, not as a binding plan.
 
-last_updated: 2026-09-16
+last_updated: 2026-09-18
 
 backlog_additions:
   - issue: 122
@@ -1306,11 +1369,14 @@ next_batch_preparation:
   selected: 10a
   tasks: [T065, T068, T069, T070]
   issues: [66, 69, 70, 71]
-  state: implemented-under-review
+  state: merged
   state_note: >-
-    This said prepared-not-implemented, which was true when written and false at head: the same
-    commit that recorded it also marks T065/T068-T070 [x] in tasks.md. See in_progress 10a for the
-    implementation record; next_batch_preparation now describes the batch that is in flight, and
-    the next preparation to run is 10b's.
+    This whole section is now history, not preparation. It said prepared-not-implemented, then
+    implemented-under-review; 10a is merged as 0e3df5ec524df20e0d1d46b4572e11dbe83e810a and its
+    four issues are closed, so the branch, base and plan selection recorded here describe a batch
+    that is finished. No preparation has been run for 10b: it needs a fresh branch from merged main
+    and its own triage. See completed 10a for the delivery record and next_best_action for what 10b
+    owes.
   pull_request: 126
   remaining_10b: [T066, T067, T071, T072, T073, T074]
+  remaining_10b_issues: [67, 68, 72, 73, 74, 75]
