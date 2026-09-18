@@ -1146,10 +1146,19 @@ in_progress:
     state: implemented-fully-reviewed-fixed
     committed: true
     pushed: true
-    pull_request: none-yet
+    pull_request: 133
+    pull_request_url: https://github.com/sgykfjsm/miko-post/pull/133
     publication_note: >-
-      Branch pushed 2026-09-18; no PR opened yet. .agents/batch-10b-pr-body.md is prepared and
-      current, including CON-002's resolution.
+      Opened 2026-09-18 from sgykfjsm/batch-10b-post-diagnostics at 06d2c1d against main 86a05f5.
+      Nine commits, 27 files, +2780/-68, mergeable. Body published from
+      .agents/batch-10b-pr-body.md, which already carried all three review stages' outcomes and
+      CON-002's resolution.
+      closingIssuesReferences verified EMPTY after opening. That is DELIBERATE and is stated in the
+      body: #67, #68 and #72-#75 stay open until this is reviewed and merged, so closing them is an
+      explicit post-merge action with a named owner. That is the step whose absence left #66 and
+      #69-#71 open for two days after #126, and #60-#65, #115, #118 and #119 open since earlier
+      batches - so the check confirms the linkage is what was intended, not that it is absent by
+      accident.
     prepared_pr_body: .agents/batch-10b-pr-body.md
     branch_note: >-
       NOT sgykfjsm/batch-10b-diagnostics. That name was already taken by a pushed branch carrying
