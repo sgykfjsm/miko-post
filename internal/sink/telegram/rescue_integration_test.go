@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/sgykfjsm/miko-post/internal/app"
+	"github.com/sgykfjsm/miko-post/internal/config"
 	"github.com/sgykfjsm/miko-post/internal/logging"
 	"github.com/sgykfjsm/miko-post/internal/post"
 	"github.com/sgykfjsm/miko-post/internal/sink/telegram"
@@ -34,7 +35,7 @@ func TestRescueHTTPServiceJSONLOutcome(t *testing.T) {
 			})
 			var output bytes.Buffer
 			logger := logging.Open(logging.Options{Writer: &output, Source: logging.SourceCLI})
-			outcome := post.New([]post.Sink{telegram.NewWithBaseURL(baseSettings(), server.URL)}, 5*time.Second, app.NewRecording(logger)).Post(mustMessage(t, "日本語 *message"))
+			outcome := post.New([]post.Sink{telegram.NewWithBaseURL(baseSettings(), server.URL)}, 5*time.Second, app.NewRecording(logger, config.Defaults().Logging)).Post(mustMessage(t, "日本語 *message"))
 			results := outcome.Results
 			if outcome.Succeeded() != succeeds {
 				t.Fatalf("aggregate success=%v", outcome.Succeeded())

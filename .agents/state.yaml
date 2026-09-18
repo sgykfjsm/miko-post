@@ -1128,7 +1128,396 @@ completed:
           internal/logging/birthtime_other.go and internal/logging/birthtime_darwin.go, both of
           which name DEC-ADV-006 in their doc comments and point here;
           .agents/batch-10a-pr-body.md; .agents/work-log.md
-in_progress: []
+in_progress:
+  - id: 10b
+    name: US5 post diagnostics
+    tasks: [T066, T067, T071, T072, T073, T074]
+    issues: [67, 68, 72, 73, 74, 75]
+    branch: sgykfjsm/batch-10b-post-diagnostics
+    base: 86a05f57c9e258355d3d2c54dc75d91dbbb5f072
+    base_note: >-
+      Rebased onto merged main 86a05f5 on 2026-09-18, after PR #131 carried the 10a record
+      reconciliation in on its own. The branch previously contained e0a0c39 as its first commit;
+      `git rebase --onto origin/main e0a0c39` dropped it explicitly rather than relying on git's
+      patch detection. Seven commits, and the tree is byte-identical before and after
+      (b09891ce208fcde2e5a6549a017144cd0c9c54ac both sides) - a rebase moves history and must not
+      move content, and this one is verified not to have. make check and the native build were
+      re-run on the rebased tree rather than trusted from before it.
+    state: implemented-fully-reviewed-fixed
+    committed: true
+    pushed: true
+    pull_request: 133
+    pull_request_url: https://github.com/sgykfjsm/miko-post/pull/133
+    publication_note: >-
+      Opened 2026-09-18 from sgykfjsm/batch-10b-post-diagnostics at 06d2c1d against main 86a05f5.
+      Nine commits, 27 files, +2780/-68, mergeable. Body published from
+      .agents/batch-10b-pr-body.md, which already carried all three review stages' outcomes and
+      CON-002's resolution.
+      closingIssuesReferences verified EMPTY after opening. That is DELIBERATE and is stated in the
+      body: #67, #68 and #72-#75 stay open until this is reviewed and merged, so closing them is an
+      explicit post-merge action with a named owner. That is the step whose absence left #66 and
+      #69-#71 open for two days after #126, and #60-#65, #115, #118 and #119 open since earlier
+      batches - so the check confirms the linkage is what was intended, not that it is absent by
+      accident.
+    prepared_pr_body: .agents/batch-10b-pr-body.md
+    branch_note: >-
+      NOT sgykfjsm/batch-10b-diagnostics. That name was already taken by a pushed branch carrying
+      a competing reconciliation of the 10a merge (commit d057f45, see completed 10a
+      competing_record), checked out in the sibling worktree
+      /Users/shige/orca/workspaces/miko-post/sgykfjsm-batch-10-diagnostics-2 and left untouched.
+      The name collision is what surfaced that branch at all.
+    review_verdict: all-three-stages-run-two-fix-passes-applied
+    review_stages:
+      contract:
+        verdict: invalid
+        blockers: [CON-001, CON-002]
+        findings: [CON-001, CON-002, CON-003, CON-004, CON-005, CON-006, CON-007, CON-008, CON-009, CON-010]
+        disposition: >-
+          CON-001 was a real behaviour defect in this batch and is FIXED, with a failing test written
+          first to confirm the reviewer's claim rather than taking it on trust: the FR-039 rescue
+          path made every rescued - and therefore SUCCESSFUL - post write the user's message body to
+          telegram_markdown_failed. See DEC-G1a. CON-003 through CON-010 were record, contract-text
+          and decision-record corrections and are all applied.
+        con_002_resolution: >-
+          RESOLVED by the user's decision on 2026-09-18: the carried 10a record commit e0a0c39 is
+          split onto its own branch, sgykfjsm/batch-10a-records, and opened as its own PR. That
+          branch is exactly one commit, because e0a0c39's parent is already merged main 0e3df5e.
+          The record conflict with d057f45 is therefore decided on its own merits instead of riding
+          along with a code change, which is what CON-002 asked for. Batch 10b must be REBASED onto
+          the new main once that PR merges, so its own PR carries only its own commits. Until then
+          10b's branch still contains e0a0c39 and a PR opened from it would still show four commits.
+        con_002_prepared_body: .agents/batch-10a-records-pr-body.md
+        con_002_published: >-
+          PR #131, https://github.com/sgykfjsm/miko-post/pull/131, opened 2026-09-18 from
+          sgykfjsm/batch-10a-records at e0a0c39 against main 0e3df5e. One commit, four files, all
+          under .agents/, mergeable_state clean. closingIssuesReferences verified EMPTY after
+          opening - the body names #66, #69-#71, #126, #60-#65, #115, #118 and #119 and must link
+          none of them, since the four it reports on are already closed.
+        fix_pass: 1
+      correctness:
+        verdict: request-changes
+        findings: [COR-001, COR-002, COR-003, COR-004, COR-005]
+        acceptance: >-
+          FR-068 met (verified on nine paths including the REAL telegram sink over HTTP, not just
+          the stand-in), FR-070 met, FR-071 partially met (COR-001), FR-076 met with a diff-induced
+          hazard (COR-002), SC-008 met end to end, SC-013 met at the code level but undermined by
+          COR-002.
+        fix_pass: 2
+      adversarial:
+        verdict: findings
+        findings: [ADV-001, ADV-002, ADV-003, ADV-004]
+        note: >-
+          The batch's central privacy claim survived attack. No credential leak was constructible
+          through either new field: a debug.Stack() dump renders frame arguments as hex words and
+          never string contents, and describePanic renders only the panic value's type. The CON-001
+          rescue fix was independently re-checked and holds.
+        fix_pass: 2
+    review_convergence: >-
+      The two stages found the same two defects independently - COR-002 == ADV-002 and
+      COR-001 == ADV-004 - which is the strongest signal in this review. Correctness demonstrated
+      the severe one as 1 surviving record versus 12 under identical conditions.
+    review_note: >-
+      All three stages have now run. Two blocker-grade defects were found in this batch's own new
+      code, both fixed in fix pass 2. One finding (ADV-003) is a product decision and is filed
+      rather than fixed. One mutant survivor (V5) was demonstrated to be an equivalent mutant
+      rather than a coverage gap.
+    delivered:
+      T071: >-
+        message capture in internal/app/recorder.go - the body is held from MessageReceived and
+        attached to every record that reports a failure, with the terminal record as a fallback
+        only when no failure record could carry it (DEC-G1).
+      T072: >-
+        NO CODE CHANGE. message_len and message_bytes already carried R-010's semantics. Verified
+        by three mutants (byte count under message_len, rune count under message_bytes, the two
+        swapped), all killed by the existing TestASuccessfulPostWritesTheContractsRecords, rather
+        than by reading the code and declaring it correct.
+      T073: >-
+        stack traces. debug.Stack() inside internal/post's deferred recover, read back through the
+        new post.Traced interface, recorded subject to stack_trace (DEC-G3, DEC-G4).
+      T074: >-
+        FR-076's warning for the GUI front door, which never called Logger.Degraded() before this
+        batch (issue #75). Once per session, replacing the stale log-path line (DEC-G5, DEC-G6).
+      T066: internal/app/capture_test.go
+      T067: internal/app/degraded_path_test.go, plus internal/gui/degraded_test.go for the GUI half
+    deviations_from_task_text:
+      note: >-
+        Five, not the three the first draft listed. Contract finding CON-003: T066's, T071's and
+        T072's stated file (internal/logging/logger_test.go / logger.go) was wrong too, and all six
+        boxes had been flipped to [x] with the file names untouched - so tasks.md, which is the
+        durable artifact where the PR body is not, asserted that internal/logging implements the
+        capture rule, the counts and the traces. It implements none of them. Correction sub-bullets
+        are now under T066, T067, T071, T072, T073 and T074, following the T039 precedent at
+        tasks.md:139.
+      items:
+        - >-
+          T066 is in internal/app/capture_test.go, not internal/logging/logger_test.go.
+        - >-
+          T071 is in internal/app/recorder.go, not internal/logging/logger.go. The rule needs the
+          post's outcome and the setting; internal/logging receives finished records.
+        - >-
+          T072 is in internal/app/recorder.go and needed no code change at all.
+        - >-
+          T067 is in internal/app, not internal/post/service_test.go: the posting core does not
+          import internal/logging and cannot be handed a logger, so "the log could not be opened"
+          is not a condition it can be placed in. Three of FR-076's four clauses are asserted there;
+          the "exactly one" count is not observable in a package with no user-visible output and is
+          carried at the two front doors (contract finding CON-010).
+        - >-
+          T074 did not touch internal/cli/render.go, which the task named. The CLI already emitted
+          the warning correctly through closeAndWarn/warningFor with its own tests; only the GUI half
+          was missing, and adding a second CLI code path to satisfy a file list would be a change
+          with no defect behind it.
+        - >-
+          T073 changed internal/post/service.go AND internal/app/recorder.go, neither of them its
+          stated internal/logging/logger.go. Unavoidable: recover() returns the panic value only, and
+          the frames are gone by the time any later layer sees the error. SinkAttempt.NameErr's own
+          comment is the precedent for a T073-motivated change at the recovery point.
+    validation: >-
+      make check (gofmt, vet, full -race suite) and a native darwin/arm64 build, re-run after the
+      CON-001 fix. internal/app at 100.0% of statements, matching its baseline; internal/gui at 73.4% against a 74.2% baseline,
+      the whole difference being one new statement inside Run, which is 0% covered at baseline too.
+      GOOS=linux GOARCH=386/arm/mips/mipsle go vet ./internal/post/ clean; internal/app production
+      code builds clean on 386. 28 mutants built, 27 killed.
+    mutants:
+      built: 37
+      killed: 35
+      survived: 2
+      survivor_disposition_2: >-
+        Two survivors across the whole batch, neither worked around. (1) keepTrace's redundant
+        trace == "" guard: deleted, because no behaviour depended on it. (2) V5, a reordering of
+        degradationWarning.check that puts the warned check before the degradation consult: proved
+        to be an EQUIVALENT MUTANT rather than a coverage gap - warned is only ever set after a
+        successful consult, so both orders produce identical output on the healthy, degraded and
+        healthy-then-degraded sequences. Recorded as equivalent rather than left as an open
+        survivor.
+      fix_pass_2_note: >-
+        V1 - swapping the GUI back to the flushing Degraded, which is the COR-002 regression itself
+        - SURVIVED the entire suite, because every test in internal/gui supplies `degraded` as a
+        closure that answers instantly and none can observe a flush barrier. The fix was correct and
+        completely unguarded. TestTheWindowNeverAsksTheFlushingDegradedQuery now pins the wiring
+        with an AST scan, following T039's os.Exit precedent in cmd/mp, and V1 is killed. An AST
+        scan rather than a grep because run.go's comments legitimately name Degraded while
+        explaining why it is not called.
+      survivor_disposition: >-
+        keepTrace's explicit `trace == ""` early return. Removing it changed no behaviour and failed
+        no test, because storing "" when nothing is stored is a no-op and the first-wins check
+        already rejects an empty offer once a real trace is held. The guard was DELETED rather than
+        given a test - an unfailable guard in front of a working one is weight with no defect behind
+        it. Both remaining keepTrace mutants (last-wins, no-op) are killed.
+      false_kill_caught: >-
+        The first message_len mutant scored as killed with no test named: replacing
+        utf8.RuneCountInString with len left the utf8 import unused, so the package failed to
+        compile and the runner read a non-zero exit as a kill. Rebuilt as a compiling mutant and
+        genuinely killed. Every subsequent mutant run checks for a build failure before scoring.
+      notable: >-
+        Both "manufacture a trace" mutants are killed - a traceFor falling back to
+        "goroutine 1 [running]:\n" + err.Error(), and a panicError.stack pinned to a plausible
+        constant. FR-071's no-manufactured-trace rule is therefore tested, not asserted. The trace
+        assertion names a frame from the panicking sink rather than checking the field is non-empty,
+        which is what makes both detectable.
+    observed: >-
+      The record shape changed and the pre-existing suite stayed green: failure records gained a
+      message field and nothing noticed, because no existing test asserted field completeness on a
+      failure record. That is the gap T066 closes, and the reason its tests assert presence AND
+      absence rather than values alone.
+    validation_gaps: [Intel-Mac, non-darwin-platform, 32-bit-execution, real-Fyne-session]
+    open_questions:
+      - id: DEC-ADV-A
+        status: open
+        filed_as: 132
+        filed_at: 2026-09-18
+        url: https://github.com/sgykfjsm/miko-post/issues/132
+        raised_in: "batch 10b adversarial review (ADV-003)"
+        question: >-
+          What bounds the captured message field? The body is unbounded user text, now written
+          verbatim onto one record per failed destination, into a log the user's only size control
+          is rotate_size_mib - and FR-074 forbids ever deleting a rotated file.
+        demonstrated: >-
+          One 15 MiB message with two failing sinks produced two archives of ~15 MiB each against a
+          1 MiB configured threshold: 2x the message on disk, and a single record 15x the threshold.
+          Rotation is evaluated BEFORE the write, so a threshold cannot bound a record - rotation
+          degenerates into one giant file per giant record. post.Message.Validate imposes no length
+          bound and the telegram sink applies no client-side cap, so a long paste is rejected by the
+          API and then logged in full.
+        tension: >-
+          SC-008 wants a failed post re-sendable from the log alone, which argues for the whole body.
+          FR-072 and FR-074 give the user a size control that one unbounded record defeats, and the
+          body is the user's private text kept forever.
+        options_and_costs:
+          - "No bound (status quo). SC-008 is literal; the log can grow to any multiple of the user's threshold, and never shrinks."
+          - "Truncate at a documented cap with an explicit message_truncated marker. Bounded, SC-008 satisfied for realistic posts, lossy for the pathological one."
+          - "Keep the full body only on the terminal record and a capped excerpt on each sink failure. One copy instead of N, at the cost of DEC-G1's one-record-has-everything property."
+        deliberately_not_answered_in: 10b
+        note: >-
+          Not a regression: before this batch no record carried the body at all, so the amplification
+          arrives with T071. It is disclosed rather than carried silently, and it is a product
+          decision about what the log promises - the same shape as DEC-ADV-006 in 10a.
+
+    not_fixed_here: >-
+      Three items. (1) internal/app's test file does not compile for a 32-bit target - app_test.go:265
+      uses int(config.MaxTimeoutSeconds), which overflows a 32-bit int. Pre-existing: app_test.go is
+      byte-identical to 0e3df5e, and it was found only by running 10a's cross-vet gate over this
+      batch's packages. 10a solved the same shape in internal/logging by scoping the 64-bit boundary
+      to its own file. (2) The GUI cannot report a Close failure: logger.Close runs in Run's deferred
+      call, after a.Run returns and the window is gone, so there is no surface left. Degraded()
+      covers the open failure and every failed write, which are the two this front door can report.
+      (3) The unbounded captured body, demonstrated by the adversarial stage as 2x amplification and
+      a record 15x the configured rotation threshold - recorded as the open question DEC-ADV-A above
+      and to be filed as an issue. All three disclosed in the PR body.
+    decisions_note: >-
+      Defined here as structured blocks, where DEC-A1 through DEC-F4 and DEC-ADV-006 live, and
+      mirrored in prose in .agents/batch-10b-pr-body.md. Contract finding CON-009: the first draft
+      defined them ONLY in the PR body, and state.yaml recorded that 10a's PR description was
+      replaced wholesale after review - so seven rationales were one rewrite away from being
+      unreachable from state.yaml. The citations resolved; the durability did not.
+    decisions_taken:
+      - id: DEC-G1
+        question: >-
+          FR-068 says the body is recorded "if any destination failed". Which record carries it?
+        decision: >-
+          Every record that reports a SINK'S OWN OUTCOME as a failure - the *_failed events from
+          SinkFinished - and the terminal record only when no failure record could carry it. The
+          formatting-fallback records carry no body.
+        why: >-
+          SC-008 wants a failed post re-sendable "without consulting any other source", and the
+          per-sink failure record already names the destination, the error type and the detail, so
+          a reader who greps one line has everything. The terminal fallback covers the one shape
+          that produces no per-sink record at all: a sink whose Name panics resolves to a sentinel
+          the vocabulary does not cover, SinkStarted returns early, and the terminal record is the
+          post's only record - without the fallback FR-068 is unmet for exactly that post. Applied
+          unconditionally instead, a two-sink post that lost both would carry the user's private
+          text three times. Hence claimBody, a claim rather than a read.
+        repetition_bound: >-
+          One record per destination that actually failed, plus the terminal record only when there
+          were none that could carry it.
+        recorded_in: "internal/app/recorder.go claimBody, terminalAttrs, failureAttrs"
+      - id: DEC-G1a
+        question: >-
+          Should the formatting-fallback records (telegram_markdown_failed,
+          telegram_plaintext_failed) carry the body, as the first implementation had them do?
+        decision: "No."
+        why: >-
+          They are emitted from inside Send, before the post's outcome exists, and FR-039's rescue
+          means a failed markdown attempt is routinely followed by a SUCCESSFUL plaintext one. So
+          telegram_markdown_failed is a failure-shaped record inside a post that fully succeeded,
+          and attaching the body there logged the user's private text on every rescued post -
+          FR-068's privacy half breached on the most ordinary path there is, since the rescue
+          exists because Telegram rejects ordinary punctuation. SC-008 loses nothing: a rescue that
+          itself fails makes Send return a RescueError, and the sink's own telegram_send_failed
+          record carries the body. These records are the stages; SinkFinished's is the outcome.
+        found_by: "contract review finding CON-001, confirmed by a failing test before the fix"
+        pinned_by: "TestARescuedPostIsASuccessAndRecordsNoBody and TestAFailedRescueRecordsTheBody"
+        recorded_in: "internal/app/recorder.go FormattingFinished"
+      - id: DEC-G2
+        question: "Where does the body go when message_on_error_only is off?"
+        decision: "On message_received, once per post, and on no other record."
+        why: >-
+          FR-068's two clauses are scoped differently and only the first is conditional: "WHEN
+          error-only message capture is enabled, successful events MUST omit message content". The
+          second - "if any destination failed, the original message body needed to reconstruct that
+          post MUST be recorded" - binds in both modes. In the disabled mode the intake record
+          satisfies it: every post emits one, and it shares the post's message_id (R-007), so a
+          failed post's body is always recorded and always joinable to its failures. What FR-068
+          leaves open is only the PLACEMENT, and putting the body on every record would repeat the
+          user's text once per destination for no reconstruction benefit.
+        correction: >-
+          An earlier version of this decision said "FR-068 constrains only the enabled case", which
+          is false - it stops the quotation before the second clause's unconditional MUST (contract
+          finding CON-004). The behaviour was already compliant; the justification was not, and it
+          had been asserted as fact in contracts/log-events.md, where a future change could have
+          relied on it to stop recording the body in that mode altogether.
+        recorded_in: "internal/app/recorder.go MessageReceived, claimBody"
+      - id: DEC-G3
+        question: >-
+          FR-071 wants a trace for a panic. recover() returns the value only - where does the stack
+          come from?
+        decision: >-
+          debug.Stack() inside the deferred recover in internal/post, carried on panicError and
+          read back through a new exported post.Traced interface.
+        why: >-
+          The frames are already unwound when the deferred function runs its body and entirely gone
+          by the time a SinkResult reaches internal/app, so there is no later point at which a
+          trace can be obtained: FR-071's "traces for panics" is unimplementable without a change at
+          the recovery point. This is outside T073's stated file (internal/logging/logger.go) and
+          the precedent is explicit - SinkAttempt.NameErr's comment records that the panic VALUE
+          used to be discarded where it was recovered and that keeping it "needed a change at the
+          point of recovery rather than a later task". An interface rather than an exported error
+          type, because the recovered value beside the trace can hold a credential, which is why
+          describePanic exists. Capture is unconditional: internal/post reads no settings and one
+          debug.Stack() on a panic costs nothing; whether the trace is RECORDED is stack_trace's
+          business, decided in internal/app.
+        recorded_in: "internal/post/service.go panicError and Traced; internal/app/recorder.go traceFor"
+      - id: DEC-G4
+        question: "How is FR-071's ban on manufactured traces enforced?"
+        decision: "By construction: only an error implementing post.Traced can produce a stack field."
+        why: >-
+          An expected operational error does not implement Traced, so no code path can produce a
+          plausible-looking stack for one - the absence of a trace in the record is the absence of a
+          trace in the error. The alternative, a list of error types that do and do not deserve a
+          trace, would have to be kept in step with internal/post's classifier forever. Two mutants
+          attack this directly and both are killed: a traceFor falling back to
+          "goroutine 1 [running]:\n" + err.Error(), and a panicError.stack pinned to a plausible
+          constant. The trace assertion names a frame from the panicking sink rather than checking
+          the field is non-empty, which is what makes both detectable.
+        recorded_in: "internal/app/recorder.go traceFor"
+      - id: DEC-G5
+        question: "How often may the GUI show FR-076's degradation warning?"
+        decision: "Once per session, on the first post that observes a degradation."
+        why: >-
+          logging.Logger latches its degradation, so Degraded() keeps answering for the rest of the
+          session, and the window outlives every post in it. Rendering that answer on each post
+          would put the warning on the second post's result and the third's - one failure reported
+          many times, which is not what FR-076's "exactly one warning" or SC-013's "told exactly
+          once" mean. The CLI does not face this: it closes and renders once per process.
+        accepted_consequence: >-
+          A degradation that BEGINS mid-session is still reported, on the first post that could have
+          been affected by it - pinned by TestADegradationThatBeginsMidSessionIsStillReported.
+        recorded_in: "internal/gui/result.go degradationWarning"
+      - id: DEC-G6
+        question: >-
+          A failed post normally renders "Details: <log path>". What happens when the log is what
+          failed?
+        decision: "The warning replaces that line rather than joining it."
+        why: >-
+          Pointing a user at a log for details when the log is the thing that failed is an
+          instruction to read a file that does not have them. internal/cli/render.go already applies
+          this reasoning to its own pairing; this makes the two front doors agree, and keeps the
+          user to one sentence about the log rather than two.
+        recorded_in: "internal/gui/result.go resultText"
+      - id: DEC-G7
+        question: "How do the two diagnostic settings reach the recorder?"
+        decision: "NewRecording takes config.LoggingSettings."
+        why: >-
+          Its zero value means both settings off, and for MessageOnErrorOnly that is the LESS
+          private direction - body recorded always. That is safe only because config.Defaults sets
+          it true and both front doors build from loaded settings, which always pass through
+          Defaults, and that assumption is asserted rather than assumed by
+          TestTheShippedDefaultsRestrictCaptureAndCollectTraces. The field mirrors the contract key's
+          name and direction rather than being inverted for a safer zero value: a field that
+          disagrees with the key it implements is worse for a reader than a documented zero value.
+        recorded_in: "internal/app/recorder.go Recording, NewRecording"
+      - id: DEC-G8
+        question: >-
+          T073's text says "panics AND unexpected errors". Only panics produce a stack. Is the
+          middle clause deferred?
+        decision: >-
+          No - it is satisfied. In this build stack is emitted for panics and for nothing else, and
+          that is FR-071 met rather than FR-071 partially delivered.
+        why: >-
+          FR-071 qualifies all three of its categories with "where a trace is AVAILABLE and useful",
+          and a plain Go error carries no frames. A panic is the only failure this program can
+          obtain real frames for, because debug.Stack() runs inside the deferred recover while they
+          still exist. For an unexpected non-panic error there is nothing to record and the same
+          requirement forbids inventing something, so "no stack field" is the requirement honoured
+          from both sides. A future sink error type that captures its own stack needs only to
+          implement post.Traced; traceFor already asks every error in the chain.
+        found_by: >-
+          contract review finding CON-005 - the box had been ticked with the clause neither
+          delivered nor discussed, and contracts/log-events.md asserted a coverage it then narrowed.
+        recorded_in: >-
+          specs/001-dual-sink-quick-post/contracts/log-events.md Traces section;
+          specs/001-dual-sink-quick-post/tasks.md T073
+
 blockers: []
 
 time_sensitive:
@@ -1182,16 +1571,14 @@ time_sensitive:
     deadline: before tagging v0.1.0
 
 next_best_action: >-
-  Implement Batch 10b - US5 post diagnostics: T066, T067, T071 (the message_on_error_only capture
-  rule), T072 (message_len as a rune count, message_bytes as the UTF-8 length), T073 (stack traces
-  subject to the stack_trace setting) and T074 (the single FR-076 warning through the front door in
-  use) - on a fresh branch from merged main 0e3df5ec524df20e0d1d46b4572e11dbe83e810a, using
-  .agents/batch-10-plan.md. Issues 67, 68, 72-75. Two standing notes land inside this batch: issue
-  110 (a panic from Sink.Name is discarded before T073 could record it, so closing it needs a change
-  in nameOf itself) and the observation carried to issue 75 that internal/gui never calls Degraded(),
-  so FR-076 yields zero warnings from the GUI today - that is T074's remaining work, not a 10a
-  regression. Batch 10a is merged and its four issues are closed; nothing is owed on it.
-
+  Review Batch 10b. It is implemented on sgykfjsm/batch-10b-post-diagnostics and NOT yet committed,
+  pushed or opened as a PR; .agents/batch-10b-pr-body.md is prepared. Run the three review stages
+  (contract, correctness, adversarial) against the batch diff, then publish. Two things a reviewer
+  should go at first: DEC-G1's claimBody, where the body lands on every failure record but the
+  terminal record only as a fallback, and DEC-G3's stack capture in internal/post, which is outside
+  T073's stated file. After the review and merge, close #67, #68 and #72-#75 explicitly - the PR
+  body carries no closing keyword, which is exactly what left #66 and #69-#71 open for two days
+  after #126.
 
 review_followups_filed:
   filed_at: 2026-09-07

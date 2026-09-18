@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"runtime/debug"
 	"slices"
 	"sync"
 	"time"
@@ -478,7 +479,7 @@ func (s *Service) nameOf(sink Sink) (name string, namePanic error) {
 		// a usable name and a recovered value, which is the one shape where
 		// these two are not the sentinel and a diagnostic at once.
 		if recovered != nil {
-			namePanic = &panicError{sink: name, value: recovered}
+			namePanic = &panicError{sink: name, value: recovered, stack: string(debug.Stack())}
 		}
 	}()
 
@@ -528,7 +529,7 @@ func (s *Service) deliver(record *sinkRecord, name string, sink Sink, message Me
 				Name:    name,
 				Success: false,
 				Reason:  reasonFailed,
-				Err:     &panicError{sink: name, value: recovered},
+				Err:     &panicError{sink: name, value: recovered, stack: string(debug.Stack())},
 			}
 		}
 
@@ -608,11 +609,31 @@ func generateID() (ulid.ULID, error) {
 
 // panicError carries a recovered sink panic into SinkResult.Err.
 //
+// Traced is implemented by an error that carries a stack captured at the
+// moment it was created, and is how the diagnostic layer asks for FR-071's
+// trace without importing this package's error types.
+//
+// An interface rather than an exported error type because the only thing a
+// recorder needs is the trace, and the panic value beside it is exactly what
+// must not travel: describePanic exists because a recovered value can be a
+// struct holding a credential. This exposes the one field that is safe to
+// render and nothing else.
+//
+// FR-071's "MUST NOT get an artificially manufactured trace" is discharged by
+// this shape rather than by a rule a call site has to remember. There is no way
+// to ask for a trace that does not exist — an expected operational error does
+// not implement Traced, so the field is absent, and no code path can construct
+// a plausible-looking stack for one.
+type Traced interface {
+	error
+
+	// Trace returns the captured stack, or "" when the error has none.
+	Trace() string
+}
+
 // A concrete type rather than fmt.Errorf so a caller can tell a panic from an
 // ordinary failure without matching on message text, and so the recovered value
 // itself survives on the struct for whatever records FR-071's trace (T073).
-// No accessor for it yet: T073 can add one when it has a use, and an exported
-// getter nothing calls would be a claim this batch cannot test.
 //
 // SinkResult's render guards keep this out of any display string, and the
 // Unwrap-less shape is deliberate: there is nothing underneath to unwrap, and
@@ -620,11 +641,41 @@ func generateID() (ulid.ULID, error) {
 type panicError struct {
 	sink  string
 	value any
+
+	// stack is the goroutine's stack as it was when the panic was recovered,
+	// and the reason this field exists here rather than at the recording
+	// layer is that nowhere else can have it.
+	//
+	// recover() hands back the panic *value* and nothing else; the stack that
+	// produced it is already unwound by the time the deferred function runs
+	// its body, and entirely gone by the time a SinkResult reaches
+	// internal/app. debug.Stack() inside the deferred recover is the last
+	// moment the frames still exist. FR-071 wants a trace "where a trace is
+	// available", and this is what makes one available.
+	//
+	// SinkAttempt.NameErr's own comment records the precedent: the panic value
+	// used to be discarded where it was recovered, and keeping it needed a
+	// change at the point of recovery rather than a later task. The trace is
+	// the same shape of problem, one field further on.
+	//
+	// Captured unconditionally, not behind the stack_trace setting. This
+	// package does not read settings, and a panic is rare enough that one
+	// debug.Stack() costs nothing worth a wiring change; whether it is
+	// *recorded* is the setting's business, and internal/app decides that.
+	stack string
 }
 
 func (e *panicError) Error() string {
 	return "sink " + e.sink + " panicked: " + describePanic(e.value)
 }
+
+// Trace returns the stack captured when the panic was recovered (FR-071).
+//
+// This is the accessor the type's comment said T073 would add once it had a
+// use. It is reached through the Traced interface rather than by exporting
+// panicError, which keeps the recovered value — which may hold a credential,
+// as describePanic's comment explains — unreachable from outside this package.
+func (e *panicError) Trace() string { return e.stack }
 
 // describePanic renders a recovered value without assuming it is an error or a
 // string.

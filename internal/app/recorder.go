@@ -9,6 +9,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/sgykfjsm/miko-post/internal/config"
 	"github.com/sgykfjsm/miko-post/internal/logging"
 	"github.com/sgykfjsm/miko-post/internal/post"
 	"github.com/sgykfjsm/miko-post/internal/sink/obsidian"
@@ -36,6 +37,14 @@ const (
 	keyHTTPStatus   = "http_status"
 	keyMessageLen   = "message_len"
 	keyMessageBytes = "message_bytes"
+
+	// keyMessage carries FR-068's captured body and keyStack FR-071's trace.
+	// Both are written only by this file, for the same reason as the rest of
+	// the vocabulary above, and both are absent rather than empty when the
+	// rule says not to record them — an empty string would satisfy a
+	// consumer's presence check and mean nothing.
+	keyMessage = "message"
+	keyStack   = "stack"
 )
 
 // lifecycle is one sink's three event names.
@@ -132,6 +141,14 @@ func producibleEvents() []logging.Event {
 // logging.Logger rather than counting calls on a spy.
 type Recording struct {
 	logger *logging.Logger
+
+	// diagnostics carries the two settings FR-068 and FR-071 are governed by.
+	//
+	// Held as the settings struct rather than as two booleans so that adding a
+	// third diagnostic setting does not change this constructor's signature
+	// again, and so a reader can see which contract keys these are without
+	// following a rename.
+	diagnostics config.LoggingSettings
 }
 
 // NewRecording returns the Recording for one run, or one that records nothing
@@ -142,8 +159,15 @@ type Recording struct {
 // every record (issue #41). Splitting them keeps that obligation in one place —
 // a Recording built from a logger someone assembled without Redact would scrub
 // nothing, and nothing in the records would say so.
-func NewRecording(logger *logging.Logger) *Recording {
-	return &Recording{logger: logger}
+// diagnostics carries logging.message_on_error_only and logging.stack_trace.
+// The zero value means both are off, which is the setting's own zero value and
+// not the shipped default: config.Defaults sets both to true, and both front
+// doors build this from loaded settings, which always pass through Defaults.
+// The direction matters for one of them — message_on_error_only off means the
+// body is recorded on success too — so TestTheShippedDefaultsRestrictCaptureAndCollectTraces
+// pins the shipped default rather than leaving it to a reader's assumption.
+func NewRecording(logger *logging.Logger, diagnostics config.LoggingSettings) *Recording {
+	return &Recording{logger: logger, diagnostics: diagnostics}
 }
 
 // Post returns the recorder for one post (post.Recording).
@@ -160,7 +184,11 @@ func (r *Recording) Post(id string) post.Recorder {
 
 	// Storage runs on the logger's ordered worker, never while the posting
 	// core holds its per-attempt mutex or is enforcing a sink deadline.
-	return &recorder{log: r.logger.PostAsync(id)}
+	return &recorder{
+		log:                r.logger.PostAsync(id),
+		messageOnErrorOnly: r.diagnostics.MessageOnErrorOnly,
+		stackTrace:         r.diagnostics.StackTrace,
+	}
 }
 
 // recorder emits one post's records.
@@ -171,8 +199,35 @@ func (r *Recording) Post(id string) post.Recorder {
 type recorder struct {
 	log *logging.PostLogger
 
-	// mu guards notes.
+	// messageOnErrorOnly and stackTrace are FR-068's and FR-071's settings,
+	// copied per post so a settings value cannot change under a post in
+	// flight. Read-only after construction.
+	messageOnErrorOnly bool
+	stackTrace         bool
+
+	// mu guards notes and body.
 	mu sync.Mutex
+
+	// bodyEmitted records that a failure record has already carried the body,
+	// so the terminal record does not repeat it. See claimBody.
+	bodyEmitted bool
+
+	// noteTrace is the trace from the first panic collected as a note, for the
+	// terminal record. See keepTrace.
+	noteTrace string
+
+	// body is the original message, kept so that a failure record can carry
+	// it (FR-068, SC-008).
+	//
+	// It is held rather than re-derived because the failure records are where
+	// SC-008 wants it and MessageReceived is the only method handed the
+	// message. post.Service calls MessageReceived before it starts any
+	// delivery goroutine, so the write does happen-before every read — but it
+	// is guarded anyway. The guarantee lives in another package's call order,
+	// the cost here is one uncontended lock per record, and an unguarded
+	// field whose safety rests on a remote ordering is the kind of thing a
+	// later refactor breaks silently under everything except -race.
+	body string
 
 	// notes collects diagnostics that no lifecycle record can carry, for the
 	// post's terminal record.
@@ -191,15 +246,22 @@ type recorder struct {
 // MessageReceived records the post entering the system (post.Recorder).
 //
 // The two counts are FR-066's message_len and message_bytes, as R-010 defines
-// them: a rune count and a UTF-8 byte length. They are the whole payload,
-// because the message *body* is deliberately absent — FR-068's capture rule
-// (record the body whenever any enabled sink failed, so the post can be
-// reconstructed and re-sent by hand) is T071, and it needs the
-// message_on_error_only setting and knowledge of the post's outcome, neither of
-// which exists at this point in a post. So this batch knowingly leaves FR-068
-// unmet rather than emitting a body unconditionally, which would leak the user's
-// private notes into the log on every successful post and violate the same rule
-// from the other side.
+// them: a rune count and a UTF-8 byte length.
+//
+// The body is kept here and emitted on the records that report a failure, not
+// on this one — FR-068 wants it "if any destination failed", and at this point
+// in a post no sink has run. Buffering it is what makes the rule expressible
+// without emitting a body unconditionally, which would leak the user's private
+// notes into the log on every successful post and violate the same rule from
+// the other side. See failureAttrs.
+//
+// With message_on_error_only off the body goes on this record instead of on
+// the failures. That is the one place an unconditional capture belongs: it is
+// the post's intake event, it happens exactly once, and it keeps the body out
+// of the per-sink records where it would be repeated once per destination for
+// no reconstruction benefit. FR-068 only constrains the enabled case — it says
+// successful events must omit the body *when* error-only capture is on — so
+// the off case is a choice, and this is it.
 //
 // The counts themselves are exact rather than approximate, and the distinction
 // is the point of having both: len is bytes, and a rune count needs
@@ -208,10 +270,175 @@ type recorder struct {
 // of three. Invalid UTF-8 cannot reach here — post.Message.Validate refuses it
 // (DEC-D4) — so RuneCountInString's substitution behaviour is not in play.
 func (r *recorder) MessageReceived(message post.Message) {
-	r.log.Info(logging.EventMessageReceived,
+	r.mu.Lock()
+	r.body = message.Original
+	r.mu.Unlock()
+
+	attrs := []slog.Attr{
 		slog.Int(keyMessageLen, utf8.RuneCountInString(message.Original)),
 		slog.Int(keyMessageBytes, len(message.Original)),
-	)
+	}
+
+	if !r.messageOnErrorOnly {
+		attrs = append(attrs, slog.String(keyMessage, message.Original))
+	}
+
+	r.log.Info(logging.EventMessageReceived, attrs...)
+}
+
+// failureAttrs returns the fields every failure record adds beyond its own
+// diagnostics: FR-068's captured body, and FR-071's trace when there is one.
+//
+// One function for both so that "a failure record carries what it takes to
+// re-send the post by hand" is a single property with a single call site per
+// record, rather than four call sites that have to be kept in step. SC-008
+// wants the body on the record naming the destination and the error, which is
+// why it goes on each failure rather than only on the terminal record: a
+// reader grepping for telegram_send_failed gets everything in one line.
+//
+// The body is omitted when message_on_error_only is off, because
+// MessageReceived has already emitted it once and repeating it per failure
+// would put the user's private text into the log N times for one post.
+func (r *recorder) failureAttrs(trace string) []slog.Attr {
+	attrs := make([]slog.Attr, 0, 2)
+
+	if body := r.claimBody(); body != "" {
+		attrs = append(attrs, slog.String(keyMessage, body))
+	}
+
+	if trace != "" {
+		attrs = append(attrs, slog.String(keyStack, trace))
+	}
+
+	return attrs
+}
+
+// claimBody returns the body for a failure record and records that one carried
+// it, or "" when it must not be emitted.
+//
+// The claim is what keeps the body off the terminal record of an ordinary
+// failed post: a per-sink failure record already names the destination and the
+// error beside it, which is the record SC-008 wants, and repeating the user's
+// private text once per failure plus once more at the end would put it in the
+// log three times for a two-sink post that lost both.
+//
+// It is a claim rather than a plain read because the terminal record is the
+// fallback for the one failure shape that produces no per-sink record at all —
+// a sink whose name has no registered events, where SinkStarted returns early
+// and the terminal record is the only record the post emits. Without the
+// fallback FR-068 would be unmet for exactly that case; without the claim it
+// would be met twice for every other one. See terminalAttrs.
+//
+// Returns "" when message_on_error_only is off, because MessageReceived has
+// already emitted the body unconditionally in that mode.
+func (r *recorder) claimBody() string {
+	if !r.messageOnErrorOnly {
+		return ""
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	// Absent rather than empty when there is no body. A post with an empty
+	// message cannot reach a sink — post.Message.Validate refuses it — so in
+	// production this is only reachable if MessageReceived was never called,
+	// which is a wiring bug, and an empty field would hide it behind
+	// something that looks like a captured empty message.
+	if r.body == "" {
+		return ""
+	}
+
+	r.bodyEmitted = true
+
+	return r.body
+}
+
+// terminalAttrs returns what the terminal error record adds beyond its
+// duration and notes.
+//
+// The body appears only when no per-sink failure record carried it, and the
+// trace only when a panic was collected in a note — a panicking Name has no
+// lifecycle record to ride on (issue #110), so the terminal record is where
+// both its text and its trace belong.
+// noteTraceValue returns the trace collected from a note's panic, if any.
+func (r *recorder) noteTraceValue() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	return r.noteTrace
+}
+
+func (r *recorder) terminalAttrs() []slog.Attr {
+	r.mu.Lock()
+	body, emitted, trace := r.body, r.bodyEmitted, r.noteTrace
+	r.mu.Unlock()
+
+	attrs := make([]slog.Attr, 0, 2)
+
+	if r.messageOnErrorOnly && !emitted && body != "" {
+		attrs = append(attrs, slog.String(keyMessage, body))
+	}
+
+	if trace != "" {
+		attrs = append(attrs, slog.String(keyStack, trace))
+	}
+
+	return attrs
+}
+
+// traceFor returns the stack an error carries, or "" when it carries none or
+// the setting is off (FR-071).
+//
+// post.Traced is the whole test. An expected operational error — a timeout, a
+// 401, a missing note — does not implement it, so there is no branch here that
+// could decide to manufacture a trace for one: the absence of a trace in the
+// record is the absence of a trace in the error. That is FR-071's "MUST NOT
+// get an artificially manufactured trace" discharged by construction rather
+// than by a list of error types this file would have to keep in step with
+// internal/post's classifier.
+//
+// errors.As walks the chain, because a sink may wrap a panic on its way out —
+// the telegram sink wraps a leaking error in its own redacting type, and the
+// same could happen to a panic from a nested call.
+//
+// The nil check after errors.As is the same guard httpStatus carries, for the
+// same reason: errors.As reports true for a typed nil in the chain and leaves
+// the target nil, and calling Trace on that would panic inside the recorder.
+func (r *recorder) traceFor(err error) string {
+	if !r.stackTrace {
+		return ""
+	}
+
+	var traced post.Traced
+
+	if errors.As(err, &traced) && traced != nil {
+		return traced.Trace()
+	}
+
+	return ""
+}
+
+// keepTrace stores the first trace collected from a note's panic.
+//
+// The first rather than the last, and joined with nothing: two panicking Name
+// methods in one post are two instances of the same sink bug, and a terminal
+// record carrying two full goroutine dumps would be several kilobytes of
+// mostly identical frames on a record whose job is to say how the post ended.
+// The notes themselves already record that both happened.
+// An empty offer needs no guard of its own: storing "" when noteTrace is
+// already "" changes nothing, and once a real trace is held the first-wins
+// check rejects the empty one for the same reason it rejects a second dump. An
+// earlier version had an explicit `trace == ""` early return, which was removed
+// when a mutant proved no behaviour depended on it — an unfailable guard in
+// front of a working one is weight a reader has to account for and a branch no
+// test can justify.
+func (r *recorder) keepTrace(trace string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.noteTrace == "" {
+		r.noteTrace = trace
+	}
 }
 
 // SinkStarted records one sink beginning its delivery (post.Recorder).
@@ -224,6 +451,7 @@ func (r *recorder) SinkStarted(attempt post.SinkAttempt) {
 	if attempt.NameErr != nil {
 		r.note(fmt.Sprintf("sink %s: obtaining the sink's name panicked: %s",
 			attempt.Sink, errorMessage(attempt.NameErr)))
+		r.keepTrace(r.traceFor(attempt.NameErr))
 	}
 
 	events, ok := lifecycleFor(attempt.Sink)
@@ -281,6 +509,8 @@ func (r *recorder) SinkFinished(attempt post.SinkAttempt, result post.SinkResult
 		attrs = append(attrs, slog.Int(keyHTTPStatus, status))
 	}
 
+	attrs = append(attrs, r.failureAttrs(r.traceFor(result.Err))...)
+
 	r.log.Error(events.failed, attrs...)
 }
 
@@ -302,10 +532,27 @@ func (r *recorder) PostCompleted(outcome post.Outcome, elapsed time.Duration) {
 	}
 
 	if outcome.Succeeded() {
+		// The trace, but never the body — and the asymmetry is the point,
+		// because the two answer to different requirements.
+		//
+		// FR-068 is scoped to the post's outcome: a delivered post records no
+		// body, and a note about a sink's misbehaving Name does not make it a
+		// failed post. FR-071 is scoped to trace *availability*, not to the
+		// outcome: a panic happened, its frames were captured, and the note in
+		// the error field above already says so. Dropping the trace here left
+		// the one failure class FR-071 exists for recorded without it, on the
+		// only record that could carry it — a panicking Name has no lifecycle
+		// record — while the contract document asserted the opposite.
+		if trace := r.noteTraceValue(); trace != "" {
+			attrs = append(attrs, slog.String(keyStack, trace))
+		}
+
 		r.log.Info(logging.EventRequestCompleted, attrs...)
 
 		return
 	}
+
+	attrs = append(attrs, r.terminalAttrs()...)
 
 	r.log.Error(logging.EventRequestCompletedWithError, attrs...)
 }
@@ -438,5 +685,24 @@ func (r *recorder) FormattingFinished(sink post.SinkAttempt, attempt post.Format
 	if status, ok := httpStatus(attempt.Err); ok {
 		attrs = append(attrs, slog.Int(keyHTTPStatus, status))
 	}
+	// Neither the body nor a trace, and each absence for its own reason.
+	//
+	// No body: a formatting-fallback record is emitted from inside Send,
+	// before the post's outcome exists, and FR-039's rescue means a failed
+	// markdown attempt is routinely followed by a successful plaintext one —
+	// so telegram_markdown_failed is a failure-shaped record inside a post
+	// that fully succeeded. Attaching the body here put the user's private
+	// text in the log on every rescued post, which is FR-068's privacy half
+	// breached on the most ordinary path there is: the rescue exists because
+	// Telegram rejects ordinary punctuation. SC-008 loses nothing, because
+	// when the rescue itself fails Send returns a RescueError and the sink's
+	// own telegram_send_failed record carries the body beside the destination,
+	// the error type and the detail — the record SC-008 asks to be
+	// self-sufficient. These records are the stages, not the outcome.
+	//
+	// No trace: a FormattingAttempt's Err comes from an HTTP exchange, never
+	// from a recovered panic, so nothing in this package's reach implements
+	// post.Traced here. A traceFor call would be a branch no test could enter,
+	// which is the shape this batch already deleted once in keepTrace.
 	r.log.Error(event, attrs...)
 }

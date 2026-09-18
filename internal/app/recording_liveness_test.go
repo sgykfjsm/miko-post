@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/sgykfjsm/miko-post/internal/app"
+	"github.com/sgykfjsm/miko-post/internal/config"
 	"github.com/sgykfjsm/miko-post/internal/logging"
 	"github.com/sgykfjsm/miko-post/internal/post"
 )
@@ -51,7 +52,7 @@ func TestStalledDiagnosticsDoNotChangeDelivery(t *testing.T) {
 			sinks := []*countedSink{{name: "obsidian"}, {name: "telegram"}}
 			done := make(chan post.Outcome, 1)
 			go func() {
-				done <- post.New([]post.Sink{sinks[0], sinks[1]}, 50*time.Millisecond, app.NewRecording(logger)).Post(post.Message{Original: "healthy destinations"})
+				done <- post.New([]post.Sink{sinks[0], sinks[1]}, 50*time.Millisecond, app.NewRecording(logger, config.Defaults().Logging)).Post(post.Message{Original: "healthy destinations"})
 			}()
 			select {
 			case <-w.entered:
@@ -98,7 +99,7 @@ func TestStalledDiagnosticsPreserveASinksOwnTimeout(t *testing.T) {
 	slow := &countedSink{name: "telegram", waitForDeadline: true}
 	done := make(chan post.Outcome, 1)
 	go func() {
-		done <- post.New([]post.Sink{good, slow}, 50*time.Millisecond, app.NewRecording(logger)).Post(post.Message{Original: "partial delivery"})
+		done <- post.New([]post.Sink{good, slow}, 50*time.Millisecond, app.NewRecording(logger, config.Defaults().Logging)).Post(post.Message{Original: "partial delivery"})
 	}()
 	select {
 	case <-w.entered:

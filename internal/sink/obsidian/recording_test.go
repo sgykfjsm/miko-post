@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/sgykfjsm/miko-post/internal/app"
+	"github.com/sgykfjsm/miko-post/internal/config"
 	"github.com/sgykfjsm/miko-post/internal/logging"
 	"github.com/sgykfjsm/miko-post/internal/post"
 	"github.com/sgykfjsm/miko-post/internal/sink/obsidian"
@@ -69,7 +70,7 @@ func TestOverlappingServicePostsLogTheirOwnRealNotes(t *testing.T) {
 			logPath := filepath.Join(t.TempDir(), "events.jsonl")
 			logger := logging.Open(logging.Options{Source: logging.SourceCLI, Path: logPath})
 			defer logger.Close()
-			service := post.New([]post.Sink{sink}, 5*time.Second, app.NewRecording(logger))
+			service := post.New([]post.Sink{sink}, 5*time.Second, app.NewRecording(logger, config.Defaults().Logging))
 			aDone := make(chan post.Outcome, 1)
 			go func() { aDone <- service.Post(post.Message{Original: "post A"}) }()
 			select {

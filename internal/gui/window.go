@@ -25,6 +25,7 @@ type window struct {
 	post                  func(post.Message) post.Outcome
 	settings              config.GUISettings
 	logPath               string
+	warning               *degradationWarning
 	dispatch              func(func())
 	after                 func(time.Duration, func()) timer
 	activity              func() uint64
@@ -35,8 +36,8 @@ type window struct {
 	status                int
 }
 
-func newWindow(native fyne.Window, settings config.GUISettings, postMessage func(post.Message) post.Outcome, logPath string) *window {
-	w := &window{native: native, settings: settings, post: postMessage, logPath: logPath,
+func newWindow(native fyne.Window, settings config.GUISettings, postMessage func(post.Message) post.Outcome, logPath string, warning *degradationWarning) *window {
+	w := &window{native: native, settings: settings, post: postMessage, logPath: logPath, warning: warning,
 		dispatch: fyne.Do, after: func(d time.Duration, f func()) timer { return time.AfterFunc(d, f) },
 		activity: func() uint64 { return 0 }, release: func() {}, status: 1}
 	w.entry = newMessageEntry(w.submit, w.close)
@@ -101,7 +102,12 @@ func (w *window) finished(outcome post.Outcome) {
 		return
 	}
 	w.send.Enable()
-	w.result.SetText(resultText(outcome, w.logPath))
+	// Asked once per post; the warning renders at most once per session while
+	// `lost` stays true for the rest of it. Read here rather than at
+	// construction because the open may have succeeded and a later write
+	// failed.
+	warning, lost := w.warning.check()
+	w.result.SetText(resultText(outcome, w.logPath, warning, lost))
 	generation, activity := w.generation, w.activity()
 	w.pending = w.after(closeDelay(delay), func() {
 		w.dispatch(func() {

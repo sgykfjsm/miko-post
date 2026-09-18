@@ -58,7 +58,7 @@ func Run(invocation Invocation, out, errOut io.Writer) int {
 	// this line owns is that the two are connected at all — a service built
 	// without one posts identically and records nothing, and nothing in the
 	// output would say so.
-	outcome := app.NewService(settings, app.NewRecording(logger)).Post(message)
+	outcome := app.NewService(settings, app.NewRecording(logger, settings.Logging)).Post(message)
 
 	// Closed before the report is assembled, not in a defer. A deferred Close
 	// would run after everything had been printed, so a failure to flush and
