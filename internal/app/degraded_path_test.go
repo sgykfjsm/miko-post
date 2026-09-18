@@ -125,12 +125,11 @@ func TestAnUnwritableLogPathCostsTheLogAndNothingElse(t *testing.T) {
 
 	warning := degraded.Warning()
 
+	// One assertion, not two: the path is never empty here, so
+	// strings.Contains already fails on an empty warning. A separate
+	// emptiness check could never be the assertion that caught a regression.
 	if !strings.Contains(warning, settings.Logging.Path) {
-		t.Errorf("the warning does not name the log path:\n%s", warning)
-	}
-
-	if warning == "" {
-		t.Error("the degradation renders an empty warning")
+		t.Errorf("the warning does not name the log path, or is empty:\n%s", warning)
 	}
 }
 

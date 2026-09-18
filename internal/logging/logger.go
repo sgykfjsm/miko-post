@@ -622,6 +622,42 @@ func (l *Logger) Degraded() *Degradation {
 		return &Degradation{Path: l.path, Err: err}
 	}
 
+	return l.DegradedSoFar()
+}
+
+// DegradedSoFar reports a degradation already known, without forcing the queue.
+//
+// Degraded is the definitive answer and this is the cheap one, and the
+// difference is not performance — it is that Degraded has a side effect that
+// makes it unsafe to ask repeatedly.
+//
+// Degraded flushes, and Flush submits a barrier and waits at most 250ms for the
+// worker to reach it. On timeout the queue is failed permanently: every record
+// already admitted for the post that just finished, and every record of every
+// later post, is discarded. For a one-shot CLI that is exactly right — it asks
+// once, after Close, and a worker that has not drained by then really has lost
+// the records. For a long-lived GUI session asking after every post it is a
+// trap: one slow write — a vault on a network mount, an fsync after a wake from
+// sleep — converts a transient stall into a permanent, session-wide diagnostics
+// outage, caused by the code that exists to *report* diagnostics outages. It
+// also blocks the caller for the full timeout, and the GUI's caller is the Fyne
+// event goroutine, so the window freezes with it.
+//
+// This method therefore reads only the two states that are already settled: an
+// open that never succeeded, and a write error the writer has already latched.
+// What it gives up is synchronicity — a write that failed but whose record is
+// still queued is not visible yet. It becomes visible on the next call, and
+// certainly at Close, which is where a front door spends its last warning. An
+// open failure, which is the common case and the one a user can act on, is
+// visible immediately and needs no flush at all.
+//
+// Safe to call while sinks are still logging concurrently, and safe to call
+// as often as a caller likes.
+func (l *Logger) DegradedSoFar() *Degradation {
+	if l.openErr != nil {
+		return &Degradation{Path: l.path, Err: l.openErr}
+	}
+
 	if err := l.writer.firstErr(); err != nil {
 		return &Degradation{Path: l.path, Err: err}
 	}

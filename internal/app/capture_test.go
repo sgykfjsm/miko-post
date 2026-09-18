@@ -61,17 +61,35 @@ func (s *panickingSink) Send(context.Context, post.Message) error {
 func fieldOf(t *testing.T, records []map[string]any, event, key string) (any, bool) {
 	t.Helper()
 
+	matches := 0
+
+	var (
+		value any
+		found bool
+	)
+
 	for _, record := range records {
 		if record["event"] == event {
-			value, ok := record[key]
-
-			return value, ok
+			matches++
+			value, found = record[key]
 		}
 	}
 
-	t.Fatalf("no %q record in %d records", event, len(records))
+	switch matches {
+	case 0:
+		t.Fatalf("no %q record in %d records", event, len(records))
+	case 1:
+	default:
+		// Loud rather than silent. An earlier version returned on the first
+		// match, so a post with two records of one event name — two sinks
+		// resolving to the same registered name, or an event that starts
+		// firing twice — would have been half-checked, with the assertion
+		// still passing on whichever record happened to come first.
+		t.Fatalf("%d %q records; this helper asserts about one, so it cannot speak for this post",
+			matches, event)
+	}
 
-	return nil, false
+	return value, found
 }
 
 // recordsWith returns every record that has the key.
@@ -267,14 +285,20 @@ func TestMessageOnErrorOnlyOffRecordsTheBodyOnIntakeAndNowhereElse(t *testing.T)
 	}
 }
 
-// TestDefaultsKeepTheMessageBodyOffSuccessfulRecords pins the shipped default,
-// which NewRecording's comment relies on.
+// TestTheShippedDefaultsRestrictCaptureAndCollectTraces pins the shipped
+// defaults, which NewRecording's comment relies on.
+//
+// Named for what it asserts — the two settings' shipped values — rather than
+// for the record-level consequence, which is
+// TestAFullySuccessfulPostRecordsNoMessageBody's job. A name promising a
+// property this body does not check is how a future reader concludes the
+// shipped-default path is covered when it is not.
 //
 // The zero value of config.LoggingSettings has MessageOnErrorOnly false, which
 // means "record the body always" — the less private of the two positions. That
 // is safe only because Defaults sets it true and both front doors build the
 // Recording from loaded settings. This is that assumption, asserted.
-func TestDefaultsKeepTheMessageBodyOffSuccessfulRecords(t *testing.T) {
+func TestTheShippedDefaultsRestrictCaptureAndCollectTraces(t *testing.T) {
 	if !config.Defaults().Logging.MessageOnErrorOnly {
 		t.Error("the shipped default no longer restricts message capture to failures; " +
 			"NewRecording's zero-value reasoning and FR-068's privacy default both rest on this")
@@ -557,5 +581,35 @@ func TestAFailedRescueRecordsTheBody(t *testing.T) {
 		if record["message"] != "記録される投稿" {
 			t.Errorf("event %v captured %q, want the original message", record["event"], record["message"])
 		}
+	}
+}
+
+// TestAPanickingNameOnASuccessfulPostStillRecordsItsTrace is FR-071 against the
+// post's outcome.
+//
+// The two requirements are scoped differently and this is where they part. A
+// sink whose Name panics but whose Send succeeds produces a delivered post — so
+// FR-068 says no body — while FR-071's trace is governed by availability, and
+// the frames were captured. The terminal record is the only record that could
+// carry it, because a panicking Name resolves to a sentinel with no lifecycle
+// events. An earlier version dropped the trace here, leaving the one failure
+// class FR-071 exists for recorded without it.
+func TestAPanickingNameOnASuccessfulPostStillRecordsItsTrace(t *testing.T) {
+	settings, path := loggedSettings(t)
+
+	records := postThrough(t, settings, path, &namelessSink{})
+
+	trace, ok := fieldOf(t, records, "request_completed", "stack")
+	if !ok {
+		t.Fatal("a recovered Name panic on a successful post left no trace anywhere")
+	}
+
+	if text, _ := trace.(string); !strings.Contains(text, "namelessSink") {
+		t.Errorf("the trace does not name the panicking sink:\n%s", text)
+	}
+
+	// And still no body: the post succeeded.
+	if carrying := recordsWith(records, "message"); len(carrying) != 0 {
+		t.Errorf("a successful post carried the body on %d record(s) alongside the trace", len(carrying))
 	}
 }

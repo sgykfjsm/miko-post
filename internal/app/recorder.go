@@ -164,7 +164,7 @@ type Recording struct {
 // not the shipped default: config.Defaults sets both to true, and both front
 // doors build this from loaded settings, which always pass through Defaults.
 // The direction matters for one of them — message_on_error_only off means the
-// body is recorded on success too — so TestDefaultsKeepTheMessageBodyOffSuccessfulRecords
+// body is recorded on success too — so TestTheShippedDefaultsRestrictCaptureAndCollectTraces
 // pins the shipped default rather than leaving it to a reader's assumption.
 func NewRecording(logger *logging.Logger, diagnostics config.LoggingSettings) *Recording {
 	return &Recording{logger: logger, diagnostics: diagnostics}
@@ -360,6 +360,14 @@ func (r *recorder) claimBody() string {
 // trace only when a panic was collected in a note — a panicking Name has no
 // lifecycle record to ride on (issue #110), so the terminal record is where
 // both its text and its trace belong.
+// noteTraceValue returns the trace collected from a note's panic, if any.
+func (r *recorder) noteTraceValue() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	return r.noteTrace
+}
+
 func (r *recorder) terminalAttrs() []slog.Attr {
 	r.mu.Lock()
 	body, emitted, trace := r.body, r.bodyEmitted, r.noteTrace
@@ -524,11 +532,21 @@ func (r *recorder) PostCompleted(outcome post.Outcome, elapsed time.Duration) {
 	}
 
 	if outcome.Succeeded() {
-		// No body and no trace on a successful terminal record, whatever was
-		// collected: FR-068's rule is about the post's outcome, and a note
-		// from a sink's misbehaving Name does not make a delivered post a
-		// failed one — PostCompleted's own comment above says why that
-		// distinction is kept.
+		// The trace, but never the body — and the asymmetry is the point,
+		// because the two answer to different requirements.
+		//
+		// FR-068 is scoped to the post's outcome: a delivered post records no
+		// body, and a note about a sink's misbehaving Name does not make it a
+		// failed post. FR-071 is scoped to trace *availability*, not to the
+		// outcome: a panic happened, its frames were captured, and the note in
+		// the error field above already says so. Dropping the trace here left
+		// the one failure class FR-071 exists for recorded without it, on the
+		// only record that could carry it — a panicking Name has no lifecycle
+		// record — while the contract document asserted the opposite.
+		if trace := r.noteTraceValue(); trace != "" {
+			attrs = append(attrs, slog.String(keyStack, trace))
+		}
+
 		r.log.Info(logging.EventRequestCompleted, attrs...)
 
 		return

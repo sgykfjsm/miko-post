@@ -1138,7 +1138,7 @@ in_progress:
     base_note: >-
       Branched from this worktree's e0a0c39, which is merged main plus the 10a record
       reconciliation commit. The production base is 0e3df5e; e0a0c39 adds only .agents/ files.
-    state: implemented-contract-reviewed-fixed
+    state: implemented-fully-reviewed-fixed
     committed: false
     pushed: false
     pull_request: none
@@ -1149,7 +1149,7 @@ in_progress:
       competing_record), checked out in the sibling worktree
       /Users/shige/orca/workspaces/miko-post/sgykfjsm-batch-10-diagnostics-2 and left untouched.
       The name collision is what surfaced that branch at all.
-    review_verdict: contract-invalid-then-fixed
+    review_verdict: all-three-stages-run-two-fix-passes-applied
     review_stages:
       contract:
         verdict: invalid
@@ -1163,11 +1163,33 @@ in_progress:
           and decision-record corrections and are all applied. CON-002 is NOT fixed: it needs a
           human decision (see blockers below).
         fix_pass: 1
-      correctness: not-run
-      adversarial: not-run
+      correctness:
+        verdict: request-changes
+        findings: [COR-001, COR-002, COR-003, COR-004, COR-005]
+        acceptance: >-
+          FR-068 met (verified on nine paths including the REAL telegram sink over HTTP, not just
+          the stand-in), FR-070 met, FR-071 partially met (COR-001), FR-076 met with a diff-induced
+          hazard (COR-002), SC-008 met end to end, SC-013 met at the code level but undermined by
+          COR-002.
+        fix_pass: 2
+      adversarial:
+        verdict: findings
+        findings: [ADV-001, ADV-002, ADV-003, ADV-004]
+        note: >-
+          The batch's central privacy claim survived attack. No credential leak was constructible
+          through either new field: a debug.Stack() dump renders frame arguments as hex words and
+          never string contents, and describePanic renders only the panic value's type. The CON-001
+          rescue fix was independently re-checked and holds.
+        fix_pass: 2
+    review_convergence: >-
+      The two stages found the same two defects independently - COR-002 == ADV-002 and
+      COR-001 == ADV-004 - which is the strongest signal in this review. Correctness demonstrated
+      the severe one as 1 surviving record versus 12 under identical conditions.
     review_note: >-
-      Correctness and adversarial review have NOT run. The contract stage returned invalid and the
-      skill gates the other two behind a valid contract, so they are owed against the fixed tree.
+      All three stages have now run. Two blocker-grade defects were found in this batch's own new
+      code, both fixed in fix pass 2. One finding (ADV-003) is a product decision and is filed
+      rather than fixed. One mutant survivor (V5) was demonstrated to be an equivalent mutant
+      rather than a coverage gap.
     delivered:
       T071: >-
         message capture in internal/app/recorder.go - the body is held from MessageReceived and
@@ -1226,9 +1248,25 @@ in_progress:
       GOOS=linux GOARCH=386/arm/mips/mipsle go vet ./internal/post/ clean; internal/app production
       code builds clean on 386. 28 mutants built, 27 killed.
     mutants:
-      built: 30
-      killed: 29
-      survived: 1
+      built: 37
+      killed: 35
+      survived: 2
+      survivor_disposition_2: >-
+        Two survivors across the whole batch, neither worked around. (1) keepTrace's redundant
+        trace == "" guard: deleted, because no behaviour depended on it. (2) V5, a reordering of
+        degradationWarning.check that puts the warned check before the degradation consult: proved
+        to be an EQUIVALENT MUTANT rather than a coverage gap - warned is only ever set after a
+        successful consult, so both orders produce identical output on the healthy, degraded and
+        healthy-then-degraded sequences. Recorded as equivalent rather than left as an open
+        survivor.
+      fix_pass_2_note: >-
+        V1 - swapping the GUI back to the flushing Degraded, which is the COR-002 regression itself
+        - SURVIVED the entire suite, because every test in internal/gui supplies `degraded` as a
+        closure that answers instantly and none can observe a flush barrier. The fix was correct and
+        completely unguarded. TestTheWindowNeverAsksTheFlushingDegradedQuery now pins the wiring
+        with an AST scan, following T039's os.Exit precedent in cmd/mp, and V1 is killed. An AST
+        scan rather than a grep because run.go's comments legitimately name Degraded while
+        explaining why it is not called.
       survivor_disposition: >-
         keepTrace's explicit `trace == ""` early return. Removing it changed no behaviour and failed
         no test, because storing "" when nothing is stored is a no-op and the first-wins check
@@ -1252,15 +1290,46 @@ in_progress:
       failure record. That is the gap T066 closes, and the reason its tests assert presence AND
       absence rather than values alone.
     validation_gaps: [Intel-Mac, non-darwin-platform, 32-bit-execution, real-Fyne-session]
+    open_questions:
+      - id: DEC-ADV-A
+        status: open
+        raised_in: "batch 10b adversarial review (ADV-003)"
+        question: >-
+          What bounds the captured message field? The body is unbounded user text, now written
+          verbatim onto one record per failed destination, into a log the user's only size control
+          is rotate_size_mib - and FR-074 forbids ever deleting a rotated file.
+        demonstrated: >-
+          One 15 MiB message with two failing sinks produced two archives of ~15 MiB each against a
+          1 MiB configured threshold: 2x the message on disk, and a single record 15x the threshold.
+          Rotation is evaluated BEFORE the write, so a threshold cannot bound a record - rotation
+          degenerates into one giant file per giant record. post.Message.Validate imposes no length
+          bound and the telegram sink applies no client-side cap, so a long paste is rejected by the
+          API and then logged in full.
+        tension: >-
+          SC-008 wants a failed post re-sendable from the log alone, which argues for the whole body.
+          FR-072 and FR-074 give the user a size control that one unbounded record defeats, and the
+          body is the user's private text kept forever.
+        options_and_costs:
+          - "No bound (status quo). SC-008 is literal; the log can grow to any multiple of the user's threshold, and never shrinks."
+          - "Truncate at a documented cap with an explicit message_truncated marker. Bounded, SC-008 satisfied for realistic posts, lossy for the pathological one."
+          - "Keep the full body only on the terminal record and a capped excerpt on each sink failure. One copy instead of N, at the cost of DEC-G1's one-record-has-everything property."
+        deliberately_not_answered_in: 10b
+        note: >-
+          Not a regression: before this batch no record carried the body at all, so the amplification
+          arrives with T071. It is disclosed rather than carried silently, and it is a product
+          decision about what the log promises - the same shape as DEC-ADV-006 in 10a.
+
     not_fixed_here: >-
-      Two items. (1) internal/app's test file does not compile for a 32-bit target - app_test.go:265
+      Three items. (1) internal/app's test file does not compile for a 32-bit target - app_test.go:265
       uses int(config.MaxTimeoutSeconds), which overflows a 32-bit int. Pre-existing: app_test.go is
       byte-identical to 0e3df5e, and it was found only by running 10a's cross-vet gate over this
       batch's packages. 10a solved the same shape in internal/logging by scoping the 64-bit boundary
       to its own file. (2) The GUI cannot report a Close failure: logger.Close runs in Run's deferred
       call, after a.Run returns and the window is gone, so there is no surface left. Degraded()
       covers the open failure and every failed write, which are the two this front door can report.
-      Both disclosed in the PR body.
+      (3) The unbounded captured body, demonstrated by the adversarial stage as 2x amplification and
+      a record 15x the configured rotation threshold - recorded as the open question DEC-ADV-A above
+      and to be filed as an issue. All three disclosed in the PR body.
     decisions_note: >-
       Defined here as structured blocks, where DEC-A1 through DEC-F4 and DEC-ADV-006 live, and
       mirrored in prose in .agents/batch-10b-pr-body.md. Contract finding CON-009: the first draft

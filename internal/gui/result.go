@@ -21,12 +21,18 @@ func correction(err error) string {
 
 // Only the core's display fields belong here; Err is exclusively diagnostic.
 //
-// warning is FR-076's degradation warning, or "" when diagnostics reached
-// disk. It goes last, after the per-destination lines and the log path, because
-// it is about the log rather than about the post: a reader's first question is
-// what happened to their message, and the answer must not be pushed down the
-// label by a paragraph about diagnostics.
-func resultText(outcome post.Outcome, logPath string, warning string) string {
+// warning is FR-076's degradation warning, or "" when there is none to show
+// *on this post*. lost says whether diagnostics are unusable at all, which is a
+// different question: the warning is spent once per session and `lost` stays
+// true for the rest of it. Passing one flag for both jobs is what made a failed
+// post point at an unwritten log once the warning had been spent on an earlier
+// successful one.
+//
+// The warning goes last, after the per-destination lines and the log path,
+// because it is about the log rather than about the post: a reader's first
+// question is what happened to their message, and the answer must not be pushed
+// down the label by a paragraph about diagnostics.
+func resultText(outcome post.Outcome, logPath string, warning string, lost bool) string {
 	var lines []string
 	for _, result := range outcome.Results {
 		if result.Success {
@@ -35,15 +41,18 @@ func resultText(outcome post.Outcome, logPath string, warning string) string {
 			lines = append(lines, result.Name+": "+result.Reason)
 		}
 	}
-	if !outcome.Succeeded() {
-		// Suppressed when diagnostics failed, because the path would be
-		// pointing at a file that does not have the details. The warning
-		// below names the same path and says why, which is the honest
-		// version of the same sentence — this is the reasoning
+	if !outcome.Succeeded() && !lost {
+		// Suppressed whenever diagnostics are unusable, because the path
+		// would be pointing at a file that does not have the details —
+		// keyed on `lost`, not on whether a warning is being printed right
+		// now. Those differ for the whole rest of a session: the warning is
+		// spent once, and if it was spent on a *successful* post then every
+		// later failed post would otherwise get the stale invitation back,
+		// which is the one post the user actually needs to diagnose. The
+		// warning below names the same path and says why, which is the
+		// honest version of the same sentence — the reasoning
 		// internal/cli/render.go already applies to its own pairing.
-		if warning == "" {
-			lines = append(lines, "Details: "+logPath)
-		}
+		lines = append(lines, "Details: "+logPath)
 	}
 	if warning != "" {
 		lines = append(lines, warning)
@@ -74,21 +83,36 @@ type degradationWarning struct {
 	warned   bool
 }
 
-// next returns the warning the first time diagnostics are found to have
-// failed, and "" on every call after that.
-func (d *degradationWarning) next() string {
-	if d == nil || d.warned || d.degraded == nil {
-		return ""
+// check reports the warning to show on this post — the first time diagnostics
+// are found to have failed, and "" afterwards — and whether diagnostics are
+// unusable at all.
+//
+// Two returns rather than one because the two outlive each other. The warning
+// is spent once per session under FR-076; `lost` stays true for every post
+// after it, and it is `lost` that must decide whether a failed post is still
+// invited to read the log.
+//
+// The degradation is consulted on every post even after the warning is spent,
+// because `lost` has to stay current — and it is cheap and side-effect-free to
+// ask, which is the whole reason this holds Logger.DegradedSoFar rather than
+// Logger.Degraded. See that method: the flushing one can kill the queue.
+func (d *degradationWarning) check() (warning string, lost bool) {
+	if d == nil || d.degraded == nil {
+		return "", false
 	}
 
 	degraded := d.degraded()
 	if degraded == nil {
-		return ""
+		return "", false
+	}
+
+	if d.warned {
+		return "", true
 	}
 
 	d.warned = true
 
 	// The same type the CLI renders, so both front doors produce one shape of
 	// sentence naming the path and the reason rather than two.
-	return degraded.Warning()
+	return degraded.Warning(), true
 }

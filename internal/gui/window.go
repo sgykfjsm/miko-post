@@ -102,10 +102,12 @@ func (w *window) finished(outcome post.Outcome) {
 		return
 	}
 	w.send.Enable()
-	// Asked once per post and rendered at most once per session; see
-	// degradationWarning. Read here rather than at construction because the
-	// open may have succeeded and a later write failed.
-	w.result.SetText(resultText(outcome, w.logPath, w.warning.next()))
+	// Asked once per post; the warning renders at most once per session while
+	// `lost` stays true for the rest of it. Read here rather than at
+	// construction because the open may have succeeded and a later write
+	// failed.
+	warning, lost := w.warning.check()
+	w.result.SetText(resultText(outcome, w.logPath, warning, lost))
 	generation, activity := w.generation, w.activity()
 	w.pending = w.after(closeDelay(delay), func() {
 		w.dispatch(func() {

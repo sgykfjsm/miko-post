@@ -122,16 +122,17 @@ Adding a second CLI code path to satisfy a file list would be a change with no d
 `make check` (gofmt, vet, full `-race` suite) and a native darwin/arm64 build, re-run after the
 CON-001 fix.
 
-`internal/app` is at **100.0% of statements, matching its baseline** — the two guards a sink cannot
+`internal/app` is at **100.0% of statements, matching its baseline**, and `internal/logging` at
+**99.5%**, unchanged by the new query — the two guards a sink cannot
 reach are covered through a new `export_test.go` seam rather than left as branches nobody has
-executed. `internal/gui` is at **73.4% against a 74.2% baseline**; the entire difference is one new
+executed. `internal/gui` is at **73.8% against a 74.2% baseline**; the entire difference is one new
 statement inside `Run`, which is 0% covered at baseline too because it needs a real Fyne app and a
 real settings file.
 
 `GOOS=linux GOARCH=386|arm|mips|mipsle go vet ./internal/post/` is clean, and `internal/app`'s
 production code builds clean on 386.
 
-**30 mutants built, 29 killed.** Highlights:
+**37 mutants built, 35 killed.** Highlights:
 
 - **Both "manufacture a trace" mutants are killed**, which is FR-071's prohibition tested rather
   than asserted: a `traceFor` falling back to `"goroutine 1 [running]:\n" + err.Error()`, and a
@@ -145,12 +146,15 @@ production code builds clean on 386.
 - Seven mutants over T074: a warning that never latches, one that never fires, one dropped in
   rendering, one the window never asks for, the stale `Details:` line, and a degradation that flips
   the exit status.
-- **One survivor, one deletion.** `keepTrace` had an explicit `trace == ""` early return that changed
+- **Two survivors, neither worked around.** `keepTrace`'s explicit `trace == ""` early return changed
   no behaviour and failed no test — storing `""` when nothing is stored is a no-op, and the
-  first-wins check already rejects an empty offer. It was deleted rather than given a test. The same
-  reasoning removed a `traceFor` call from `FormattingFinished` during the CON-001 fix: a
+  first-wins check already rejects an empty offer — so it was deleted rather than given a test. The
+  same reasoning removed a `traceFor` call from `FormattingFinished` during the CON-001 fix: a
   `FormattingAttempt`'s error comes from an HTTP exchange, never a panic, so that branch was
-  unreachable even from a test.
+  unreachable even from a test. The second survivor, a reordering of `degradationWarning.check`, was
+  shown to be an **equivalent mutant** rather than a coverage gap: `warned` is only ever set after a
+  successful consult, so both orders behave identically on the healthy, degraded and
+  healthy-then-degraded sequences.
 - **A false kill, caught and corrected.** The first `message_len` mutant "killed" with no test named:
   replacing `utf8.RuneCountInString` with `len` left the `utf8` import unused, so the package failed
   to compile and a non-zero exit was scored as a kill. Rebuilt as a compiling mutant, it is genuinely
@@ -165,12 +169,64 @@ Not claimed: Intel Mac, a non-darwin platform, a 32-bit *run* (vetted and compil
 Fyne session — the GUI warning is driven through the window's dispatch seam, not a live window.
 
 ## Review status
-The **contract stage has run and returned `invalid`**, with ten findings. CON-001 was a real defect
-and is fixed; CON-003 through CON-010 were record, contract-text and decision-record corrections and
-are applied. **CON-002 is not fixed and is the carried prerequisite below.**
+All three stages have run, and **two fix passes** are applied.
 
-**Correctness and adversarial review have not run.** They are gated behind a valid contract and are
-owed against this fixed tree.
+- **Contract: `invalid`**, ten findings. CON-001 was a real defect and is fixed; CON-003 through
+  CON-010 were record, contract-text and decision-record corrections, all applied. **CON-002 is not
+  fixed** — see the carried prerequisite below.
+- **Correctness: `request-changes`**, five findings. All applied.
+- **Adversarial: `findings`**, four findings. Three applied; ADV-003 is a product decision and is
+  filed rather than fixed.
+
+**The two stages found the same two defects independently** (`COR-002 == ADV-002`,
+`COR-001 == ADV-004`), which is the strongest signal in this review.
+
+### The blocker in the GUI warning — my own code, fixed
+`internal/gui` called `Logger.Degraded()` after every post, on the Fyne event goroutine. `Degraded()`
+calls `Flush()`, which submits a barrier and waits 250 ms; on timeout it calls `failLocked`, whose
+own comment reads *"disables this logger permanently"*. So one slow write — a vault on a network
+mount, an fsync after a wake from sleep — **discarded every record of every later post in the
+session, and froze the window for a quarter second per post.** The code added to satisfy FR-076
+could cause the exact outage FR-076 exists to report. Demonstrated as **1 surviving record versus
+12** under identical conditions. The CLI was never exposed: it asks once, after `Close`.
+
+Fixed by adding `logging.DegradedSoFar()`, which reads only the two already-settled states —
+`openErr` and the writer's latched error — and submits no barrier. What it gives up is synchronicity:
+a write that failed but is still queued becomes visible on the next call, or at `Close`. An open
+failure, the common case and the one a user can act on, needs no flush at all.
+
+**The fix was completely unguarded, and only a mutant showed it.** Swapping the GUI back to
+`Degraded` survived the entire suite, because every test in `internal/gui` supplies `degraded` as a
+closure that answers instantly and none can observe a flush barrier.
+`TestTheWindowNeverAsksTheFlushingDegradedQuery` now pins the wiring with an AST scan, following
+T039's `os.Exit` precedent in `cmd/mp` — an AST scan rather than a grep because `run.go`'s comments
+legitimately name `Degraded` while explaining why it is not called.
+
+### The other two
+- **ADV-001** — the `Details: <log path>` suppression was keyed on `warning != ""`. The warning is
+  spent once per session, so if it was spent on a *successful* post, every later **failed** post got
+  the stale invitation back — pointing the user at an unwritten log on the one post they actually
+  need to diagnose. My own test only covered the case where the first post is the failing one, which
+  is why the suite was green. `check()` now returns `(warning, lost)` and the suppression keys on
+  `lost`.
+- **COR-001 / ADV-004** — a panic in `Name()` on a post that otherwise succeeds lost its trace,
+  while the contract text this batch wrote asserted the terminal record carries it. The two
+  requirements are scoped differently and had been conflated: FR-068 is scoped to the post's
+  *outcome*, FR-071 to trace *availability*. The trace now goes on the successful terminal record;
+  the body still does not, and a mutant that adds both is killed by two tests.
+
+Test-quality findings applied: `fieldOf` now fails loudly on duplicate event names rather than
+silently checking the first (COR-003); a dominated, unfailable assertion dropped from T067's test
+(COR-004); and the defaults test renamed to say what it asserts, since the old name promised a
+record-level property its body never checked (COR-005).
+
+### What the adversarial stage could not break
+Worth recording as much as what it could. **No credential leak was constructible through either new
+field.** A `debug.Stack()` dump renders frame arguments as hex words and never string contents, and
+`describePanic` renders only the panic value's type — a sink whose receiver holds a `config.Secret`,
+panicking with a struct carrying a second credential not in `Options.Redact`, leaked neither. The
+CON-001 rescue fix was independently re-checked against the **real** telegram sink over HTTP and
+holds.
 
 ## Carried prerequisite — needs a decision before merge
 This PR carries `e0a0c39`, the Batch 10a record reconciliation, which is not on `origin/main`.
@@ -189,7 +245,7 @@ status. `contracts/log-events.md` is updated: the field table now records which 
 formerly-owed field rather than claiming any are still owed, the message-capture section says which
 records carry the body and which deliberately do not, and the traces section carries DEC-G8.
 
-Deliberately not addressed — two items, which is the whole list:
+Deliberately not addressed — three items, which is the whole list:
 
 1. **`internal/app`'s test file does not compile for a 32-bit target**, pre-existing and newly
    discovered by running 10a's cross-vet gate over this batch's packages: `app_test.go:265` uses
@@ -198,7 +254,17 @@ Deliberately not addressed — two items, which is the whole list:
    the 64-bit boundary to its own file.
 2. **The GUI cannot report a `Close` failure.** `logger.Close` runs in `Run`'s deferred call, after
    `a.Run()` returns and the window is gone, so there is no surface left — unlike the CLI, which
-   closes before it renders. `Degraded()` covers the open failure and every failed write.
+   closes before it renders. The open failure and every latched write failure are the two this front
+   door can report.
+3. **The captured body is unbounded** — recorded as open question **DEC-ADV-A** in `state.yaml`, to
+   be filed as an issue. The adversarial stage demonstrated it: one 15 MiB message with two failing
+   sinks produced 2x amplification on disk and a single record **15x the configured rotation
+   threshold**, because rotation is evaluated *before* the write so a threshold cannot bound a
+   record. `post.Message.Validate` imposes no length bound and the chat sink applies no client-side
+   cap. Not a regression — no record carried the body before this batch — but SC-008 ("re-sendable
+   from the log alone") and FR-072/FR-074 (a size control, and never deleting an archive) pull in
+   opposite directions, so what the log promises here is a product decision. Three options and their
+   costs are recorded.
 
 Issues stay open until this is reviewed and merged. **This PR body carries no closing keyword**, so
 closing #67, #68 and #72–#75 after merge is an explicit human action — which is the gap that left

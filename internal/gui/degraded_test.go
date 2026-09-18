@@ -200,11 +200,63 @@ func TestTheWarningDoesNotChangeTheExitStatus(t *testing.T) {
 func TestNextIsSafeOnAZeroWarning(t *testing.T) {
 	var nilWarning *degradationWarning
 
-	if got := nilWarning.next(); got != "" {
-		t.Errorf("a nil degradationWarning returned %q", got)
+	if got, lost := nilWarning.check(); got != "" || lost {
+		t.Errorf("a nil degradationWarning returned %q, lost=%v", got, lost)
 	}
 
-	if got := (&degradationWarning{}).next(); got != "" {
-		t.Errorf("a degradationWarning with no logger returned %q", got)
+	if got, lost := (&degradationWarning{}).check(); got != "" || lost {
+		t.Errorf("a degradationWarning with no logger returned %q, lost=%v", got, lost)
+	}
+}
+
+// TestAFailedPostAfterTheWarningIsSpentStillHidesTheLogPath is the ordering the
+// first implementation got wrong.
+//
+// The warning is spent once per session. If the post that spends it SUCCEEDED,
+// there was no "Details:" line to replace — and every later failed post got the
+// stale invitation back, pointing the user at a log that was never written. That
+// is the one post they actually need to diagnose. The suppression is keyed on
+// whether diagnostics are lost, not on whether a warning is being printed now.
+func TestAFailedPostAfterTheWarningIsSpentStillHidesTheLogPath(t *testing.T) {
+	h := setupDegrading(t, succeeds, unwritable)
+
+	first := submitAndSettle(t, h, "a successful post that spends the warning")
+	if !strings.Contains(first, degradedLogPath) {
+		t.Fatalf("the first post did not warn, so the warning was never spent:\n%s", first)
+	}
+
+	if strings.Contains(first, "Details: ") {
+		t.Errorf("a successful post offered a details line:\n%s", first)
+	}
+
+	// Now a post that fails, with the warning already gone.
+	h.w.post = fails
+
+	second := submitAndSettle(t, h, "a failed post afterwards")
+
+	if strings.Contains(second, "Details: ") {
+		t.Errorf("a failed post was pointed at a log that could not be written:\n%s", second)
+	}
+
+	if !strings.Contains(second, "timed out") {
+		t.Errorf("the destination's real outcome was lost:\n%s", second)
+	}
+
+	// And the warning is still not repeated: FR-076 allows exactly one.
+	if strings.Contains(second, degradedLogPath) {
+		t.Errorf("the warning was shown a second time:\n%s", second)
+	}
+}
+
+// TestAHealthyLogStillOffersTheLogPathOnAFailedPost is the control for the test
+// above: with diagnostics working, a failed post must still be invited to read
+// them.
+func TestAHealthyLogStillOffersTheLogPathOnAFailedPost(t *testing.T) {
+	h := setupDegrading(t, fails, func() *logging.Degradation { return nil })
+
+	shown := submitAndSettle(t, h, "a failed post with a healthy log")
+
+	if !strings.Contains(shown, "Details: ") {
+		t.Errorf("a failed post with a working log was not pointed at it:\n%s", shown)
 	}
 }
