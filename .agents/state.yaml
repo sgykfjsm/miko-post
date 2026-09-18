@@ -1134,14 +1134,22 @@ in_progress:
     tasks: [T066, T067, T071, T072, T073, T074]
     issues: [67, 68, 72, 73, 74, 75]
     branch: sgykfjsm/batch-10b-post-diagnostics
-    base: 0e3df5ec524df20e0d1d46b4572e11dbe83e810a
+    base: 86a05f57c9e258355d3d2c54dc75d91dbbb5f072
     base_note: >-
-      Branched from this worktree's e0a0c39, which is merged main plus the 10a record
-      reconciliation commit. The production base is 0e3df5e; e0a0c39 adds only .agents/ files.
+      Rebased onto merged main 86a05f5 on 2026-09-18, after PR #131 carried the 10a record
+      reconciliation in on its own. The branch previously contained e0a0c39 as its first commit;
+      `git rebase --onto origin/main e0a0c39` dropped it explicitly rather than relying on git's
+      patch detection. Seven commits, and the tree is byte-identical before and after
+      (b09891ce208fcde2e5a6549a017144cd0c9c54ac both sides) - a rebase moves history and must not
+      move content, and this one is verified not to have. make check and the native build were
+      re-run on the rebased tree rather than trusted from before it.
     state: implemented-fully-reviewed-fixed
-    committed: false
-    pushed: false
-    pull_request: none
+    committed: true
+    pushed: true
+    pull_request: none-yet
+    publication_note: >-
+      Branch pushed 2026-09-18; no PR opened yet. .agents/batch-10b-pr-body.md is prepared and
+      current, including CON-002's resolution.
     prepared_pr_body: .agents/batch-10b-pr-body.md
     branch_note: >-
       NOT sgykfjsm/batch-10b-diagnostics. That name was already taken by a pushed branch carrying
