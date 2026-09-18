@@ -258,8 +258,8 @@ Deliberately not addressed — three items, which is the whole list:
    `a.Run()` returns and the window is gone, so there is no surface left — unlike the CLI, which
    closes before it renders. The open failure and every latched write failure are the two this front
    door can report.
-3. **The captured body is unbounded** — recorded as open question **DEC-ADV-A** in `state.yaml`, to
-   be filed as an issue. The adversarial stage demonstrated it: one 15 MiB message with two failing
+3. **The captured body is unbounded** — recorded as open question **DEC-ADV-A** in `state.yaml` and
+   filed as **#132**. The adversarial stage demonstrated it: one 15 MiB message with two failing
    sinks produced 2x amplification on disk and a single record **15x the configured rotation
    threshold**, because rotation is evaluated *before* the write so a threshold cannot bound a
    record. `post.Message.Validate` imposes no length bound and the chat sink applies no client-side

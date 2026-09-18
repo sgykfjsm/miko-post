@@ -1315,6 +1315,9 @@ in_progress:
     open_questions:
       - id: DEC-ADV-A
         status: open
+        filed_as: 132
+        filed_at: 2026-09-18
+        url: https://github.com/sgykfjsm/miko-post/issues/132
         raised_in: "batch 10b adversarial review (ADV-003)"
         question: >-
           What bounds the captured message field? The body is unbounded user text, now written
