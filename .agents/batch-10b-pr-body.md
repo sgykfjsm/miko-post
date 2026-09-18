@@ -8,9 +8,9 @@ produced one.
 ## Batch
 Batch 10b / US5: T066, T067, T071–T074, issues #67, #68, #72–#75.
 
-**This PR carries three commits, not two.** `e0a0c39` is the Batch 10a record reconciliation, which
-is not on `origin/main`; `38a45fe` and `159e3dc` are 10b. See *Carried prerequisite* below — that
-commit needs a decision before this merges.
+Based on merged `main` `0e3df5e`, once the Batch 10a record reconciliation (`e0a0c39`) has merged
+through its own PR — see *Carried prerequisite* below. This branch must be rebased onto the new
+`main` before its PR is opened.
 
 ## What each task did
 - **T071** — `message` capture in `internal/app/recorder.go`. The body is held from
@@ -228,16 +228,18 @@ panicking with a struct carrying a second credential not in `Options.Redact`, le
 CON-001 rescue fix was independently re-checked against the **real** telegram sink over HTTP and
 holds.
 
-## Carried prerequisite — needs a decision before merge
-This PR carries `e0a0c39`, the Batch 10a record reconciliation, which is not on `origin/main`.
-`.agents/state.yaml` — written by that very commit — says of it: *"Resolve before either record is
-merged to main; they are two independent reconciliations of one event."* The competitor is `d057f45`
-on the pushed branch `sgykfjsm/batch-10b-diagnostics`, which records the same 10a merge as
-`passed-with-notes` over two cycles where the run manifest shows three cycles and an adversarial
-stage that never completed.
+## Carried prerequisite — resolved by splitting
+This PR originally carried `e0a0c39`, the Batch 10a record reconciliation, which is not on
+`origin/main`. `.agents/state.yaml` — written by that very commit — says of it: *"Resolve before
+either record is merged to main; they are two independent reconciliations of one event."*
 
-Merging this PR as it stands publishes one side of that conflict and buries the other. Either
-reconcile the two records first, or split `e0a0c39` out of this branch.
+**That commit is now split onto its own branch, `sgykfjsm/batch-10a-records`, and opened as its own
+PR** (CON-002's required outcome). It is exactly one commit there, because its parent is already
+merged `main`. The record conflict with `d057f45` is decided on its own merits rather than riding
+along with a code change.
+
+**This batch must be rebased onto the new `main` once that PR merges**, so its own PR carries only
+its own commits. Until then this branch still contains `e0a0c39`.
 
 ## Scope
 No change to the event vocabulary, redaction, rotation, the settings schema, sink behaviour or exit

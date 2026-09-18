@@ -1160,8 +1160,16 @@ in_progress:
           first to confirm the reviewer's claim rather than taking it on trust: the FR-039 rescue
           path made every rescued - and therefore SUCCESSFUL - post write the user's message body to
           telegram_markdown_failed. See DEC-G1a. CON-003 through CON-010 were record, contract-text
-          and decision-record corrections and are all applied. CON-002 is NOT fixed: it needs a
-          human decision (see blockers below).
+          and decision-record corrections and are all applied.
+        con_002_resolution: >-
+          RESOLVED by the user's decision on 2026-09-18: the carried 10a record commit e0a0c39 is
+          split onto its own branch, sgykfjsm/batch-10a-records, and opened as its own PR. That
+          branch is exactly one commit, because e0a0c39's parent is already merged main 0e3df5e.
+          The record conflict with d057f45 is therefore decided on its own merits instead of riding
+          along with a code change, which is what CON-002 asked for. Batch 10b must be REBASED onto
+          the new main once that PR merges, so its own PR carries only its own commits. Until then
+          10b's branch still contains e0a0c39 and a PR opened from it would still show four commits.
+        con_002_prepared_body: .agents/batch-10a-records-pr-body.md
         fix_pass: 1
       correctness:
         verdict: request-changes
