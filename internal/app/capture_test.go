@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sgykfjsm/miko-post/internal/app"
 	"github.com/sgykfjsm/miko-post/internal/config"
@@ -478,5 +479,83 @@ func TestKeepTraceKeepsTheFirstTrace(t *testing.T) {
 	// And an empty offer after a real one does not clear it.
 	if got := probe.KeepTrace(""); got != "first goroutine dump" {
 		t.Errorf("an empty trace cleared the stored one, leaving %q", got)
+	}
+}
+
+// errFormattingRejected stands in for Telegram's rejection of markdown, which
+// is what triggers FR-039's plaintext rescue.
+var errFormattingRejected = errors.New("can't parse entities")
+
+// rescuedSink models the telegram sink's FR-039 rescue: it reports a failed
+// markdown attempt, then a plaintext attempt, and its overall result is the
+// plaintext one.
+//
+// A stand-in rather than the real sink with an HTTP server, because what is
+// under test is which records carry the body, and the rescue's two
+// ReportFormatting calls are the whole mechanism that matters here.
+type rescuedSink struct{ plaintextErr error }
+
+func (s *rescuedSink) Name() string { return telegram.SinkName }
+
+func (s *rescuedSink) Send(ctx context.Context, _ post.Message) error {
+	post.ReportFormatting(ctx, post.FormattingAttempt{
+		Err: errFormattingRejected, Duration: time.Millisecond,
+	})
+	post.ReportFormatting(ctx, post.FormattingAttempt{
+		Plain: true, Err: s.plaintextErr, Duration: time.Millisecond,
+	})
+
+	return s.plaintextErr
+}
+
+// TestARescuedPostIsASuccessAndRecordsNoBody is FR-068's privacy half against
+// FR-039's rescue path.
+//
+// The rescue is not an exotic path: it exists because Telegram rejects ordinary
+// punctuation, so a markdown attempt failing and a plaintext attempt succeeding
+// is a routine, fully successful post. FR-068 and log-events.md both say a post
+// that fully succeeded carries the body on no record — and
+// telegram_markdown_failed is a failure-shaped record inside a successful post,
+// which is the one place "attach the body to failure records" and "a successful
+// post records no body" disagree.
+func TestARescuedPostIsASuccessAndRecordsNoBody(t *testing.T) {
+	settings, path := loggedSettings(t)
+
+	records := postThrough(t, settings, path, &rescuedSink{})
+
+	// Precondition: the post really did succeed, or this test proves nothing.
+	if _, ok := fieldOf(t, records, "telegram_plaintext_succeeded", "sink"); !ok {
+		t.Fatal("the rescue did not succeed, so this is not the success path")
+	}
+
+	if _, ok := fieldOf(t, records, "request_completed", "duration_ms"); !ok {
+		t.Fatal("the post did not complete successfully, so this is not the success path")
+	}
+
+	if carrying := recordsWith(records, "message"); len(carrying) != 0 {
+		t.Errorf("a rescued — and therefore successful — post put the body on %d record(s); "+
+			"FR-068 requires none", len(carrying))
+
+		for _, record := range carrying {
+			t.Errorf("  event %v carried the body", record["event"])
+		}
+	}
+}
+
+// TestAFailedRescueRecordsTheBody is the other side: when the plaintext attempt
+// also fails the post failed, and SC-008 wants the body.
+func TestAFailedRescueRecordsTheBody(t *testing.T) {
+	settings, path := loggedSettings(t)
+
+	records := postThrough(t, settings, path, &rescuedSink{plaintextErr: errSendFailed})
+
+	if carrying := recordsWith(records, "message"); len(carrying) == 0 {
+		t.Error("a post whose rescue also failed recorded no body; SC-008 cannot be met")
+	}
+
+	for _, record := range recordsWith(records, "message") {
+		if record["message"] != "記録される投稿" {
+			t.Errorf("event %v captured %q, want the original message", record["event"], record["message"])
+		}
 	}
 }

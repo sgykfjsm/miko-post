@@ -55,16 +55,15 @@ not change the terminal event's name or level, which still reflects delivery out
 
 ## What is emitted as of T071-T074, and what is still owed
 
-T040 emits `message_received`, the six sink lifecycle events, and the two terminal events. One
-entry in the table above is not yet at its final state, and it is recorded here so that a missing
-field reads as a scheduled gap rather than as a defect. The other two — `message` and `stack` —
-were delivered by T071 and T073 and are described in their own sections below.
+Nothing in the field table above is owed any more. The three fields that were scheduled gaps have
+all been delivered, and this section is kept as the record of when — a reader meeting an older log
+needs to know which fields a given build could produce.
 
-| Field | State after T040 | Owner of the rest |
+| Field | Was | Delivered by |
 |---|---|---|
-| `error_type` | `timeout`, `permission_denied`, `chat_not_found`, `unauthorized`, `rate_limited`, or generic `failed`, selected with the display reason by one classifier | **T056 / Batch 8** adds specific categories; `timeout` and the generic fallback retain their meaning |
-| `message` | ~~Not emitted at all.~~ **Delivered by T071**; see the message-capture rule below | — |
-| `stack` | ~~Not emitted.~~ **Delivered by T073**; see the traces section below | — |
+| `error_type` | `timeout` or a generic `failed` only | **T056 / Batch 8**, which added `permission_denied`, `chat_not_found`, `unauthorized` and `rate_limited`, selected with the display reason by one classifier |
+| `message` | Not emitted at all | **T071 / Batch 10b**; see the message-capture rule below |
+| `stack` | Not emitted | **T073 / Batch 10b**; see the traces section below |
 
 `message_len` and `message_bytes` **are** emitted, on `message_received`, as R-010 defines them.
 
@@ -90,22 +89,42 @@ With `message_on_error_only = true` (the default):
 - **Any** enabled sink failed → the original message body is recorded, sufficient to reconstruct
   and re-send the post by hand (SC-008).
 
-**Which record carries it (T071).** The body goes on **every record that reports a failure** — each
-`*_failed` sink event and each formatting-fallback failure — because SC-008 asks for a post to be
-re-sendable without consulting any other source, and those are the records that already name the
-destination, the error type and the detail. One record, everything needed.
+**Which record carries it (T071).** The body goes on **every record that reports a sink's own
+outcome as a failure** — the `*_failed` events emitted by `SinkFinished` — because SC-008 asks for a
+post to be re-sendable without consulting any other source, and those are the records that already
+name the destination, the error type and the detail. A reader who greps one of them has everything.
+
+**The formatting-fallback records deliberately do not carry it.** `telegram_markdown_failed` and
+`telegram_plaintext_failed` are emitted from inside `Send`, before the post's outcome exists, and
+FR-039's rescue means a failed markdown attempt is routinely followed by a *successful* plaintext
+one — so `telegram_markdown_failed` is a failure-shaped record inside a post that fully succeeded.
+Attaching the body there would put the user's private text in the log on every rescued post,
+breaching the first rule in this section on the most ordinary path there is: the rescue exists
+because Telegram rejects ordinary punctuation. SC-008 loses nothing, because a rescue that itself
+fails makes `Send` return a `RescueError` and the sink's own `telegram_send_failed` record carries
+the body. These records are the *stages*; `SinkFinished`'s is the outcome.
 
 The terminal `request_completed_with_error` record carries it **only when no failure record could**.
 That happens for a sink whose `Name` panics: it resolves to a sentinel the event vocabulary does not
 cover (issue #110), so no lifecycle record is emitted and the terminal record is the post's only
 record. Without the fallback FR-068 would be unmet for exactly that post; with it applied
 unconditionally, a two-sink post that lost both destinations would carry the user's private text
-three times.
+three times — twice on the failure records and once more at the end.
+
+So the body's repetition is bounded by the number of destinations that actually failed: one record
+each, and the terminal record only when there were none that could carry it.
 
 With `message_on_error_only = false` the body is recorded on `message_received` instead — once, on
-the post's intake event — and on no other record. FR-068 constrains only the enabled case, so this
-is a choice: putting it on every record would repeat the body once per destination for no
-reconstruction benefit.
+the post's intake event — and on no other record.
+
+FR-068's two clauses are scoped differently, and the distinction is what makes this legal. Only the
+first is conditional: "**When** error-only message capture is enabled, successful events MUST omit
+message content". The second is not — "if any destination failed, the original message body needed
+to reconstruct that post MUST be recorded" — so it binds in **both** modes. In the disabled mode it
+is satisfied by the intake record, which every post emits and which shares the post's `message_id`,
+so a failed post's body is always recorded and always joinable to its failures (R-007). What FR-068
+leaves open is only the body's *placement*, and putting it on every record would repeat the user's
+text once per destination for no reconstruction benefit.
 
 The captured body passes through the same `Options.Redact` scrub as every other field, so a message
 that happens to contain the bot token is redacted rather than leaked (FR-069).
@@ -125,6 +144,16 @@ first error.
 Recorded for panics, unexpected errors, and failures where a trace is available and useful,
 subject to `stack_trace`. Expected operational errors — a timeout, a 401, a missing note with
 `create_if_missing = false` — MUST NOT get an artificially manufactured trace.
+
+**In this build, `stack` is emitted for panics and for nothing else, and that is a decision rather
+than a gap (DEC-G8).** FR-071's three categories are not three sources: the requirement qualifies
+all of them with "where a trace is **available** and useful", and a plain Go `error` carries no
+stack. A panic is the only failure this program can obtain real frames for, because `debug.Stack()`
+runs inside the deferred `recover` while they still exist. For an unexpected non-panic error there
+is nothing to record, and the same requirement forbids inventing something — so "no `stack` field"
+is FR-071 satisfied, not FR-071 deferred. If a future sink returns an error type that carries its
+own captured stack, implementing `post.Traced` on it is all that is needed; `traceFor` already asks
+every error in the chain.
 
 **How the prohibition is kept (T073).** The stack is captured by `debug.Stack()` inside the deferred
 `recover` in `internal/post`, which is the last moment the frames still exist — `recover()` returns

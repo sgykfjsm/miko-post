@@ -667,6 +667,24 @@ func (r *recorder) FormattingFinished(sink post.SinkAttempt, attempt post.Format
 	if status, ok := httpStatus(attempt.Err); ok {
 		attrs = append(attrs, slog.Int(keyHTTPStatus, status))
 	}
-	attrs = append(attrs, r.failureAttrs(r.traceFor(attempt.Err))...)
+	// Neither the body nor a trace, and each absence for its own reason.
+	//
+	// No body: a formatting-fallback record is emitted from inside Send,
+	// before the post's outcome exists, and FR-039's rescue means a failed
+	// markdown attempt is routinely followed by a successful plaintext one —
+	// so telegram_markdown_failed is a failure-shaped record inside a post
+	// that fully succeeded. Attaching the body here put the user's private
+	// text in the log on every rescued post, which is FR-068's privacy half
+	// breached on the most ordinary path there is: the rescue exists because
+	// Telegram rejects ordinary punctuation. SC-008 loses nothing, because
+	// when the rescue itself fails Send returns a RescueError and the sink's
+	// own telegram_send_failed record carries the body beside the destination,
+	// the error type and the detail — the record SC-008 asks to be
+	// self-sufficient. These records are the stages, not the outcome.
+	//
+	// No trace: a FormattingAttempt's Err comes from an HTTP exchange, never
+	// from a recovered panic, so nothing in this package's reach implements
+	// post.Traced here. A traceFor call would be a branch no test could enter,
+	// which is the shape this batch already deleted once in keepTrace.
 	r.log.Error(event, attrs...)
 }
