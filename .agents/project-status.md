@@ -8,7 +8,7 @@ message to Telegram and today's Obsidian daily note concurrently and independent
 a GUI front door, through one shared posting core.
 
 ## Status
-In execution. 69 of 91 tasks in `tasks.md` are `[x]`; 22 remain. Batches 1–9, the separately
+In execution. 75 of 91 tasks in `tasks.md` are `[x]`; 16 remain. Batches 1–9, the separately
 requested GUI background (#122) and Batch 10a are merged to `main`. `main` is at
 `0e3df5ec524df20e0d1d46b4572e11dbe83e810a` and `make check` (gofmt, vet, full `-race` suite) is
 green there across all ten packages.
@@ -60,15 +60,40 @@ issue owns a load-time upper bound for the two rotation keys). All four are loss
 holds, and all four await a product decision.
 
 ## In progress
-Nothing. The worktree is clean apart from the long-standing, deliberately excluded
-`.specify/integrations/claude.manifest.json` edit, which is unrelated to the feature and has been
-carried across every batch without being committed.
+**Batch 10b — US5 post diagnostics (T066, T067, T071–T074 / #67, #68, #72–#75)** — is implemented
+on `sgykfjsm/batch-10b-post-diagnostics` and **not yet reviewed, committed or pushed**. The PR body
+is prepared at `.agents/batch-10b-pr-body.md`.
+
+Three fields `contracts/log-events.md` listed as owed are delivered: `message` under FR-068's
+capture rule, `stack` under FR-071, and FR-076's single warning at the GUI front door, which
+`internal/gui` never produced (issue #75). T072 needed no code change — `message_len` and
+`message_bytes` already carried R-010's semantics, and that was verified with three mutants rather
+than by reading the code.
+
+Validation: `make check`, native darwin/arm64 build, `internal/app` at 100.0% (matching baseline),
+`internal/gui` at 73.4% against a 74.2% baseline — the whole difference being one new statement
+inside the untestable `Run`. 28 mutants built, 27 killed; the survivor proved a `keepTrace` guard
+unnecessary and the guard was deleted rather than given a test.
+
+Note the branch name: **not** `sgykfjsm/batch-10b-diagnostics`. That name was already taken by the
+pushed branch carrying the competing 10a reconciliation (`d057f45`), which is left untouched — the
+collision is what surfaced it.
+
+The long-standing, deliberately excluded `.specify/integrations/claude.manifest.json` edit remains
+uncommitted, as it has been through every batch.
 
 ## Blockers
 None.
 
 ## Next best action
-Implement **Batch 10b** — US5 post diagnostics: T066, T067, T071 (`message_on_error_only` capture),
+**Review Batch 10b**, then publish and merge it, then close #67, #68 and #72–#75 explicitly — the
+PR body carries no closing keyword, which is precisely what left #66 and #69–#71 open for two days
+after #126. Two things a reviewer should go at first: DEC-G1's `claimBody`, where the body lands on
+every failure record but on the terminal record only as a fallback, and DEC-G3's stack capture in
+`internal/post`, which is outside T073's stated file. Then Batch 11 (US6, T075–T083) and Batch 12
+(polish and gates, T084–T091).
+
+The superseded plan for this batch, kept for the record: implement **Batch 10b** — US5 post diagnostics: T066, T067, T071 (`message_on_error_only` capture),
 T072 (`message_len` as a rune count, `message_bytes` as the UTF-8 length), T073 (stack traces
 subject to the `stack_trace` setting) and T074 (a single FR-076 warning through the front door in
 use) — on a fresh branch from merged `main`, using `.agents/batch-10-plan.md`. Issues #67, #68,

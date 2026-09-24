@@ -69,7 +69,7 @@ func TestRealSinksRemainIndependent(t *testing.T) {
 				limit = 150 * time.Millisecond
 			}
 			start := time.Now()
-			outcome := post.New([]post.Sink{obsidian.New(settings.Sink.Obsidian), telegram.NewWithBaseURL(settings.Sink.Telegram, server.URL)}, limit, app.NewRecording(logger)).Post(post.Message{Original: "preserve this thought"})
+			outcome := post.New([]post.Sink{obsidian.New(settings.Sink.Obsidian), telegram.NewWithBaseURL(settings.Sink.Telegram, server.URL)}, limit, app.NewRecording(logger, config.Defaults().Logging)).Post(post.Message{Original: "preserve this thought"})
 			elapsed := time.Since(start)
 			if err := logger.Close(); err != nil {
 				t.Fatal(err)

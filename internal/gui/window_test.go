@@ -13,6 +13,7 @@ import (
 	"fyne.io/fyne/v2/driver/desktop"
 	"fyne.io/fyne/v2/test"
 	"github.com/sgykfjsm/miko-post/internal/config"
+	"github.com/sgykfjsm/miko-post/internal/logging"
 	"github.com/sgykfjsm/miko-post/internal/post"
 )
 
@@ -34,9 +35,19 @@ type harness struct {
 
 func setup(t *testing.T, send func(post.Message) post.Outcome) *harness {
 	t.Helper()
+	// A healthy logger: Degraded reports nothing, so no FR-076 warning
+	// appears and every assertion written before T074 sees the same text.
+	return setupDegrading(t, send, func() *logging.Degradation { return nil })
+}
+
+// setupDegrading is setup with the logger's degradation under the test's
+// control, for T074's warning.
+func setupDegrading(t *testing.T, send func(post.Message) post.Outcome, degraded func() *logging.Degradation) *harness {
+	t.Helper()
 	a := test.NewApp()
 	h := &harness{queued: make(chan func(), 20)}
-	h.w = newWindow(a.NewWindow("test"), config.Defaults().GUI, send, "/tmp/diagnostic.jsonl")
+	h.w = newWindow(a.NewWindow("test"), config.Defaults().GUI, send, "/tmp/diagnostic.jsonl",
+		&degradationWarning{degraded: degraded})
 	h.w.dispatch = func(f func()) { h.queued <- f }
 	h.w.after = func(d time.Duration, f func()) timer {
 		ft := &fakeTimer{fire: f, delay: d}

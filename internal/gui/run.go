@@ -26,8 +26,21 @@ func Run(errOut io.Writer) int {
 	a := app.NewWithID("io.github.sgykfjsm.miko-post")
 	logger := posting.OpenLogger(settings, logging.SourceGUI)
 	defer logger.Close()
-	service := posting.NewService(settings, posting.NewRecording(logger))
-	w := newWindow(a.NewWindow("miko-post"), settings.GUI, service.Post, logger.Path())
+	service := posting.NewService(settings, posting.NewRecording(logger, settings.Logging))
+	// FR-076's warning for the GUI front door.
+	//
+	// DegradedSoFar, never Degraded: this is consulted after every post for the
+	// life of the window, and Degraded submits a flush barrier whose timeout
+	// permanently disables the logger — so probing for a diagnostics failure
+	// would itself be able to cause one, and would block the Fyne event
+	// goroutine for up to 250ms each time. See logging.DegradedSoFar.
+	//
+	// logger.Close runs in the deferred call above, after a.Run returns and the
+	// window is gone, so a close failure has no surface left to appear on here
+	// — unlike the CLI, which closes before it renders. The open failure and
+	// every latched write failure are the two this front door can report.
+	w := newWindow(a.NewWindow("miko-post"), settings.GUI, service.Post, logger.Path(),
+		&degradationWarning{degraded: logger.DegradedSoFar})
 	w.native.Show()
 	activity, release, err := observeActivity(w.native)
 	if err != nil {

@@ -91,7 +91,10 @@ func postThrough(t *testing.T, settings config.Settings, path string, sinks ...p
 
 	logger := app.OpenLogger(settings, logging.SourceCLI)
 
-	post.New(sinks, app.SinkTimeout(settings), app.NewRecording(logger)).
+	// settings.Logging, not config.Defaults().Logging: the diagnostics
+	// settings have to be the ones the caller configured, or a test that
+	// turns message_on_error_only off would silently keep testing the default.
+	post.New(sinks, app.SinkTimeout(settings), app.NewRecording(logger, settings.Logging)).
 		Post(post.Message{Original: "記録される投稿"})
 
 	if err := logger.Close(); err != nil {
@@ -924,12 +927,12 @@ func TestHTTPStatusOnlyComesFromAChatReply(t *testing.T) {
 func TestARecordingWithNoLoggerRecordsNothing(t *testing.T) {
 	t.Parallel()
 
-	if got := app.NewRecording(nil).Post("01ABC"); got != nil {
+	if got := app.NewRecording(nil, config.Defaults().Logging).Post("01ABC"); got != nil {
 		t.Errorf("Post returned %#v for a Recording with no logger, want a nil Recorder", got)
 	}
 
 	// And a post through it still succeeds, which is the property that matters.
-	outcome := post.New([]post.Sink{&chatSink{}}, time.Second, app.NewRecording(nil)).
+	outcome := post.New([]post.Sink{&chatSink{}}, time.Second, app.NewRecording(nil, config.Defaults().Logging)).
 		Post(post.Message{Original: "診断は無い"})
 
 	if !outcome.Succeeded() {
@@ -948,7 +951,7 @@ func TestTheRecordingIsWiredIntoTheServiceItBuilds(t *testing.T) {
 
 	logger := app.OpenLogger(settings, logging.SourceCLI)
 
-	app.NewService(settings, app.NewRecording(logger)).
+	app.NewService(settings, app.NewRecording(logger, config.Defaults().Logging)).
 		Post(post.Message{Original: "設定から組み立てる"})
 
 	if err := logger.Close(); err != nil {
