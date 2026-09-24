@@ -149,6 +149,56 @@ for these two keys, so this clamp is the only guard; it is not an interim measur
 on one (compare `sink.telegram.http_timeout_seconds`, whose clamp was interim because #114
 owned the load-time fix).
 
+**`rotate_size_mib` bounds the file between records, not the size of a record** (decision on #132).
+Rotation is evaluated *before* each write, so a single record larger than the threshold always
+lands whole: the writer rotates, then writes something bigger than the limit into the fresh file.
+This is reachable in ordinary use, because FR-068 puts the **whole message body** on every record
+reporting a failed destination and nothing bounds that body — `post.Message.Validate` checks only
+blankness and UTF-8 validity, and the chat sink applies no client-side length cap. A 15 MiB paste
+that both destinations reject writes roughly 30 MiB of archives, each a single line fifteen times
+the configured threshold.
+
+Capturing the body in full is deliberate: SC-008 requires a failed post to be re-sendable from the
+log *without consulting any other source*, and a truncated body cannot promise that. The accepted
+consequence is that `rotate_size_mib` is a bound on how large the file grows **between** records
+rather than a cap on total size, and that FR-074 forbids ever reclaiming the space. A user who
+posts very large messages that fail should expect the log directory to grow accordingly.
+
+**`rotate_after_days` is meaningful only where the platform records a file creation time**
+(decision on #128). Where it does not, `creationTime` falls back to `ModTime`, and because `mp` is
+a short-lived CLI writing through `O_APPEND`, each run then measures the age from the *previous
+run's last post* rather than from the log's real age — so the age trigger effectively never fires.
+That is every non-darwin `GOOS`, and darwin on any volume with no birth time (SMB, NFS, exFAT). The
+exception is a long-lived GUI session, which holds one handle and does fire the trigger, measured
+from session start. `rotate_size_mib` still bounds the file on those platforms and nothing is lost;
+A-011 sanctions the substitution and R-006 prescribes it.
+
+**Rotation acts on the path, not on the open file** (decision on #127). Two consequences, both
+accepted for v0.1 and neither of which loses a record:
+
+- **Two `mp` processes sharing one `logging.path`** — a CLI post while a GUI window is open — each
+  hold their own handle and their own size counter. When either rotates, the other keeps appending
+  to the file it still has open, which is now an archive. Every record reaches disk, but they
+  scatter: the file `logger.Path()` names may not contain the older process's records, and archives
+  that look closed can still be growing. The shared active file can also reach roughly N ×
+  `rotate_size_mib` before anyone rotates.
+- **A symlinked `logging.path` is not supported under rotation.** `openLogFile` accepts a symlink
+  to a regular file — a legitimate way to put the log on another volume — but `os.Rename` renames
+  the *link*, not its target. After the first rotation the archive is a dangling-looking link, the
+  original target keeps its own name untouched, and a new regular file is created **on the volume
+  that held the link**, silently undoing the placement the user chose. No degradation is raised,
+  because from rotation's point of view it succeeded.
+
+**A partial write's repair newline can cross a rotation** (decision on #129). When an underlying
+write returns a short count with an error — the ENOSPC shape — `safeWriter` writes a single `\n` to
+terminate the fragment so the *next* record still decodes on its own (FR-064). That newline is a
+second write, so it is measured against both thresholds again; if the partial write pushed the size
+across the threshold, the fragment is archived unterminated and the newline becomes the first byte
+of the new active log. Accepted: it is reachable only on a filesystem that has just filled up and
+only when the partial write lands exactly across the threshold, and it costs one extra unreadable
+line in an archive plus a leading blank line in the next file — no record beyond what the failed
+write already cost.
+
 ## Not configurable (FR-057, constitution principle V)
 
 Exit codes, UTF-8/LF encoding, sink concurrency, the note `<br>` transformation, and the

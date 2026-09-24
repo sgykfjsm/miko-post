@@ -1604,6 +1604,33 @@ next_best_action: >-
   disabled currently reports after the fact and exits 1 rather than refusing beforehand - and
   contracts/cli-interface.md is the contract T080 must match exactly.
 
+decisions_resolved:
+  - resolved_at: 2026-09-24
+    by: maintainer
+    note: >-
+      The standing decision backlog was cleared in one pass. Four issues were decided AND documented
+      and are closed; three are decided but stay open because the decision creates scoped work.
+    closed:
+      - {issue: 132, decision: "no bound - the body is captured in full", recorded_in: "contracts/config-schema.md"}
+      - {issue: 127, decision: "accept and document - concurrent front doors scatter records; a symlinked logging.path is unsupported under rotation", recorded_in: "contracts/config-schema.md"}
+      - {issue: 128, decision: "accept the boundary - rotate_after_days is meaningful only on darwin with a recorded birth time", recorded_in: "contracts/config-schema.md"}
+      - {issue: 129, decision: "accept and document - the repair newline can cross a rotation", recorded_in: "contracts/config-schema.md"}
+    kept_open_with_scoped_work:
+      - {issue: 94, decision: "option (b) - stamp version and commit through linker flags in the release path", recorded_in: "docs/design.md and docs/design.ja.md section 14", closes_when: "T090 asserts against the documented release path (Batch 12)"}
+      - {issue: 119, decision: "option B - an internal seam on cli.Run, no user-visible setting", closes_when: "Batch 11 lands a test driving two simultaneously-succeeding destinations from argv"}
+      - {issue: 130, decision: "scoped into Batch 11 rather than decided away - the load-time upper bound belongs with US6's settings validation", closes_when: "config.Validate bounds both rotation keys from above"}
+    dissent_recorded: >-
+      #132 went against the recommendation in the issue, which was a documented cap with a
+      message_truncated marker. The maintainer took SC-008's "re-sendable without consulting any
+      other source" literally. The decision is recorded as made; what changed as a result is that
+      the documentation had to be more careful, because the load-bearing half of accepting no bound
+      is that a user configuring rotate_size_mib learns it does not cap a record.
+    already_existed: >-
+      #94's mechanism was already present - make install has carried the -ldflags stamping since the
+      Makefile was written. What was missing was any statement that a release MUST go through it, so
+      a maintainer reaching for `go install ...@latest` out of habit would have shipped
+      git_commit = "unknown" to every user with nothing saying not to. No code was needed.
+
 issue_sweeps:
   - swept_at: 2026-09-24
     scope: "issues merged in earlier batches but never closed, plus the three standing review follow-ups"

@@ -77,13 +77,27 @@ DEC-G1, DEC-G1a and DEC-G2 through DEC-G8. The load-bearing ones:
 - **DEC-G5 / DEC-G6** — the GUI warns once per session, and the warning replaces the log-path line
   rather than joining it.
 
-## Open decisions awaiting an answer
-- **#132 (DEC-ADV-A)** — what bounds the captured message body. One 15 MiB message with two failing
-  sinks produced 2× amplification and a single record **15× the configured rotation threshold**,
-  because rotation is evaluated before the write. SC-008 and FR-072/FR-074 pull in opposite
-  directions. Recommendation in the issue is a documented cap with a `message_truncated` marker.
-- **#127, #128, #129, #130** — Batch 10a's four deferred items, all still open.
-- **#94** — `git_commit` reads `unknown` on tagged installs; needed before tagging v0.1.0.
+## Decisions — cleared 2026-09-24
+The standing decision backlog was resolved in one pass. **Four are decided, documented and closed**:
+
+- **#132** — the body is captured **in full, with no bound**. SC-008's "re-sendable without
+  consulting any other source" taken literally. The accepted consequence is documented in
+  `contracts/config-schema.md`: `rotate_size_mib` bounds the file *between* records, not the size
+  of a record, and FR-074 forbids reclaiming the space.
+- **#127** — accept and document. Concurrent front doors scatter records across archives; a
+  symlinked `logging.path` is unsupported under rotation.
+- **#128** — accept the boundary. `rotate_after_days` is meaningful only on darwin with a recorded
+  birth time.
+- **#129** — accept and document. The repair newline can cross a rotation.
+
+**Three are decided but stay open, because the decision creates scoped work:**
+
+- **#94** — stamp version and commit through linker flags in the release path. Documented in
+  `docs/design.md` §14 and its Japanese counterpart; `make install` already does it. Closes when
+  **T090** asserts against the documented release path (Batch 12).
+- **#119** — an internal seam on `cli.Run`, no user-visible setting. **Scoped into Batch 11.**
+- **#130** — the load-time upper bound for the rotation keys. **Scoped into Batch 11**, which works
+  on settings validation anyway.
 
 ## Housekeeping — swept 2026-09-24
 **#60–#65 closed** (T059–T064, delivered in Batch 9 / PR #125). Verified before closing: each task
@@ -98,7 +112,7 @@ two-destinations-both-succeeding path is still unreachable from argv.
 **#119 is worth deciding before Batch 11**, since US6 is the CLI front door work that will be in
 that seam anyway.
 
-44 issues open overall.
+40 issues open overall.
 
 ## Touched files
 This reconciliation touches `.agents/state.yaml`, `.agents/project-status.md`,

@@ -460,3 +460,23 @@ go install github.com/sgykfjsm/miko-post/cmd/mp@latest
 ```
 
 The installed executable name is `mp`. Platform-specific application bundles, code signing, notarization, and separate installers are outside the v0.1 distribution requirement.
+
+### Releasing (decision on #94)
+
+**A release MUST stamp the version and commit through linker flags.** `make install` does this:
+
+```bash
+make install          # go install -ldflags "-X …version=… -X …commit=…" ./cmd/mp
+```
+
+The reason is that a build from the module cache records no `vcs.*` build settings, so
+`internal/version` has nothing to recover a commit from. Once `v0.1.0` is tagged, `@latest`
+resolves to that tag, and a plain `go install …@latest` would therefore report
+`git_commit = "unknown"` for **effectively every end user** — not in an edge case. FR-066 requires
+records to carry the application version and commit, and constitution principle III makes these
+logs the record of record for reconstructing a lost message, so a dead commit field on the primary
+distribution channel is not an acceptable default.
+
+An untagged pseudo-version install (`@v0.0.0-…-aaaabbbbcccc`) does recover the commit from the
+pseudo-version itself, and a local `go build` in a git tree recovers it from `vcs.revision`. It is
+specifically the tagged module-cache build — the one users will get — that needs the flags.
