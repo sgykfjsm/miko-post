@@ -9,7 +9,7 @@ a GUI front door, through one shared posting core.
 
 ## Status
 In execution. **75 of 91 tasks are `[x]`; 16 remain.** `main` is at
-`d6fcb6bd8ce1b138d5659dfa095384866cf24684` and `make check` (gofmt, vet, full `-race` suite) is
+`dfdc69fb8c55065d6a2f470f801c0ddc1718ef13` (PR #134, records only, on top of Batch 10b's `d6fcb6b`) and `make check` (gofmt, vet, full `-race` suite) is
 green there across all ten packages.
 
 **US5 diagnostics is fully delivered.** Batches 1–9, the GUI background (#122), Batch 10a (lossless

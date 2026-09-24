@@ -1593,7 +1593,7 @@ time_sensitive:
 
 next_best_action: >-
   Implement Batch 11 - US6 settings resolution: T075-T083, issues 76-84. A fresh branch from merged
-  main d6fcb6bd8ce1b138d5659dfa095384866cf24684, then the usual three-stage review. The batch is
+  main dfdc69fb8c55065d6a2f470f801c0ddc1718ef13 (PR #134, records only, on top of d6fcb6b), then the usual three-stage review. The batch is
   the CLI front door's remaining behaviour: the -c/--config override reaching only the CLI posting
   path and never the window constructor (FR-005, constitution principle V), --config without a
   message erroring without opening the window (FR-006), help output carrying the RESOLVED default
@@ -1653,6 +1653,26 @@ issue_sweeps:
     note: >-
       #119 is worth deciding BEFORE Batch 11: US6 is the CLI front door's remaining behaviour, so it
       is the batch that will be working in that seam anyway.
+
+records_prs_merged:
+  - pr: 134
+    url: https://github.com/sgykfjsm/miko-post/pull/134
+    title: "docs: reconcile Batch 10b, sweep stale issues, and clear the decision backlog"
+    merged_at: 2026-09-24T02:55:01Z
+    merge_commit: dfdc69fb8c55065d6a2f470f801c0ddc1718ef13
+    base: d6fcb6bd8ce1b138d5659dfa095384866cf24684
+    head: 7caf62f7500c70c29f7dfc1aade6d493c249b00e
+    tree: 7d161f7501dd8cf7ddee1df03152ae25c20d3151
+    merge_verification: >-
+      The squashed commit and the PR head share tree 7d161f75, checked after merge rather than
+      asserted, so main carries exactly what was reviewed. closingIssuesReferences read back EMPTY
+      after merge, as intended - the body names many issue numbers and was reworded on opening
+      after "Closed #60-#65" had silently linked #60.
+    files: 7
+    note: >-
+      Records and docs only, no .go file. Carried the 10b reconciliation, the #60-#65 sweep and the
+      decision backlog (#127-#130, #132, #94, #119). This record ships in Batch 11's PR, following
+      the batch-N-record-in-batch-N+1 pattern.
 
 review_followups_filed:
   filed_at: 2026-09-07
@@ -1746,7 +1766,6 @@ batch_6_split:
 
 remaining_batches:
   - {id: 11, name: "US6 settings resolution", tasks: "T075-T083", issues: "76-84", note: "US5 is fully delivered: 10a and 10b are both merged, see completed"}
-  - {id: 11, name: "US6 settings resolution", tasks: "T075-T083"}
   - {id: 12, name: "Polish and gates", tasks: "T084-T091"}
 
 touched_files:
