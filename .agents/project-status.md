@@ -8,61 +8,41 @@ message to Telegram and today's Obsidian daily note concurrently and independent
 a GUI front door, through one shared posting core.
 
 ## Status
-In execution. **75 of 91 tasks are `[x]`; 16 remain.** `main` is at
-`dfdc69fb8c55065d6a2f470f801c0ddc1718ef13` (PR #134, records only, on top of Batch 10b's `d6fcb6b`) and `make check` (gofmt, vet, full `-race` suite) is
-green there across all ten packages.
-
-**US5 diagnostics is fully delivered.** Batches 1–9, the GUI background (#122), Batch 10a (lossless
-rotation) and Batch 10b (post diagnostics) are all merged.
+In execution. **84 of 91 tasks are `[x]`; 7 remain (Batch 12, T084–T091).** `main` is at
+`dfdc69fb8c55065d6a2f470f801c0ddc1718ef13` (PR #134, records only, on top of Batch 10b's `d6fcb6b`).
+The T075–T083 ticks are on the Batch 11 branch, which is not merged.
 
 ## Completed
-**Batch 10b — US5 post diagnostics (T066, T067, T071–T074 / #67, #68, #72–#75)** — merged
-2026-09-24 as `d6fcb6b` from PR #133, at reviewed head `a944dc9`. The squashed commit and the
-reviewed head share tree `9c81f88bf10d83c39aed87cfe318a4356eb046bb`, so `main` carries byte-for-byte
-what the review produced. All six issues were closed in the same session, each with a comment naming
-the PR and the merge commit.
-
-Delivered: FR-068's message capture (`message` on each record reporting a sink's own failure, with
-the terminal record as a fallback only when no failure record could carry it), FR-071's traces
-(`debug.Stack()` inside `internal/post`'s deferred `recover`, read back through the new
-`post.Traced`), and FR-076's warning at the GUI front door, which `internal/gui` had never produced.
-T072 needed no code change and was closed by mutation testing rather than by inspection.
-
-Reviewed through all three stages with two fix passes. **37 mutants, 35 killed**; the two survivors
-were a redundant guard that was deleted and one demonstrably equivalent mutant. `internal/app` at
-100.0% of statements.
-
-Two defects the review caught in the batch's own new code, both fixed before merge:
-
-- The message body was written to the log on **every rescued — and therefore successful — post**,
-  because FR-039's plaintext rescue emits a failure-shaped record inside a successful post.
-- The GUI's per-post health probe called the **flushing** `Degraded()`, whose 250 ms timeout
-  permanently fails the record queue: one slow write discarded every record of every later post in
-  the session and froze the window. Measured as 1 surviving record against 12. Fixed with
-  `logging.DegradedSoFar`, and the wiring is now pinned by an AST scan because swapping it back had
-  survived the entire suite.
+Batches 1–10b, the GUI background (#122) and the records PR #134 are merged. Batch 10b's detail is
+in the archived status page and in `.agents/state.yaml` under `completed`.
 
 ## In progress
-Nothing. The worktree carries only the long-standing, deliberately excluded
-`.specify/integrations/claude.manifest.json` edit.
+**Batch 11 — US6 settings resolution (T075–T083 / #76–#84, plus #119 and #130).** It is implemented
+on `sgykfjsm/record-pr134-run-batch11`: `13379f8` is the PR #134 merge record, `25a4f1d` the batch,
+and fix passes 1 and 2 are uncommitted. It has **not been pushed and has no PR.** It delivers:
+
+- FR-006: `-c` without a message is refused with the contract's text, and no window opens.
+- FR-007: help prints the resolved default path and exits 0.
+- FR-018 and FR-058: settings with no destination, or invalid settings, are refused through the
+  shared `app.LoadSettings` before any logger or sink exists.
+- FR-030: a minimal startup-error window.
+- #130: load-time upper bounds on the rotation keys.
+- #119: a two-destinations-succeeding test inside `internal/cli`.
+
+The three-stage review has run three times (cycles 0, 1 and 2), with two fix passes. Cycle 0 had
+ten findings across the three stages: CON-001–004, COR-001–003 and ADV-001–003. The most serious
+was that **Esc could not dismiss the startup-error window** in the real driver while its test
+passed. After fix pass 2, all 37 distinct mutants are killed, and the cycle 2 re-review is
+finishing.
 
 ## Blockers
-None.
+None. Both maintainer calls are made (2026-09-24): **DEC-H1** accepts the `-c ""` refusal, and
+**DEC-H2** means no startup-error window opens when no settings path can be resolved.
 
 ## Next best action
-**Implement Batch 11 — US6 settings resolution: T075–T083, issues #76–#84**, on a fresh branch from
-merged `main`, then the usual three-stage review. This is the CLI front door's remaining behaviour:
-the `-c`/`--config` override reaching only the CLI posting path and never the window constructor
-(FR-005, constitution principle V), `--config` without a message erroring without opening the window
-(FR-006), help output carrying the **resolved** default settings path (FR-007), the
-all-sinks-disabled startup error (FR-018) and the minimal startup-error window (FR-030).
-
-Two things to settle early: **T081 is the requirement T039's own acceptance note records as not
-implemented** — both destinations disabled currently reports after the fact and exits `1` rather
-than refusing beforehand — and `contracts/cli-interface.md` is the contract T080 must match exactly.
-T082 depends on the `internal/gui` package from US2, which exists.
-
-Then Batch 12 (polish and gates, T084–T091).
+Finish Batch 11's review loop, commit, then push and open the PR with the maintainer's go-ahead.
+After merge, in the same session, close #76–#84, #119 and #130. Then Batch 12 (polish and gates,
+T084–T091).
 
 ## Important decisions
 Batch 10b's decisions are recorded in full in `.agents/state.yaml` under `completed` 10b as
@@ -95,9 +75,10 @@ The standing decision backlog was resolved in one pass. **Four are decided, docu
 - **#94** — stamp version and commit through linker flags in the release path. Documented in
   `docs/design.md` §14 and its Japanese counterpart; `make install` already does it. Closes when
   **T090** asserts against the documented release path (Batch 12).
-- **#119** — an internal seam on `cli.Run`, no user-visible setting. **Scoped into Batch 11.**
-- **#130** — the load-time upper bound for the rotation keys. **Scoped into Batch 11**, which works
-  on settings validation anyway.
+- **#119** — an internal seam on `cli.Run`, no user-visible setting. **Delivered in Batch 11**
+  (not yet merged).
+- **#130** — the load-time upper bound for the rotation keys. **Delivered in Batch 11** (not yet
+  merged).
 
 ## Housekeeping — swept 2026-09-24
 **#60–#65 closed** (T059–T064, delivered in Batch 9 / PR #125). Verified before closing: each task
@@ -109,12 +90,12 @@ bulk-close them. #115's credential-free-error invariant is still unenforced, #11
 is still neither pinned nor documented as intentionally unpinned, and #119's
 two-destinations-both-succeeding path is still unreachable from argv.
 
-**#119 is worth deciding before Batch 11**, since US6 is the CLI front door work that will be in
-that seam anyway.
+**#4 and #42–#52 closed** on 2026-09-24 (T003 and T041–T051, delivered by Batch 7 / PR #123,
+`6f40dad`), each with a comment naming the PR and merge commit.
 
-40 issues open overall.
+28 issues open overall.
 
 ## Touched files
-This reconciliation touches `.agents/state.yaml`, `.agents/project-status.md`,
-`.agents/work-log.md` and `.agents/archive/project-status-before-batch-11.md`. Batch 10b's own files
-are listed under `touched_files` in `state.yaml`.
+Batch 11's files are commit `25a4f1d` plus the uncommitted fix passes. `git diff --stat dfdc69f`
+on the branch is the authoritative list. The outgoing copy of this page is archived as
+`.agents/archive/project-status-before-batch-11-review.md`.

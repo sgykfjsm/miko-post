@@ -142,10 +142,16 @@ rejects a value that is not greater than zero, and a value past the largest that
 without wrapping: `config.MaxRotateSizeMiB` (`math.MaxInt64 / 2^20`, bytes) and
 `config.MaxRotateAfterDays` (`math.MaxInt64 / 24h`, a `time.Duration`). The bound is the wrap
 point and not a "sensible" maximum, which is the rule #109 set for the timeout keys: any smaller
-number would be a policy this contract does not state, and a value past the wrap point could
-never have meant what it reads as. Unchecked, the multiplication wraps negative, and a negative
-threshold is not inert — rotation compares `>=`, so every write would rotate and the log would
-become a directory of one-record files. The rejection says so.
+number would be a policy this contract does not state. Unchecked, the multiplication would wrap,
+and where it lands is never what the setting reads as: zero or negative, which the rotation check
+treats as "condition disabled", so rotation silently stops; or a small positive number —
+`rotate_size_mib = 2^44+1` wraps to exactly 1 MiB — an arbitrary threshold nobody configured. The
+rejection names the limit and says that writing it means "rotate almost never", which is what a
+user entering a huge value wants.
+
+**Compatibility**: before #130, a value above the limit loaded and was clamped to "effectively
+never", so it did no harm. It is now refused at load time, and both front doors refuse to post
+until the file is edited. The fix is to lower the value to the limit.
 
 `internal/logging` keeps its clamp at the conversion, deliberately, as defence in depth rather
 than as the guard. `logging.Options` can be built by a caller that never went through

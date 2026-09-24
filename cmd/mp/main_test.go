@@ -1,6 +1,7 @@
 package main_test
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"go/ast"
@@ -14,6 +15,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/sgykfjsm/miko-post/internal/gui"
 )
@@ -87,7 +89,15 @@ func run(t *testing.T, home string, argv ...string) result {
 		t.Fatalf("build the binary: %v", err)
 	}
 
-	command := exec.Command(path, argv...)
+	// Bounded, because since FR-030 a regression that lets an invocation reach
+	// the window path opens a real window and waits to be dismissed: without a
+	// deadline the test hangs until go test's own timeout and leaves the window
+	// and the process behind. Every invocation here finishes in well under a
+	// second, so the bound is generous rather than tuned.
+	ctx, cancel := context.WithTimeout(context.Background(), processTimeout)
+	defer cancel()
+
+	command := exec.CommandContext(ctx, path, argv...)
 	command.Env = []string{
 		"HOME=" + home,
 		"XDG_CONFIG_HOME=" + filepath.Join(home, "config"),
@@ -101,6 +111,12 @@ func run(t *testing.T, home string, argv ...string) result {
 	command.Stderr = &stderr
 
 	runErr := command.Run()
+
+	if ctx.Err() != nil {
+		t.Fatalf("mp %q did not exit within %s and was killed — it is probably waiting on a "+
+			"window it must not have opened\nstdout: %s\nstderr: %s",
+			argv, processTimeout, stdout.String(), stderr.String())
+	}
 
 	got := result{stdout: stdout.String(), stderr: stderr.String()}
 
@@ -126,6 +142,9 @@ func run(t *testing.T, home string, argv ...string) result {
 
 	return got
 }
+
+// processTimeout bounds one run of the binary; see run.
+const processTimeout = 30 * time.Second
 
 // world is one run's filesystem: a home directory, a vault, and a settings file.
 type world struct {

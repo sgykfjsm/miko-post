@@ -15,8 +15,14 @@ import (
 // the settings error's own text — config.Load's and config.RequireDestination's
 // errors are written to be read by the user, each naming the key or file at
 // fault — and the resolved settings path on a line of its own, because the fix
-// is almost always "open this file" and a path buried mid-sentence is hard to
-// copy. The action is Quit.
+// is almost always "open this file" and the path is what the user has to find.
+// The action is Quit.
+//
+// The labels are not selectable. A selectable label takes focus, and focus is
+// what routes Esc (see the Quit button below), so making the path copyable is a
+// change to dismissal as much as to display; the same text is on stderr for a
+// user who started mp from a terminal. path is never empty here: startupFailure
+// opens no window when the path could not be resolved.
 //
 // It has no message field, and that is the requirement rather than minimalism:
 // a field would invite typing a post that could not be sent, which is the
@@ -29,18 +35,8 @@ type errorWindow struct {
 	native fyne.Window
 }
 
-// unresolvedPath stands in for the settings path when it could not be resolved
-// at all, which happens only when $HOME is unset and XDG_CONFIG_HOME is too.
-// FR-030 asks for the resolved path, and when there is none the honest display
-// says so instead of leaving the line out and inviting the question.
-const unresolvedPath = "could not be resolved"
-
 func newErrorWindow(native fyne.Window, message, path string) *errorWindow {
 	w := &errorWindow{native: native}
-
-	if path == "" {
-		path = unresolvedPath
-	}
 
 	text := widget.NewLabel(message)
 	text.Wrapping = fyne.TextWrapWord
@@ -48,7 +44,14 @@ func newErrorWindow(native fyne.Window, message, path string) *errorWindow {
 	location := widget.NewLabel("Settings file: " + path)
 	location.Wrapping = fyne.TextWrapBreak
 
-	quit := widget.NewButton("Quit", w.close)
+	// A commandButton, not a plain widget.Button: Quit has the focus, and the
+	// driver delivers a key to the focused widget rather than to the canvas,
+	// so Esc reaches the canvas handler below only when nothing is focused. A
+	// plain Button handles Space and nothing else, which made Esc dead in the
+	// real driver while a test calling the canvas handler directly passed. The
+	// posting window's Send and Cancel buttons are commandButtons for the same
+	// reason (R-003).
+	quit := newCommandButton("Quit", w.close, w.close)
 	quit.Importance = widget.HighImportance
 
 	native.SetContent(container.NewBorder(nil, container.NewHBox(quit), nil, nil,
@@ -57,6 +60,7 @@ func newErrorWindow(native fyne.Window, message, path string) *errorWindow {
 	native.SetCloseIntercept(w.close)
 	native.Canvas().AddShortcut(&desktop.CustomShortcut{KeyName: fyne.KeyQ, Modifier: fyne.KeyModifierSuper},
 		func(fyne.Shortcut) { w.close() })
+	// Esc while nothing has focus, which a click on empty space produces.
 	native.Canvas().SetOnTypedKey(func(k *fyne.KeyEvent) {
 		if k.Name == fyne.KeyEscape {
 			w.close()

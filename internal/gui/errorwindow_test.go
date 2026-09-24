@@ -1,6 +1,7 @@
 package gui
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -109,24 +110,6 @@ func TestTheStartupErrorWindowShowsTheMessageAndPathAndNoField(t *testing.T) {
 	}
 }
 
-// TestTheStartupErrorWindowSaysWhenThereIsNoPath: the path line is kept, and
-// says it could not be resolved, rather than disappearing.
-func TestTheStartupErrorWindowSaysWhenThereIsNoPath(t *testing.T) {
-	_, w := newTestErrorWindow(t, "resolve home directory", "")
-
-	found := false
-
-	for _, o := range widgetsOf(w.native.Content()) {
-		if l, ok := o.(*widget.Label); ok && l.Text == "Settings file: "+unresolvedPath {
-			found = true
-		}
-	}
-
-	if !found {
-		t.Error("with no resolvable path the window dropped the path line instead of saying so")
-	}
-}
-
 // TestEveryDismissalClosesTheStartupErrorWindow: Quit, the close box, Esc and
 // Cmd+Q all close it, which ends the event loop so Run returns its failure
 // status. A dismissal that did nothing would leave a window the user cannot
@@ -138,7 +121,7 @@ func TestEveryDismissalClosesTheStartupErrorWindow(t *testing.T) {
 	}{
 		{name: "Quit", dismiss: func(w *errorWindow) {
 			for _, o := range widgetsOf(w.native.Content()) {
-				if b, ok := o.(*widget.Button); ok && b.Text == "Quit" {
+				if b, ok := o.(*commandButton); ok && b.Text == "Quit" {
 					test.Tap(b)
 
 					return
@@ -155,7 +138,16 @@ func TestEveryDismissalClosesTheStartupErrorWindow(t *testing.T) {
 
 			intercept()
 		}},
-		{name: "Esc", dismiss: func(w *errorWindow) {
+		{name: "Esc, as the driver delivers it: to the focused widget", dismiss: func(w *errorWindow) {
+			focused := w.native.Canvas().Focused()
+			if focused == nil {
+				t.Fatal("nothing has focus, so this case would not exercise the focused route")
+			}
+
+			focused.TypedKey(&fyne.KeyEvent{Name: fyne.KeyEscape})
+		}},
+		{name: "Esc with nothing focused", dismiss: func(w *errorWindow) {
+			w.native.Canvas().Unfocus()
 			w.native.Canvas().OnTypedKey()(&fyne.KeyEvent{Name: fyne.KeyEscape})
 		}},
 		{name: "Cmd+Q", dismiss: func(w *errorWindow) {
@@ -214,5 +206,120 @@ func TestTheWindowReadsOnlyTheDefaultSettings(t *testing.T) {
 
 	if !settings.Sink.Obsidian.Enabled {
 		t.Error("the window's settings are not the ones in the default file")
+	}
+}
+
+// recordingApp is Fyne's headless app with the two calls startupFailure makes
+// observed: the windows it creates, and Run, during which the test dismisses
+// the window as a user would.
+type recordingApp struct {
+	fyne.App
+	t       *testing.T
+	windows []*interceptRecorder
+	ran     bool
+}
+
+func (a *recordingApp) NewWindow(title string) fyne.Window {
+	w := &interceptRecorder{Window: a.App.NewWindow(title)}
+	a.windows = append(a.windows, w)
+
+	return w
+}
+
+func (a *recordingApp) Run() {
+	a.ran = true
+
+	if len(a.windows) != 1 {
+		a.t.Fatalf("Run started with %d windows, want the error window alone", len(a.windows))
+	}
+
+	a.windows[0].intercept()
+}
+
+// TestAStartupFailureShowsTheErrorWindowAndExitsOne is Run's settings-failure
+// branch (FR-030, FR-058, T082, T083): the error reaches errOut, the one window
+// shown is the startup-error window with no message field and the path it was
+// handed, the event loop runs until it is dismissed, and the status is 1.
+//
+// The error text deliberately does not contain the path, so the path line is
+// asserted on its own rather than satisfied by the message.
+func TestAStartupFailureShowsTheErrorWindowAndExitsOne(t *testing.T) {
+	base := test.NewApp()
+	t.Cleanup(base.Quit)
+
+	a := &recordingApp{App: base, t: t}
+
+	var errOut strings.Builder
+
+	status := startupFailure(&errOut, func() fyne.App { return a }, errors.New("no destination is enabled"), "/x/config.toml")
+
+	if status != 1 {
+		t.Errorf("status = %d, want 1", status)
+	}
+
+	if want := "mp: no destination is enabled\n"; errOut.String() != want {
+		t.Errorf("errOut = %q, want %q", errOut.String(), want)
+	}
+
+	if !a.ran {
+		t.Error("the event loop never ran, so the error window was never on screen")
+	}
+
+	if len(a.windows) != 1 {
+		t.Fatalf("created %d windows, want 1", len(a.windows))
+	}
+
+	w := a.windows[0]
+
+	if w.closes != 1 {
+		t.Errorf("the window was closed %d times, want 1", w.closes)
+	}
+
+	var shown, located bool
+
+	for _, o := range widgetsOf(w.Content()) {
+		switch o := o.(type) {
+		case *widget.Entry, *messageEntry:
+			t.Errorf("a startup failure showed a window with a message field: %T", o)
+		case *widget.Label:
+			shown = shown || strings.Contains(o.Text, "no destination is enabled")
+			located = located || o.Text == "Settings file: /x/config.toml"
+		}
+	}
+
+	if !shown {
+		t.Error("the window shown does not carry the error")
+	}
+
+	if !located {
+		t.Error("the window shown does not name the settings path it was handed")
+	}
+}
+
+// TestAStartupFailureWithNoPathOpensNoWindow: with no resolvable path there is
+// nothing for the window to show that stderr does not, and constructing the
+// application would write Fyne's storage relative to the working directory, so
+// the application is never constructed.
+func TestAStartupFailureWithNoPathOpensNoWindow(t *testing.T) {
+	var errOut strings.Builder
+
+	constructed := false
+
+	status := startupFailure(&errOut, func() fyne.App {
+		constructed = true
+
+		return test.NewApp()
+	}, errors.New("resolve home directory"), "")
+
+	if status != 1 {
+		t.Errorf("status = %d, want 1", status)
+	}
+
+	if want := "mp: resolve home directory\n"; errOut.String() != want {
+		t.Errorf("errOut = %q, want %q", errOut.String(), want)
+	}
+
+	if constructed {
+		t.Error("the application was constructed with no settings path to show")
 	}
 }

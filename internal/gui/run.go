@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 
+	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
 	posting "github.com/sgykfjsm/miko-post/internal/app"
 	"github.com/sgykfjsm/miko-post/internal/config"
@@ -26,13 +27,7 @@ import (
 func Run(errOut io.Writer) int {
 	path, settings, err := windowSettings()
 	if err != nil {
-		fmt.Fprintln(errOut, "mp: "+err.Error())
-
-		a := app.NewWithID(appID)
-		newErrorWindow(a.NewWindow("miko-post"), err.Error(), path).native.Show()
-		a.Run()
-
-		return 1
+		return startupFailure(errOut, func() fyne.App { return app.NewWithID(appID) }, err, path)
 	}
 	a := app.NewWithID(appID)
 	logger := posting.OpenLogger(settings, logging.SourceGUI)
@@ -74,4 +69,38 @@ const appID = "io.github.sgykfjsm.miko-post"
 // actually reads (T076).
 func windowSettings() (string, config.Settings, error) {
 	return posting.LoadSettings("")
+}
+
+// startupFailure is Run's settings-failure branch: the error on errOut, the
+// startup-error window until it is dismissed, then exit status 1 (FR-030,
+// FR-058, T082, T083).
+//
+// Split out of Run and handed the application's constructor, so that the
+// branch's obligations — report, show the error window rather than the posting
+// one, return failure — are asserted by a test driving Fyne's headless app
+// instead of resting on a reading of the code. What stays untested is the one
+// line in Run that supplies the real constructor, which needs a display.
+//
+// With no resolved path — $HOME unset and XDG_CONFIG_HOME unset too — there is
+// no window, only the stderr line and exit 1, and the application is never
+// constructed. Constructing it is not free: Fyne derives its preferences and
+// storage directories from the home directory, and with none it creates them
+// relative to the working directory, so a launch that has already decided it
+// cannot run would leave a Library/ and a fyne/ tree wherever it was started.
+// FR-030's window exists to show the resolved path; without one it has nothing
+// to show that stderr does not, and not writing outside the application's own
+// locations outranks it. A constructor rather than an application is taken for
+// exactly this reason: an application passed in would already have written.
+func startupFailure(errOut io.Writer, newApp func() fyne.App, err error, path string) int {
+	fmt.Fprintln(errOut, "mp: "+err.Error())
+
+	if path == "" {
+		return 1
+	}
+
+	a := newApp()
+	newErrorWindow(a.NewWindow("miko-post"), err.Error(), path).native.Show()
+	a.Run()
+
+	return 1
 }

@@ -1123,3 +1123,39 @@ confirmed. Valid git-generated publication patches now reverse-check successfull
 - **PR #134 squash-merged as `dfdc69fb8c55065d6a2f470f801c0ddc1718ef13`** at 02:55 UTC, on base `d6fcb6b`. Its head `7caf62f` and the squashed commit share tree `7d161f7501dd8cf7ddee1df03152ae25c20d3151`, checked after merge, so `main` carries exactly the reviewed records. `closingIssuesReferences` reads back empty, as intended.
 - Recorded under a new `records_prs_merged` key in `state.yaml`. `next_best_action` now bases Batch 11 on `dfdc69f`. Removed a duplicated Batch 11 entry from `remaining_batches` that the 10b reconciliation left behind.
 - This record ships in Batch 11's PR, following the batch N record in batch N+1 pattern.
+
+### 2026-09-24 — Batch 11: triage, sweep, implement, review cycle 0, fix pass 1
+- **Triage** confirmed Batch 11 = T075–T083 (#76–#84) + #119 (option B) + #130. Only Batch 12 remains after it.
+- **Sweep**: #4 and #42–#52 were `[x]` and delivered by PR #123 (`6f40dad`) but still open. With the user's authorisation they were closed, each with a comment naming the PR and merge commit. Open issues went from 40 to 28. GitHub MCP worked this session.
+- **Implemented** in `25a4f1d`:
+  - `cli.Parse` refuses `-c` without a message (FR-006) and parses help to `ModeHelp`; `cli.Help` prints the resolved path (FR-007).
+  - `Settings.RequireDestination` and `app.LoadSettings` are shared by both front doors (FR-018, FR-058).
+  - `gui.errorWindow` provides FR-030.
+  - `config.MaxRotateSizeMiB` and `MaxRotateAfterDays` implement #130.
+  - `cli.run`'s constructor seam implements #119. A test drives the real `app.Sinks`, and `sinks[:1]` is now killed in `internal/cli`.
+  - `cmd/mp`'s window-startup process test was **removed**: since FR-030 it would open a real window and hang.
+- **Review cycle 0**:
+  - Contract valid.
+  - Correctness found one real bug: **Esc did nothing in the startup-error window**. The focused Quit button was a plain `widget.Button`, which glfw hands the key to instead of the canvas, and the test called the canvas handler directly, so it passed. This is the same trap the posting window had already solved with `commandButton` (R-003). A test that bypasses the driver's routing tests the wrong thing.
+  - Adversarial found that `gui.Run`'s failure branch was guarded by nothing: `return 0`, no stderr and no window all survived. It also found the over-limit rotation message claimed a harm the #126 clamp had already prevented.
+- **Fix pass 1**: Esc goes through a `commandButton`, and the test uses focused routing. `startupFailure` is extracted and driven with a recording headless app. The rotation message and docs are honest and carry a compatibility note. `cmd/mp` runs are bounded at 30 s, so the FR-006 regression now fails in about 32 s instead of hanging. The `-c ""` row is added to the contract. Stale T037/T039 notes are marked superseded. After the fix pass, **39 of 39 mutants are killed**, including a full re-run of the original 32.
+- **Process incidents, recorded so they are not repeated**: two test-time requests reached `api.telegram.org` with fake tokens, and nothing was posted. One came from the adversarial reviewer, whose probe set `MIKO_POST_TELEGRAM_BOT_TOKEN`, which overrides the file token and so defeated the short-token guard it was relying on. The other came from my own `run-ignore-seam` mutant, which by construction bypasses the substitute sink. A mutant that removes a network seam should be run with the network unreachable.
+- Native checks: `--help` and FR-006 were verified on the binary. The error window stayed open, printed the message and created no log. A real keypress dismissal could not be verified, because osascript blocked on Accessibility permission.
+
+### 2026-09-24 — Batch 11: review cycle 1 and fix pass 2
+- Cycle 1 re-reviewed the full diff. The contract was valid.
+- Correctness found that the path argument to the error window was unasserted (the `sf-nopath` mutant survived). It also found that my own rotation rationale was false: `dueForRotation` treats a threshold of `<= 0` as disabled, so a wrapped value switches rotation off or makes it arbitrary (`2^44+1` MiB wraps to exactly 1 MiB). It never rotates on every write. The same false sentence was also in #130 and in the #126 comment. I had repeated it into four places without checking it against `dueForRotation`.
+- Adversarial found two tests that would reach the Bot API under the very regression they guard against. It also found that, with `$HOME` unset, the window path now makes Fyne write `Library/` and `fyne/` into the working directory.
+- Fix pass 2 addressed all findings:
+  - The refusal tests run through a constructor that calls `t.Fatal`.
+  - The #119 test checks the substitution before `post.New`.
+  - `startupFailure` takes the app constructor and opens no window when there is no path (ADV-D1, flagged for the maintainer).
+  - The rotation text is corrected everywhere.
+  - The native-dismissal gap is in the T082 note and the contract.
+- 38 of 38 mutants are killed.
+- A third fake-token request reached `api.telegram.org`, from the cycle-1 correctness reviewer re-running the seam-bypass mutant. Saved as a memory. The cycle-1 adversarial prompt carried the rule as hard rules and did not repeat the incident.
+- Stopped before cycle 2 for two maintainer decisions: CON-001 (the `-c ""` refusal) and ADV-D1 (no window without a resolvable path). Re-reviewing before the answers would only need to be repeated once they came in.
+- User decided 2026-09-24: **DEC-H1** accepts the `-c ""` refusal (CON-001). **DEC-H2** means no startup-error window opens when no settings path resolves (ADV-D1). Both are recorded in `state.yaml` and the contracts.
+- Cycle-2 contract review: valid, with record and doc findings only. Native checks were re-run on the final tree: help, FR-006, the error window staying open with no log, and no-HOME writing nothing (DEC-H2). Records, the PR body and the contract were brought in line. The mutant list is recorded as `mutants_fix_pass_2`: 37 distinct mutants, all killed. #92 / T091 is named as the owner of the native-dismissal check. A #126 comment correction is planned as a follow-up.
+- Own slip, recorded so it is not repeated: an unquoted heredoc (`<<EOF`) ran every backtick span in the Python source as a zsh command substitution. The commands only failed, so there were no side effects, but the text I inserted lost every backticked word and several replacements silently did nothing. Found by reading the output, repaired from a script file, and re-scanned. Use `<<'EOF'` or a script file whenever the payload contains backticks.
+- Cycle-2 correctness passed; its one non-blocking finding was a stale test comment, now fixed. Cycle-2 adversarial found the DEC-H2 records overstated as "no HOME": the guard only covers HOME and XDG_CONFIG_HOME both unset. With HOME unset but XDG set, Fyne still writes into the cwd. That case is shared with the posting window, where it predates this batch, so it is recorded as a follow-up candidate (DEC-ADV-1) rather than patched on one path only. The wording is corrected in the PR body and state.yaml.

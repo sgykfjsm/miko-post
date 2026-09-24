@@ -22,9 +22,18 @@ mp [options] [message...]
 | `mp hello world` | Join args with exactly one ASCII space → `hello world` (FR-004) | per post |
 | `mp -c ./c.toml "hello"` | Post using `./c.toml`, this post only (FR-005) | per post |
 | `mp -c ./c.toml` | Error, **do not open the window** (FR-006) | `1` |
+| `mp -c "" "hello"` | Error: `-c/--config needs a path to a settings file`; nothing is posted | `1` |
 | `mp --help` | Help including the resolved default config path (FR-007) | `0` |
 
 `--config` MUST NOT affect the configuration the window uses (FR-005, constitution principle V).
+
+An empty `-c` value is refused rather than read as "no override" — which is how an unset shell
+variable in `mp -c "$CONF" hello` arrives. Posting on the default settings instead would be a
+silent substitution of the file the user named, the outcome FR-005's "this post only" exists to
+rule out. This row is a Batch 11 addition not derived from a numbered requirement, accepted by
+the maintainer on 2026-09-24 (decision DEC-H1), and recorded here so the refusal reads as intended
+rather than as a regression.
+
 Standard input is never read for message content (FR-008).
 
 ## Required message text
@@ -108,12 +117,13 @@ warning to the user-visible output naming the log path and the reason.
 
 ## Verification boundary
 
-Everything above is implemented. One case is verified one layer below the process, and the
+Everything above is implemented. Two cases are verified one layer below the process, and the
 reason is recorded so the gap reads as a decision rather than an oversight (issue #119, option B):
 
 **Two destinations both succeeding** is driven from a parsed command line through `cli.Run`'s
 whole sequence — settings load, `app.Sinks`, the orchestrator, the note on disk, the report and
-the exit status — with only the chat destination's network call substituted, in
+the exit status — with the service constructor supplied by the test, which uses the real `app.Sinks` and
+`post.New` and swaps the chat sink for a succeeding stand-in, in
 `internal/cli/startup_test.go`. It is not reachable through a built binary, because the chat
 destination's Bot API origin is unexported and no settings key may redirect it (FR-057,
 constitution principle V). A regression dropping the second destination on the success path is
@@ -121,5 +131,16 @@ therefore caught in `internal/cli`, not only by `cmd/mp`'s partial-failure test.
 
 **The startup-error window** (FR-030) is not exercised by a process test either: it waits to be
 dismissed, so a test would hang, and on a developer's machine would open a real window. Its
-content and every dismissal are tested headlessly in `internal/gui`, and the refusal that leads to
-it is tested in `internal/app`.
+content, every dismissal (Esc delivered to the focused Quit button as the driver delivers it), and
+the failure branch's report-show-exit-1 sequence (`startupFailure`, driven by Fyne's headless app)
+are tested in `internal/gui`; the refusal that leads to it is tested in `internal/app`. Two things
+are **not** verified by any automated test: `gui.Run` handing the real application constructor to
+that branch, and dismissal through the **native** driver — a real Esc, click, close box or Cmd+Q
+and the exit status that follows. The headless tests follow the driver's routing as read from Fyne
+v2.8.1's source, which is exactly where cycle 0's Esc defect hid, so a native check is the
+remaining evidence owed, by T091 / #92 (the quickstart FR-030 scenario); Batch 11 could not run one (macOS Accessibility permission).
+
+With no resolvable settings path (`$HOME` unset and `XDG_CONFIG_HOME` unset), the window front
+door reports on stderr and exits `1` **without** opening the window: constructing the Fyne
+application would create its storage relative to the working directory, and the window's purpose
+is to show a path there is none of (decision DEC-H2).

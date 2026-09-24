@@ -101,15 +101,16 @@ const MaxTimeoutSeconds = int64(math.MaxInt64 / int64(time.Second))
 //
 // The same argument as MaxTimeoutSeconds, applied to the keys it did not cover.
 // internal/logging multiplies rotate_size_mib by 2^20 and rotate_after_days by a
-// day's worth of nanoseconds, and an unchecked product wraps negative — which is
-// not inert there: a negative threshold compares as already exceeded, so every
-// write would rotate and the log would become a directory of one-record files.
+// day's worth of nanoseconds, and an unchecked product wraps. Where it lands depends on the value, and neither
+// outcome is what the setting reads as: zero or negative, which dueForRotation
+// treats as "condition disabled", so rotation silently stops; or a small
+// positive number — rotate_size_mib = 2^44+1 wraps to exactly 1 MiB — which is
+// an arbitrary threshold nobody configured.
 //
 // The bound is the wrap point rather than a "sensible" maximum, and that is the
 // choice #109 already made for the timeouts. Any smaller number would be a
 // policy this version's contract does not state; this one is a fact about the
-// arithmetic, so a value it rejects is one that could never have meant what it
-// reads as.
+// arithmetic — the largest threshold that can be represented at all.
 //
 // internal/logging keeps its clamp at the conversion. It is defence in depth
 // now rather than the only guard: logging.Options is also built by callers
@@ -371,18 +372,20 @@ func validateTimeoutSeconds(found *problems, key string, seconds int) {
 
 // validateRotation bounds one rotation key from both sides (FR-072, issue #130).
 //
-// The message says what the overflow would have done, as validateTimeoutSeconds
-// does, because the number alone reads as arbitrary: a user who wrote a huge
-// value meant "never rotate", and the useful thing to tell them is that the
-// value would have done the opposite.
+// The message names the limit as a representability limit and says what to
+// write instead, because a user who wrote a huge value almost certainly meant
+// "rotate almost never" — and the limit itself says exactly that. It does not
+// claim the value was doing harm: internal/logging has clamped such values to
+// "effectively never" since issue #126, so a document carrying one used to
+// load and behave sensibly, and is refused now only because this version no
+// longer accepts a value it cannot represent.
 func validateRotation(found *problems, key string, value int, limit int64) {
 	switch {
 	case value <= 0:
 		found.addf("%s must be greater than 0 (got %d)", key, value)
 	case int64(value) > limit:
-		found.addf("%s must be at most %d (got %d); a larger value overflows the internal "+
-			"threshold and would rotate the log on every write rather than almost never",
-			key, limit, value)
+		found.addf("%s must be at most %d (got %d), the largest threshold it can represent; "+
+			"to rotate almost never, set it to %d", key, limit, value, limit)
 	}
 }
 

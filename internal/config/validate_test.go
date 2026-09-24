@@ -1173,7 +1173,8 @@ func TestValidateBoundsBotTokenLength(t *testing.T) {
 // bounded from below only, so a value past the wrap point loaded cleanly and
 // relied on internal/logging's clamp to mean anything sensible. The boundary
 // pair fails a bound written with the wrong comparison; the rows past it are
-// the values that wrap negative, which is "rotate on every write".
+// values whose unchecked conversion wraps — to a disabled condition or to an
+// arbitrary small threshold, never to what the setting reads as.
 func TestValidateBoundsRotationFromAbove(t *testing.T) {
 	t.Parallel()
 
@@ -1239,13 +1240,14 @@ func TestValidateBoundsRotationFromAbove(t *testing.T) {
 					}
 				}
 
-				// Above the bound, the message says what the value would have
-				// done; below it, it must not, or the user is told about an
-				// overflow for typing zero.
-				overflow := strings.Contains(err.Error(), "overflows")
-				if above := int64(tc.value) > key.limit; overflow != above {
-					t.Errorf("%s = %d: overflow explanation present = %v, want %v: %v",
-						key.key, tc.value, overflow, above, err)
+				// Above the bound, the message names the limit and what to write
+				// instead; below it, it must not, or the user who typed zero is
+				// told about a ceiling.
+				advice := fmt.Sprintf("to rotate almost never, set it to %d", key.limit)
+				advised := strings.Contains(err.Error(), advice)
+				if above := int64(tc.value) > key.limit; advised != above {
+					t.Errorf("%s = %d: limit advice present = %v, want %v: %v",
+						key.key, tc.value, advised, above, err)
 				}
 			})
 		}

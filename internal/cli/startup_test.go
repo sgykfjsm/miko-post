@@ -15,6 +15,7 @@ import (
 	"github.com/sgykfjsm/miko-post/internal/cli"
 	"github.com/sgykfjsm/miko-post/internal/config"
 	"github.com/sgykfjsm/miko-post/internal/post"
+	"github.com/sgykfjsm/miko-post/internal/sink/telegram"
 )
 
 // -----------------------------------------------------------------------------
@@ -32,8 +33,16 @@ func (v vault) writeSettings(t *testing.T, document string) {
 	}
 }
 
-// runPost parses `-c <vault settings> hello` and runs it.
-func (v vault) runPost(t *testing.T) (status int, out, errOut string) {
+// runRefused parses `-c <vault settings> hello` and runs it through a service
+// constructor that fails the test if it is ever called.
+//
+// Every caller expects a refusal before a service exists, and that is what the
+// constructor asserts. It is also what keeps these tests off the network: some
+// of their settings enable the chat destination with a well-formed token, and
+// under the very regression each test exists to catch — the refusal not
+// happening — the production constructor would build the real chat sink and
+// send to the Bot API before any assertion ran.
+func (v vault) runRefused(t *testing.T) (status int, out, errOut string) {
 	t.Helper()
 
 	invocation, err := cli.Parse([]string{"-c", v.configPath, "hello"})
@@ -43,7 +52,11 @@ func (v vault) runPost(t *testing.T) (status int, out, errOut string) {
 
 	var stdout, stderr bytes.Buffer
 
-	status = cli.Run(invocation, &stdout, &stderr)
+	status = cli.RunWith(invocation, &stdout, &stderr, func(config.Settings, post.Recording) *post.Service {
+		t.Fatal("a posting service was constructed, so the settings were not refused")
+
+		return nil
+	})
 
 	return status, stdout.String(), stderr.String()
 }
@@ -73,7 +86,7 @@ enabled = false
 path = %q
 `)
 
-	status, out, errOut := v.runPost(t)
+	status, out, errOut := v.runRefused(t)
 
 	if status != cli.ExitFailure {
 		t.Errorf("status = %d, want %d", status, cli.ExitFailure)
@@ -125,7 +138,7 @@ bot_token = "0123456789:abcdefghijklmnop"
 path = %q
 `)
 
-	status, out, errOut := v.runPost(t)
+	status, out, errOut := v.runRefused(t)
 
 	if status != cli.ExitFailure {
 		t.Errorf("status = %d, want %d", status, cli.ExitFailure)
@@ -173,9 +186,10 @@ func (s succeedingChat) Send(context.Context, post.Message) error {
 // The seam replaces the service constructor and nothing upstream of it. The
 // sinks come from app.Sinks and the service from post.New, so a truncation of
 // the sink list in either — the `sinks[:1]` mutant the issue names — drops a
-// result this test counts. The substitute replaces only the chat sink's network
-// call, found by name in the list app.Sinks built, and the test fails if it
-// was not there to replace.
+// result this test counts. The substitute replaces the whole chat sink with a
+// succeeding stand-in carrying its name — found by name in the list app.Sinks
+// built, so none of the real chat sink's own code runs here — and the test
+// fails, before anything is sent, if it was not there to replace.
 //
 // Process-level, through a built binary, this remains unreachable: the chat
 // sink's origin is unexported and no settings key may redirect it (FR-057).
@@ -211,10 +225,17 @@ path = %q
 		sinks := app.Sinks(settings)
 
 		for i, sink := range sinks {
-			if sink.Name() == "telegram" {
+			if sink.Name() == telegram.SinkName {
 				sinks[i] = succeedingChat{name: sink.Name(), calls: &chatCalls}
 				substituted = true
 			}
+		}
+
+		// Checked here, before post.New, and not after the run: an
+		// unsubstituted chat sink is a real one, and letting the post go ahead
+		// to find that out afterwards would send to the Bot API first.
+		if !substituted {
+			t.Fatal("app.Sinks built no chat sink to substitute, so this is not a two-destination run")
 		}
 
 		return post.New(sinks, app.SinkTimeout(settings), recording)
@@ -225,7 +246,7 @@ path = %q
 	status := cli.RunWith(invocation, &out, &errOut, newService)
 
 	if !substituted {
-		t.Fatal("app.Sinks built no chat sink to substitute, so this is not a two-destination run")
+		t.Fatal("the service constructor was never called")
 	}
 
 	if status != cli.ExitSuccess {

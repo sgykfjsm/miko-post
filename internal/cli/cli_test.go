@@ -147,10 +147,10 @@ func TestParseJoinsMessageArgumentsWithOneASCIISpace(t *testing.T) {
 
 // TestParseDispatchesToTheWindowOnlyWithNoMessage is FR-002 and FR-003.
 //
-// The `-c` rows are FR-005: the settings-file override applies to command-line
-// posting only. Dropping it at the parse boundary is what makes that structural,
-// and the assertion is that the window invocation carries no path at all rather
-// than that some later code ignores one.
+// The `-c` row is FR-005: the override reaches a command-line post, and only
+// one. No row here pairs -c with the window any more — since FR-006 (T079) a -c
+// without a message is refused in Parse, in TestParseRejectsWhatItCannotUnderstand
+// — so a window invocation cannot carry a path at all.
 func TestParseDispatchesToTheWindowOnlyWithNoMessage(t *testing.T) {
 	t.Parallel()
 

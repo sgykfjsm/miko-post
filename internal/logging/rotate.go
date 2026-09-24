@@ -32,14 +32,16 @@ const dayDuration = 24 * time.Hour
 
 // Largest thresholds that survive conversion into the units this file works in.
 //
-// This is not hypothetical tidiness. config.Validate bounds both keys from
-// below only — rotate_size_mib and rotate_after_days must be greater than zero
-// and nothing caps them — so a value near the integer limit reaches here, and
-// the multiplication below would wrap it negative. A negative threshold is not
-// an inert one: dueForRotation compares size >= threshold, so every write would
-// rotate, producing a directory of one-record files rather than a log. Clamping
-// makes an absurd setting mean "effectively never", which is the direction that
-// loses nothing.
+// config.Validate now rejects values above these same thresholds (issue #130,
+// config.MaxRotateSizeMiB and config.MaxRotateAfterDays), so settings that went
+// through config.Load never reach the clamp. It stays as defence in depth for a
+// caller that builds Options directly: for that caller a value near the integer
+// limit still reaches here, and the multiplication below would wrap. A wrapped
+// product is zero or negative, which dueForRotation reads as "condition
+// disabled", or a small positive number — rotate_size_mib = 2^44+1 wraps to
+// exactly 1 MiB — which is an arbitrary threshold nobody configured. Clamping
+// makes an absurd setting mean "effectively never", which is what it reads as
+// and loses nothing.
 //
 // Typed int64 rather than untyped: maxRotateSizeMiB exceeds a 32-bit int, and
 // an untyped constant compared against an int would not compile there.
