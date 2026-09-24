@@ -1128,7 +1128,6 @@ completed:
           internal/logging/birthtime_other.go and internal/logging/birthtime_darwin.go, both of
           which name DEC-ADV-006 in their doc comments and point here;
           .agents/batch-10a-pr-body.md; .agents/work-log.md
-in_progress:
   - id: 10b
     name: US5 post diagnostics
     tasks: [T066, T067, T071, T072, T073, T074]
@@ -1143,11 +1142,33 @@ in_progress:
       (b09891ce208fcde2e5a6549a017144cd0c9c54ac both sides) - a rebase moves history and must not
       move content, and this one is verified not to have. make check and the native build were
       re-run on the rebased tree rather than trusted from before it.
-    state: implemented-fully-reviewed-fixed
+    state: merged
     committed: true
     pushed: true
     pull_request: 133
     pull_request_url: https://github.com/sgykfjsm/miko-post/pull/133
+    merged_from_head: a944dc90e9150c99a3fe9572de58095ccbe231b0
+    squashed_as: d6fcb6bd8ce1b138d5659dfa095384866cf24684
+    merged_at: 2026-09-24T02:21:48Z
+    merge_verification: >-
+      The squashed commit d6fcb6b and the reviewed head a944dc9 have the same tree,
+      9c81f88bf10d83c39aed87cfe318a4356eb046bb, so main carries byte-for-byte what the three review
+      stages and both fix passes produced. Checked at merge time rather than asserted.
+    issues_closed:
+      closed_at: 2026-09-24
+      issues: [67, 68, 72, 73, 74, 75]
+      state_reason: completed
+      how: >-
+        Closed immediately after the merge, in the same session, each with a comment naming PR #133
+        and d6fcb6b, the delivering files, the decisions that governed them and the caveats carried
+        forward - #72 points at #132 for the unbounded body, #75 records that the batch's most
+        serious defect was in the fix for that very issue. PR #133 carried no closing keyword by
+        design, which was stated in its body, so this was an explicit post-merge step with a named
+        owner rather than something left to GitHub.
+      why_it_mattered: >-
+        This is the step whose absence left #66 and #69-#71 open for two days after #126, and
+        #60-#65, #115, #118 and #119 open since earlier batches. Doing it in the same session as
+        the merge is the only arrangement that has actually worked.
     publication_note: >-
       Opened 2026-09-18 from sgykfjsm/batch-10b-post-diagnostics at 06d2c1d against main 86a05f5.
       Nine commits, 27 files, +2780/-68, mergeable. Body published from
@@ -1517,7 +1538,7 @@ in_progress:
         recorded_in: >-
           specs/001-dual-sink-quick-post/contracts/log-events.md Traces section;
           specs/001-dual-sink-quick-post/tasks.md T073
-
+in_progress: []
 blockers: []
 
 time_sensitive:
@@ -1571,14 +1592,17 @@ time_sensitive:
     deadline: before tagging v0.1.0
 
 next_best_action: >-
-  Review Batch 10b. It is implemented on sgykfjsm/batch-10b-post-diagnostics and NOT yet committed,
-  pushed or opened as a PR; .agents/batch-10b-pr-body.md is prepared. Run the three review stages
-  (contract, correctness, adversarial) against the batch diff, then publish. Two things a reviewer
-  should go at first: DEC-G1's claimBody, where the body lands on every failure record but the
-  terminal record only as a fallback, and DEC-G3's stack capture in internal/post, which is outside
-  T073's stated file. After the review and merge, close #67, #68 and #72-#75 explicitly - the PR
-  body carries no closing keyword, which is exactly what left #66 and #69-#71 open for two days
-  after #126.
+  Implement Batch 11 - US6 settings resolution: T075-T083, issues 76-84. A fresh branch from merged
+  main d6fcb6bd8ce1b138d5659dfa095384866cf24684, then the usual three-stage review. The batch is
+  the CLI front door's remaining behaviour: the -c/--config override reaching only the CLI posting
+  path and never the window constructor (FR-005, constitution principle V), --config without a
+  message erroring without opening the window (FR-006), help output carrying the RESOLVED default
+  settings path rather than an unexpanded $XDG_CONFIG_HOME expression (FR-007), the
+  all-sinks-disabled startup error (FR-018) and the minimal startup-error window (FR-030).
+  Note T082 depends on the internal/gui package from US2, which exists. Two things to settle early:
+  T081 is the requirement T039's own acceptance note records as NOT implemented - both destinations
+  disabled currently reports after the fact and exits 1 rather than refusing beforehand - and
+  contracts/cli-interface.md is the contract T080 must match exactly.
 
 review_followups_filed:
   filed_at: 2026-09-07
@@ -1671,7 +1695,7 @@ batch_6_split:
     internal package.
 
 remaining_batches:
-  - {id: 10b, name: "US5 post diagnostics", tasks: "T066, T067, T071-T074", issues: "67, 68, 72-75", note: "10a (T065, T068-T070) is merged; see completed"}
+  - {id: 11, name: "US6 settings resolution", tasks: "T075-T083", issues: "76-84", note: "US5 is fully delivered: 10a and 10b are both merged, see completed"}
   - {id: 11, name: "US6 settings resolution", tasks: "T075-T083"}
   - {id: 12, name: "Polish and gates", tasks: "T084-T091"}
 
@@ -1736,7 +1760,7 @@ assumptions:
     The batch decomposition above is re-derived by run-batch-cycle's triage step each run; it is
     recorded here for orientation, not as a binding plan.
 
-last_updated: 2026-09-18
+last_updated: 2026-09-24
 
 backlog_additions:
   - issue: 122
