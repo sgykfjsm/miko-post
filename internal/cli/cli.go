@@ -26,25 +26,24 @@ const (
 // collapse the spacing inside a single quoted argument.
 const argumentSeparator = " "
 
-// ErrHelpNotAvailable is returned for -h and --help.
+// ErrConfigWithoutMessage is FR-006's error: -c/--config supplied with no
+// message to post.
 //
-// Help output is T080's, in batch 11: contracts/cli-interface.md specifies the
-// exact text, including the settings path resolved for the current environment,
-// and half of that is worse than none — a user shown an incomplete help page
-// has no way to tell it is incomplete. So the flag is recognised and refused
-// with a message that says so, rather than being reported as an unknown flag,
-// which would read as a typo on the user's part.
+// The text is contracts/cli-interface.md's required message, verbatim, and it is
+// returned from Parse rather than checked later so that the window path is never
+// reached: an Invocation with ModeWindow cannot come back from a command line
+// that named a settings file. FR-006 says "MUST NOT open the window", and the
+// strongest form of that is the dispatch never seeing a window request.
+var ErrConfigWithoutMessage = errors.New("--config is only available when posting from CLI")
+
+// ErrEmptyConfigPath is returned for -c or --config given an empty value.
 //
-// flag.ErrHelp is wrapped rather than replaced so the cause survives errors.Is
-// for anything that wants to distinguish "asked for help" from "got the command
-// line wrong", and so T080's implementation has a single value to delete.
-//
-// Exit status: this returns through Parse's error, so the process exits 1 today
-// where the contract requires 0. That is a known gap, recorded here rather than
-// papered over with a partial help page.
-var ErrHelpNotAvailable = fmt.Errorf(
-	"%w: help output is not implemented yet; see specs/001-dual-sink-quick-post/contracts/cli-interface.md",
-	flag.ErrHelp)
+// Without it `mp -c "" hello` would post with the default settings, because ""
+// is also how Invocation spells "no override". A user who typed -c meant to
+// point somewhere else, and an unset shell variable in `mp -c "$CONF" hello` is
+// the realistic way to get here; posting on the default settings instead is
+// the silent half-success FR-005 is written to prevent.
+var ErrEmptyConfigPath = errors.New("-c/--config needs a path to a settings file")
 
 // Mode is what one invocation asks the binary to do (FR-002, FR-003).
 type Mode int
@@ -55,6 +54,9 @@ const (
 
 	// ModeWindow opens the window, which is what no message arguments means.
 	ModeWindow
+
+	// ModeHelp prints help and exits 0 (FR-007).
+	ModeHelp
 )
 
 // String makes a failed comparison in a test readable, and a Mode printed
@@ -65,6 +67,8 @@ func (m Mode) String() string {
 		return "post"
 	case ModeWindow:
 		return "window"
+	case ModeHelp:
+		return "help"
 	default:
 		return fmt.Sprintf("Mode(%d)", int(m))
 	}
@@ -96,12 +100,9 @@ type Invocation struct {
 	// makes that structural — the window path is handed nothing to misuse —
 	// instead of a rule each future caller has to remember.
 	//
-	// FR-006 says supplying it without a message is an error that must not open
-	// the window. That is T079, in batch 11. Until it lands, `mp -c x.toml`
-	// opens the window on the default settings, which satisfies FR-005 but not
-	// FR-006. T079 needs to know the flag was supplied, so it will have to add a
-	// field here; it is deliberately not added in advance, because a field
-	// nothing reads is a field nobody maintains.
+	// Supplying it without a message is FR-006's error rather than a window
+	// request, so the field and ModeWindow never meet: see
+	// ErrConfigWithoutMessage.
 	ConfigPath string
 }
 
@@ -143,20 +144,42 @@ func Parse(argv []string) (Invocation, error) {
 	flags.StringVar(&configPath, "config", "", configUsage)
 
 	if err := flags.Parse(argv); err != nil {
+		// FR-007: help wins over everything else on the command line, including
+		// a -c without a message, because a user asking how to use the command
+		// is better served by the answer than by an error about how they used it.
 		if errors.Is(err, flag.ErrHelp) {
-			return Invocation{}, ErrHelpNotAvailable
+			return Invocation{Mode: ModeHelp}, nil
 		}
 
 		return Invocation{}, err
 	}
 
+	// Whether the flag was given at all, which the value cannot say: "" is both
+	// "not given" and "given empty". Visit reports only flags that were set.
+	configGiven := false
+
+	flags.Visit(func(f *flag.Flag) {
+		if f.Name == "c" || f.Name == "config" {
+			configGiven = true
+		}
+	})
+
 	arguments := flags.Args()
 
 	if len(arguments) == 0 {
+		// FR-006: a settings file named with nothing to post is an error, and
+		// the window is not opened on some other settings instead.
+		if configGiven {
+			return Invocation{}, ErrConfigWithoutMessage
+		}
+
 		// FR-002: no message arguments opens the window, on the default
-		// resolved settings path. ConfigPath is deliberately dropped; see the
-		// field comment.
+		// resolved settings path.
 		return Invocation{Mode: ModeWindow}, nil
+	}
+
+	if configGiven && configPath == "" {
+		return Invocation{}, ErrEmptyConfigPath
 	}
 
 	// FR-004: exactly one ASCII space between adjacent arguments, and nothing

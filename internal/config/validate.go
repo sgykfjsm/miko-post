@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"path/filepath"
@@ -94,6 +95,50 @@ const pathSeparators = `/\`
 // merely unreachable.
 const MaxTimeoutSeconds = int64(math.MaxInt64 / int64(time.Second))
 
+// MaxRotateSizeMiB and MaxRotateAfterDays are the largest values the two
+// rotation keys may hold: the largest that still convert to a byte count and to
+// a time.Duration without wrapping (issue #130).
+//
+// The same argument as MaxTimeoutSeconds, applied to the keys it did not cover.
+// internal/logging multiplies rotate_size_mib by 2^20 and rotate_after_days by a
+// day's worth of nanoseconds, and an unchecked product wraps. Where it lands depends on the value, and neither
+// outcome is what the setting reads as: zero or negative, which dueForRotation
+// treats as "condition disabled", so rotation silently stops; or a small
+// positive number — rotate_size_mib = 2^44+1 wraps to exactly 1 MiB — which is
+// an arbitrary threshold nobody configured.
+//
+// The bound is the wrap point rather than a "sensible" maximum, and that is the
+// choice #109 already made for the timeouts. Any smaller number would be a
+// policy this version's contract does not state; this one is a fact about the
+// arithmetic — the largest threshold that can be represented at all.
+//
+// internal/logging keeps its clamp at the conversion. It is defence in depth
+// now rather than the only guard: logging.Options is also built by callers
+// that never went through Load, and for them the clamp is still what turns an
+// absurd value into "effectively never". The two agree on the threshold by
+// construction — both divide math.MaxInt64 by the same unit — so a value that
+// passes here is never clamped there.
+const (
+	MaxRotateSizeMiB   = int64(math.MaxInt64 / (1 << 20))
+	MaxRotateAfterDays = int64(math.MaxInt64 / int64(24*time.Hour))
+)
+
+// ErrNoDestinationEnabled is FR-018's startup error: a settings document in
+// which every destination is disabled.
+//
+// A sentinel rather than a ValidationError problem, because it is not one. The
+// document is entirely valid as a document — every key has a legal value — and
+// Validate says so. What is wrong is that posting with it cannot do anything,
+// which is a question only a front door that is about to post asks. Keeping the
+// two apart lets each front door tell "fix this key" from "turn something on"
+// with errors.Is rather than by reading message text.
+//
+// The text is the actionable message the requirement asks for: it names the
+// two keys that would fix it, since "no destination" alone tells a user what is
+// wrong but not where.
+var ErrNoDestinationEnabled = errors.New("no destination is enabled, so there is nowhere to " +
+	"post: set enabled = true under [sink.obsidian] or [sink.telegram] and try again")
+
 // MinBotTokenLength is the shortest sink.telegram.bot_token this program will
 // accept, and the reason is not credential strength.
 //
@@ -180,9 +225,8 @@ func (p *problems) addf(format string, args ...any) {
 //     enabled.
 //
 // Whether every sink is disabled is not checked here. That is FR-018's startup
-// error and belongs to the front door (T081): such a document is entirely valid
-// as a document, and the actionable message the requirement calls for is a
-// front-door concern.
+// error, reported by RequireDestination: such a document is entirely valid as a
+// document, and refusing to post with it is a front-door decision (T081).
 func (s Settings) Validate() error {
 	// time.Now() carries time.Local, and that Location is the point: FR-051
 	// makes the Obsidian sink render its date and time at local wall-clock time,
@@ -228,6 +272,21 @@ func (s Settings) validateAt(now time.Time) error {
 	}
 
 	return &ValidationError{Problems: found}
+}
+
+// RequireDestination reports FR-018's startup error: nil when at least one
+// destination is enabled, ErrNoDestinationEnabled when none is.
+//
+// Separate from Validate for the reason on ErrNoDestinationEnabled. The front
+// doors call it after Load and before anything that could post exists, which is
+// what makes FR-018's "no post attempt" structural rather than a check each
+// sink has to remember (FR-058).
+func (s Settings) RequireDestination() error {
+	if s.Sink.Obsidian.Enabled || s.Sink.Telegram.Enabled {
+		return nil
+	}
+
+	return ErrNoDestinationEnabled
 }
 
 func (t TelegramSettings) validate(found *problems) {
@@ -311,6 +370,25 @@ func validateTimeoutSeconds(found *problems, key string, seconds int) {
 	}
 }
 
+// validateRotation bounds one rotation key from both sides (FR-072, issue #130).
+//
+// The message names the limit as a representability limit and says what to
+// write instead, because a user who wrote a huge value almost certainly meant
+// "rotate almost never" — and the limit itself says exactly that. It does not
+// claim the value was doing harm: internal/logging has clamped such values to
+// "effectively never" since issue #126, so a document carrying one used to
+// load and behave sensibly, and is refused now only because this version no
+// longer accepts a value it cannot represent.
+func validateRotation(found *problems, key string, value int, limit int64) {
+	switch {
+	case value <= 0:
+		found.addf("%s must be greater than 0 (got %d)", key, value)
+	case int64(value) > limit:
+		found.addf("%s must be at most %d (got %d), the largest threshold it can represent; "+
+			"to rotate almost never, set it to %d", key, limit, value, limit)
+	}
+}
+
 func (o ObsidianSettings) validate(found *problems, now time.Time) {
 	if o.Enabled {
 		switch {
@@ -369,13 +447,8 @@ func (l LoggingSettings) validate(found *problems) {
 		found.addf("logging.format must be %q (got %q)", LogFormatJSONL, l.Format)
 	}
 
-	if l.RotateSizeMiB <= 0 {
-		found.addf("logging.rotate_size_mib must be greater than 0 (got %d)", l.RotateSizeMiB)
-	}
-
-	if l.RotateAfterDays <= 0 {
-		found.addf("logging.rotate_after_days must be greater than 0 (got %d)", l.RotateAfterDays)
-	}
+	validateRotation(found, "logging.rotate_size_mib", l.RotateSizeMiB, MaxRotateSizeMiB)
+	validateRotation(found, "logging.rotate_after_days", l.RotateAfterDays, MaxRotateAfterDays)
 
 	// logging.path is deliberately unvalidated. Empty means the default state
 	// path (FR-056), and any non-empty value is a path whose writability can

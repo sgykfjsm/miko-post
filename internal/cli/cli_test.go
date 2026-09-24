@@ -3,7 +3,6 @@ package cli_test
 import (
 	"bytes"
 	"errors"
-	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -148,10 +147,10 @@ func TestParseJoinsMessageArgumentsWithOneASCIISpace(t *testing.T) {
 
 // TestParseDispatchesToTheWindowOnlyWithNoMessage is FR-002 and FR-003.
 //
-// The `-c` rows are FR-005: the settings-file override applies to command-line
-// posting only. Dropping it at the parse boundary is what makes that structural,
-// and the assertion is that the window invocation carries no path at all rather
-// than that some later code ignores one.
+// The `-c` row is FR-005: the override reaches a command-line post, and only
+// one. No row here pairs -c with the window any more — since FR-006 (T079) a -c
+// without a message is refused in Parse, in TestParseRejectsWhatItCannotUnderstand
+// — so a window invocation cannot carry a path at all.
 func TestParseDispatchesToTheWindowOnlyWithNoMessage(t *testing.T) {
 	t.Parallel()
 
@@ -163,16 +162,6 @@ func TestParseDispatchesToTheWindowOnlyWithNoMessage(t *testing.T) {
 	}{
 		{name: "no arguments", argv: nil, wantMode: cli.ModeWindow},
 		{name: "an empty argument vector", argv: []string{}, wantMode: cli.ModeWindow},
-		{
-			name:     "the config flag alone",
-			argv:     []string{"-c", "/tmp/x.toml"},
-			wantMode: cli.ModeWindow,
-		},
-		{
-			name:     "the long config flag alone",
-			argv:     []string{"--config", "/tmp/x.toml"},
-			wantMode: cli.ModeWindow,
-		},
 		{
 			name:     "a bare -- with nothing after it",
 			argv:     []string{"--"},
@@ -227,8 +216,19 @@ func TestParseRejectsWhatItCannotUnderstand(t *testing.T) {
 		{name: "an unknown flag before the message", argv: []string{"-x", "hello"}},
 		{name: "an unknown long flag", argv: []string{"--nope"}},
 		{name: "the config flag with no value", argv: []string{"-c"}},
-		{name: "short help", argv: []string{"-h"}, wantIs: cli.ErrHelpNotAvailable},
-		{name: "long help", argv: []string{"--help"}, wantIs: cli.ErrHelpNotAvailable},
+		// FR-006: a settings file with nothing to post is an error, never the
+		// window. Both spellings, and the -- form that ends flag parsing before
+		// an empty message list.
+		{name: "the config flag alone", argv: []string{"-c", "/tmp/x.toml"}, wantIs: cli.ErrConfigWithoutMessage},
+		{name: "the long config flag alone", argv: []string{"--config", "/tmp/x.toml"}, wantIs: cli.ErrConfigWithoutMessage},
+		{name: "the long config flag with =", argv: []string{"--config=/tmp/x.toml"}, wantIs: cli.ErrConfigWithoutMessage},
+		{name: "the config flag then --", argv: []string{"-c", "/tmp/x.toml", "--"}, wantIs: cli.ErrConfigWithoutMessage},
+		{name: "an empty config value alone", argv: []string{"-c", ""}, wantIs: cli.ErrConfigWithoutMessage},
+		// An empty value with a message is refused rather than read as "no
+		// override", which is what "" means inside Invocation.
+		{name: "an empty config value with a message", argv: []string{"-c", "", "hello"}, wantIs: cli.ErrEmptyConfigPath},
+		{name: "an empty long config value with a message", argv: []string{"--config=", "hello"}, wantIs: cli.ErrEmptyConfigPath},
+		{name: "a later empty value overriding a real one", argv: []string{"-c", "/tmp/x.toml", "--config", "", "hello"}, wantIs: cli.ErrEmptyConfigPath},
 		{
 			name:   "help after a message is still help, because flag parsing stops at the message",
 			argv:   []string{"hello", "-h"},
@@ -275,27 +275,41 @@ func TestParseRejectsWhatItCannotUnderstand(t *testing.T) {
 	}
 }
 
-// TestHelpIsRecognisedRatherThanTreatedAsATypo pins the deliberate gap.
-//
-// Help output is T080's (batch 11) and half of it is worse than none, so the
-// flag is refused with a message that says it is not implemented. This test
-// exists so that T080 has to change a test rather than discover the behaviour,
-// and so the reason is written down next to the assertion.
-func TestHelpIsRecognisedRatherThanTreatedAsATypo(t *testing.T) {
+// TestFR006PrintsTheRequiredText pins the message contracts/cli-interface.md
+// requires verbatim, so rewording it is a contract change and not a refactor.
+func TestFR006PrintsTheRequiredText(t *testing.T) {
 	t.Parallel()
 
-	_, err := cli.Parse([]string{"--help"})
-	if err == nil {
-		t.Fatal("--help was accepted, so help is implemented and this test is stale")
-	}
+	const want = "--config is only available when posting from CLI"
 
-	if !errors.Is(err, flag.ErrHelp) {
-		t.Errorf("--help produced %v, which does not match flag.ErrHelp — it is being "+
-			"reported as an unknown flag, which reads to a user as their own typo", err)
+	if got := cli.ErrConfigWithoutMessage.Error(); got != want {
+		t.Errorf("FR-006 message = %q, want %q", got, want)
 	}
+}
 
-	if !strings.Contains(err.Error(), "not implemented") {
-		t.Errorf("the message does not say help is unimplemented: %q", err)
+// TestParseRecognisesHelp is FR-007's dispatch half: -h and --help ask for help
+// wherever they appear before the message, and help wins over a -c without a
+// message, which would otherwise be FR-006's error.
+func TestParseRecognisesHelp(t *testing.T) {
+	t.Parallel()
+
+	for _, argv := range [][]string{
+		{"-h"},
+		{"--help"},
+		{"-help"},
+		{"-c", "/tmp/x.toml", "--help"},
+		{"--help", "hello"},
+	} {
+		invocation, err := cli.Parse(argv)
+		if err != nil {
+			t.Errorf("Parse(%q) = %v, want help", argv, err)
+
+			continue
+		}
+
+		if invocation != (cli.Invocation{Mode: cli.ModeHelp}) {
+			t.Errorf("Parse(%q) = %+v, want only ModeHelp", argv, invocation)
+		}
 	}
 }
 
@@ -1201,6 +1215,10 @@ func TestModeStringNamesEveryValue(t *testing.T) {
 
 	if got := cli.ModeWindow.String(); got != "window" {
 		t.Errorf("ModeWindow = %q, want %q", got, "window")
+	}
+
+	if got := cli.ModeHelp.String(); got != "help" {
+		t.Errorf("ModeHelp = %q, want %q", got, "help")
 	}
 
 	if got := cli.Mode(7).String(); got != "Mode(7)" {

@@ -1538,7 +1538,66 @@ completed:
         recorded_in: >-
           specs/001-dual-sink-quick-post/contracts/log-events.md Traces section;
           specs/001-dual-sink-quick-post/tasks.md T073
-in_progress: []
+in_progress:
+  - id: 11
+    name: US6 settings resolution
+    tasks: [T075, T076, T077, T078, T079, T080, T081, T082, T083]
+    issues: [76, 77, 78, 79, 80, 81, 82, 83, 84]
+    additionally_delivered_issues: [119, 130]
+    branch: sgykfjsm/record-pr134-run-batch11
+    base: dfdc69fb8c55065d6a2f470f801c0ddc1718ef13
+    implementation_commit: 25a4f1d72cb3818c50dd821d6e861b49043072f2
+    state: implemented, reviewed locally through cycle 1 with two fix passes; review converged: passed-with-notes after cycles 0-2 and three fix passes; committed locally, not pushed, no PR; not pushed, no PR
+    prepared_pr_body: .agents/batch-11-pr-body.md
+    review_mode: review-and-fix (authorized 2026-09-24)
+    review_cycle_0:
+      contract: {status: valid, findings: [CON-001, CON-002, CON-003, CON-004]}
+      correctness: {status: findings, findings: [COR-001, COR-002, COR-003]}
+      adversarial: {status: findings, findings: [ADV-001, ADV-002, ADV-003]}
+    fix_pass_1:
+      - {ids: [COR-001, ADV-002], what: "Esc was dead in the real driver: the focused Quit button (a plain widget.Button) swallowed it and the test called the canvas handler directly. Quit is now a commandButton; the test sends Esc to the focused widget as glfw does"}
+      - {ids: [ADV-001, COR-002, CON-003], what: "gui.Run's failure branch extracted as startupFailure(errOut, fyne.App, err, path) and driven headlessly: stderr line, error window only, event loop run, exit 1. Only Run's one line handing it the real app stays untested"}
+      - {ids: [CON-001], what: "-c \"\" with a message refusal kept and recorded as a dispatch-table row with its rationale; flagged for maintainer acceptance in the PR body"}
+      - {ids: [ADV-003], what: "rotation over-limit message and config-schema text no longer claim harm the #126 clamp never allowed; compatibility note added; stale rotate.go comment updated"}
+      - {ids: [COR-003], what: "cmd/mp process runs bounded at 30s with CommandContext; an FR-006 regression now fails in ~32s instead of hanging with a real window open"}
+      - {ids: [CON-004], what: "T037/T039 notes marked superseded by Batch 11"}
+      - {ids: [CON-002], what: "records reconciled (this entry, project-status.md, work-log.md)"}
+    review_cycle_1:
+      contract: {status: valid, findings: [CON-001, CON-002, CON-003]}
+      correctness: {status: findings, findings: [COR-001, COR-002]}
+      adversarial: {status: findings, findings: [ADV-001, ADV-002, ADV-003, ADV-004], decision_items: [ADV-D1]}
+    fix_pass_2:
+      - {ids: [COR-001], what: "startupFailure test asserts the path line with an error text that does not contain the path; the sf-nopath mutant is killed"}
+      - {ids: [ADV-002, ADV-003], what: "refusal tests run through RunWith with a constructor that t.Fatals, so a regression cannot reach the Bot API; #119 test checks substitution before post.New and matches telegram.SinkName"}
+      - {ids: [ADV-001], what: "no resolvable path: stderr + exit 1, Fyne app never constructed (startupFailure takes a constructor); unresolvedPath fallback removed. Chosen by the coordinator, flagged as ADV-D1 for the maintainer"}
+      - {ids: [COR-002], what: "rotation rationale corrected in config-schema.md, validate.go, validate_test.go and rotate.go: a wrapped threshold is disabled or arbitrary, never rotate-every-write (dueForRotation treats <= 0 as disabled)"}
+      - {ids: [CON-002], what: "T082 delivery note and cli-interface.md Verification boundary state native dismissal is unverified and why"}
+      - {ids: [CON-003, ADV-004], what: "FR-008 paragraph separated; error-window comment no longer claims the path is copyable"}
+    decisions:
+      - {id: DEC-H1, finding: CON-001, decided_at: 2026-09-24, by: maintainer, decision: "accepted - `mp -c \"\" <message>` is refused with cli.ErrEmptyConfigPath, exit 1, rather than posting on the default settings", recorded_in: "contracts/cli-interface.md dispatch table"}
+      - {id: DEC-H2, finding: ADV-001 / ADV-D1, decided_at: 2026-09-24, by: maintainer, decision: "with no resolvable settings path the window front door prints to stderr and exits 1 without constructing the Fyne app, so nothing is written relative to the working directory", recorded_in: "contracts/gui-interface.md and contracts/cli-interface.md Verification boundary"}
+    mutation: >-
+      After fix pass 1: 39 of 39 killed. After fix pass 2: 37 distinct mutants, all killed (38 runs;
+      modestring-help ran twice). Excluded: run-ignore-seam, which by construction sends to the real
+      Bot API, and ew-nopathfallback, whose code was removed under DEC-H2. sinks-truncate (sinks[:1] in
+      app.Sinks) is killed in internal/cli, which is #119's acceptance.
+    mutants_fix_pass_2: [chatid-noop-offline, dispatch-help, esc-focused-noop, ew-nocmdq, ew-noesc, ew-nointercept, ew-nomessage, ew-nopath, ew-quit-noop, guisettings-other, help-exit1, help-unresolved-empty, load-nopath, load-req-nopath, load-req-partial, load-skip-req, maxdays-1, maxmib+1, modestring-help, parse-help-post, parse-no006, parse-noempty, parse-nolong, parse-noshort, reqdest-and, reqdest-nil, rot-advice, rot-floor, rot-ge, rot-noupper, rot-swap-limit, sf-noemptyguard, sf-nopath, sf-noprint, sf-norun, sf-return0, sinks-truncate]
+    review_cycle_2:
+      contract: {status: valid, findings: [CON-001, CON-002, CON-003, CON-004, CON-005, CON-006, CON-007], note: "record and doc findings, all applied before the code stages ran"}
+      correctness: {status: pass-with-notes, findings: [COR-001], note: "30 mutants, all killed; COR-001 was a stale test comment, now fixed"}
+      adversarial: {status: findings, findings: [ADV-001, ADV-002], decision_items: [DEC-ADV-1]}
+    followup_candidates:
+      - {source: cycle-2 ADV-001 / DEC-ADV-1, target: "new issue", action: "with HOME unset but XDG_CONFIG_HOME set, both the posting window and the startup-error window let Fyne write Library/ and fyne/ into the cwd, because Fyne derives storage from os.UserHomeDir() alone. The posting-window case predates Batch 11. Decide whether any window launch should refuse, or construct the app differently, when HOME is unset", status: planned, needs: "GitHub write authorization"}
+      - {source: cycle-2 CON-005, target: "issue #126 (closed)", action: "comment correcting its rotation-clamp rationale: a wrapped threshold disables rotation or becomes arbitrary, never rotate-every-write", status: planned, needs: "GitHub write authorization"}
+    native_checks_final_tree: >-
+      2026-09-24 on HEAD 25a4f1d plus the uncommitted fix passes (worktree diff sha256 prefix
+      bf8975efb186): --help printed the resolved path and exited 0; -c ./c.toml printed the FR-006 text
+      and exited 1; an all-disabled default config kept the error window open until the 5s kill and
+      created no log; with HOME and XDG_CONFIG_HOME both unset, exit 1 and nothing written to the cwd (DEC-H2).
+    validation_gaps:
+      - "Owned by T091 / #92 (quickstart.md FR-030 scenario). Native dismissal of the startup-error window by a real keypress or click: osascript blocked on Accessibility permission. Covered headlessly for Quit, close box, Esc (focused and unfocused) and Cmd+Q"
+    process_incidents:
+      - "Three test-time requests reached api.telegram.org with fake tokens and nothing was posted: the cycle-0 adversarial reviewer's probe (an env token overrode the file token), the coordinator's run-ignore-seam mutant, and the same mutant re-run by the cycle-1 correctness reviewer. Both run-ignore-seam runs bypass the substitute sink by construction"
 blockers: []
 
 time_sensitive:
@@ -1592,17 +1651,11 @@ time_sensitive:
     deadline: before tagging v0.1.0
 
 next_best_action: >-
-  Implement Batch 11 - US6 settings resolution: T075-T083, issues 76-84. A fresh branch from merged
-  main d6fcb6bd8ce1b138d5659dfa095384866cf24684, then the usual three-stage review. The batch is
-  the CLI front door's remaining behaviour: the -c/--config override reaching only the CLI posting
-  path and never the window constructor (FR-005, constitution principle V), --config without a
-  message erroring without opening the window (FR-006), help output carrying the RESOLVED default
-  settings path rather than an unexpanded $XDG_CONFIG_HOME expression (FR-007), the
-  all-sinks-disabled startup error (FR-018) and the minimal startup-error window (FR-030).
-  Note T082 depends on the internal/gui package from US2, which exists. Two things to settle early:
-  T081 is the requirement T039's own acceptance note records as NOT implemented - both destinations
-  disabled currently reports after the fact and exits 1 rather than refusing beforehand - and
-  contracts/cli-interface.md is the contract T080 must match exactly.
+  Finish Batch 11's review loop (cycle 2 re-review of the full diff after fix pass 2 and the
+  cycle-2 record fixes), commit the uncommitted fix passes, then with the maintainer's go-ahead push sgykfjsm/record-pr134-run-batch11 and open the PR
+  from .agents/batch-11-pr-body.md. Verify closingIssuesReferences is empty after opening. After
+  merge, in the same session: close #76-#84, #119 and #130 with the merge commit, and move batch 11
+  from in_progress to completed. Then Batch 12 (T084-T091).
 
 decisions_resolved:
   - resolved_at: 2026-09-24
@@ -1653,6 +1706,26 @@ issue_sweeps:
     note: >-
       #119 is worth deciding BEFORE Batch 11: US6 is the CLI front door's remaining behaviour, so it
       is the batch that will be working in that seam anyway.
+
+records_prs_merged:
+  - pr: 134
+    url: https://github.com/sgykfjsm/miko-post/pull/134
+    title: "docs: reconcile Batch 10b, sweep stale issues, and clear the decision backlog"
+    merged_at: 2026-09-24T02:55:01Z
+    merge_commit: dfdc69fb8c55065d6a2f470f801c0ddc1718ef13
+    base: d6fcb6bd8ce1b138d5659dfa095384866cf24684
+    head: 7caf62f7500c70c29f7dfc1aade6d493c249b00e
+    tree: 7d161f7501dd8cf7ddee1df03152ae25c20d3151
+    merge_verification: >-
+      The squashed commit and the PR head share tree 7d161f75, checked after merge rather than
+      asserted, so main carries exactly what was reviewed. closingIssuesReferences read back EMPTY
+      after merge, as intended - the body names many issue numbers and was reworded on opening
+      after "Closed #60-#65" had silently linked #60.
+    files: 7
+    note: >-
+      Records and docs only, no .go file. Carried the 10b reconciliation, the #60-#65 sweep and the
+      decision backlog (#127-#130, #132, #94, #119). This record ships in Batch 11's PR, following
+      the batch-N-record-in-batch-N+1 pattern.
 
 review_followups_filed:
   filed_at: 2026-09-07
@@ -1745,8 +1818,6 @@ batch_6_split:
     internal package.
 
 remaining_batches:
-  - {id: 11, name: "US6 settings resolution", tasks: "T075-T083", issues: "76-84", note: "US5 is fully delivered: 10a and 10b are both merged, see completed"}
-  - {id: 11, name: "US6 settings resolution", tasks: "T075-T083"}
   - {id: 12, name: "Polish and gates", tasks: "T084-T091"}
 
 touched_files:

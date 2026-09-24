@@ -126,8 +126,8 @@ shared rule in `internal/config/validate.go` so a third timeout key cannot acqui
 |---|---|---|---|
 | `format` | string | `"jsonl"` | `"jsonl"` only in v0.1 |
 | `path` | string | `""` | **Empty means the default state path** (FR-056) |
-| `rotate_size_mib` | int | `10` | > 0 (FR-072); no upper bound at load time — see below |
-| `rotate_after_days` | int | `7` | > 0 (FR-072); no upper bound at load time — see below |
+| `rotate_size_mib` | int | `10` | > 0 and ≤ `8796093022207` (FR-072, #130) — see below |
+| `rotate_after_days` | int | `7` | > 0 and ≤ `106751` (FR-072, #130) — see below |
 | `message_on_error_only` | bool | `true` | Governs FR-068 |
 | `stack_trace` | bool | `true` | Governs FR-071 |
 | `include_version` | bool | `true` | Governs FR-066 |
@@ -137,17 +137,27 @@ shared rule in `internal/config/validate.go` so a third timeout key cannot acqui
 `~/.local/state/miko-post/app.jsonl` when the variable is unset or empty. A non-empty
 `logging.path` overrides it.
 
-**The rotation thresholds are bounded only from below** (FR-072). `config.Validate` checks
-that each is greater than zero and nothing caps either, so a value near the integer limit
-reaches the code that converts it. `internal/logging` therefore clamps both at the
-conversion — `rotate_size_mib` to bytes and `rotate_after_days` to a `time.Duration` —
-because the unclamped multiplication wraps negative, and a negative threshold is not an
-inert one: rotation compares `>=`, so every single write would rotate and the log would
-become a directory of one-record files. Clamped, an absurd setting means "effectively
-never", which is the direction that loses nothing. No issue owns a load-time upper bound
-for these two keys, so this clamp is the only guard; it is not an interim measure waiting
-on one (compare `sink.telegram.http_timeout_seconds`, whose clamp was interim because #114
-owned the load-time fix).
+**The rotation thresholds are bounded from both sides** (FR-072, issue #130). `config.Validate`
+rejects a value that is not greater than zero, and a value past the largest that converts
+without wrapping: `config.MaxRotateSizeMiB` (`math.MaxInt64 / 2^20`, bytes) and
+`config.MaxRotateAfterDays` (`math.MaxInt64 / 24h`, a `time.Duration`). The bound is the wrap
+point and not a "sensible" maximum, which is the rule #109 set for the timeout keys: any smaller
+number would be a policy this contract does not state. Unchecked, the multiplication would wrap,
+and where it lands is never what the setting reads as: zero or negative, which the rotation check
+treats as "condition disabled", so rotation silently stops; or a small positive number —
+`rotate_size_mib = 2^44+1` wraps to exactly 1 MiB — an arbitrary threshold nobody configured. The
+rejection names the limit and says that writing it means "rotate almost never", which is what a
+user entering a huge value wants.
+
+**Compatibility**: before #130, a value above the limit loaded and was clamped to "effectively
+never", so it did no harm. It is now refused at load time, and both front doors refuse to post
+until the file is edited. The fix is to lower the value to the limit.
+
+`internal/logging` keeps its clamp at the conversion, deliberately, as defence in depth rather
+than as the guard. `logging.Options` can be built by a caller that never went through
+`config.Load`, and for that caller the clamp is still what makes an absurd value mean
+"effectively never". The two agree on the threshold by construction — both divide
+`math.MaxInt64` by the same unit — so a value that passes validation is never clamped.
 
 **`rotate_size_mib` bounds the file between records, not the size of a record** (decision on #132).
 Rotation is evaluated *before* each write, so a single record larger than the threshold always

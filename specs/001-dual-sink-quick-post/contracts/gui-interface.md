@@ -70,7 +70,13 @@ are never shown in the window — they belong in the log.
 
 When settings are invalid or every sink is disabled and the windowed path was launched, a minimal
 error window shows the actionable message and the **resolved settings path**, offers no message
-field, and exits `1` when dismissed.
+field, and exits `1` when dismissed. Quit, the close box, Esc and Cmd+Q dismiss it; Esc is delivered
+through the focused Quit button, because the driver hands a key to the focused widget before the
+canvas (the same reason as the posting window's R-003).
+
+When no settings path can be resolved at all (`$HOME` and `XDG_CONFIG_HOME` both unset), no window
+is opened: the error goes to stderr and the process exits `1`. Constructing the application would
+write Fyne's storage relative to the working directory, and there is no path for the window to show (decision DEC-H2, 2026-09-24).
 
 ## Durability (spec Edge Cases)
 

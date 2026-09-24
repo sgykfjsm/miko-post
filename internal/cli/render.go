@@ -54,13 +54,13 @@ const (
 
 	logPathPrefix = "See log for details: "
 
-	// Printed when the post ran with no destinations at all.
+	// Printed for a report with no results at all.
 	//
-	// Deliberately a statement of fact and not FR-018's startup error: that
-	// requirement wants an actionable message *before* a post is attempted, and
-	// it is T081's, in batch 11. Printing nothing at all was the alternative and
-	// is worse — a bare "See log for details" under an empty report reads as a
-	// crash.
+	// Run no longer produces one: FR-018's startup error (T081) refuses settings
+	// with no destination before a post is attempted, in app.LoadSettings. The
+	// line stays because Render takes any Report and an empty one is still
+	// representable, and printing nothing is worse than stating it — a bare
+	// "See log for details" under an empty report reads as a crash.
 	noDestinationsLine = "No destination is enabled, so nothing was posted."
 )
 

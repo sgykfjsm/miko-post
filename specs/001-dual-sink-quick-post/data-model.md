@@ -141,7 +141,10 @@ FR-018's **all-sinks-disabled check** is deliberately *not* part of `config.Load
 every sink disabled is a valid document, so `Load` accepts it; the check is a startup rule each
 front door applies before any post is attempted — T081 for the CLI, spanning
 `internal/config/validate.go` and `internal/cli/cli.go`, and T082 for the GUI, whose startup-error
-window is where it surfaces (FR-030). T083 covers only routing a load or validation failure to the
+window is where it surfaces (FR-030). As built, the rule is `Settings.RequireDestination` in
+`internal/config/validate.go`, returning `config.ErrNoDestinationEnabled`, and both front doors
+reach it through one sequence, `app.LoadSettings` (resolve, `Load`, then this check), so the two
+cannot apply it differently. T083 covers only routing a load or validation failure to the
 front door that was used, not applying this rule. Sink construction (T036) and main wiring (T039)
 therefore cannot assume `Load` already enforced it.
 

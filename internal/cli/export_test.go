@@ -25,3 +25,7 @@ var DisplayName = displayName
 // branch nobody has ever run, deciding whether the user is told that their
 // diagnostics are broken.
 var WarningFor = warningFor
+
+// RunWith is Run with the posting service's constructor supplied, for the one
+// test that needs two destinations to succeed together (issue #119). See run.
+var RunWith = run
