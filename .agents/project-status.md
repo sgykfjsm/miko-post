@@ -85,10 +85,20 @@ DEC-G1, DEC-G1a and DEC-G2 through DEC-G8. The load-bearing ones:
 - **#127, #128, #129, #130** — Batch 10a's four deferred items, all still open.
 - **#94** — `git_commit` reads `unknown` on tagged installs; needed before tagging v0.1.0.
 
-## Overdue housekeeping
-A closure sweep is still owed on issues merged in earlier batches: **#60–#65** (T059–T064, Batch 9 /
-PR #125) and review follow-ups **#115**, **#118**, **#119**. Same cause each time — no closing
-keyword and no owner for the post-merge step. 50 issues open overall.
+## Housekeeping — swept 2026-09-24
+**#60–#65 closed** (T059–T064, delivered in Batch 9 / PR #125). Verified before closing: each task
+is `[x]`, #125 reads back as merged, and the implementation is present.
+
+**#115, #118 and #119 deliberately kept open** — they are real unfinished work, not stale
+bookkeeping, and each now carries a comment recording the check so the next sweep does not
+bulk-close them. #115's credential-free-error invariant is still unenforced, #118's `Error()` scan
+is still neither pinned nor documented as intentionally unpinned, and #119's
+two-destinations-both-succeeding path is still unreachable from argv.
+
+**#119 is worth deciding before Batch 11**, since US6 is the CLI front door work that will be in
+that seam anyway.
+
+44 issues open overall.
 
 ## Touched files
 This reconciliation touches `.agents/state.yaml`, `.agents/project-status.md`,

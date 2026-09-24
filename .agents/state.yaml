@@ -1604,6 +1604,29 @@ next_best_action: >-
   disabled currently reports after the fact and exits 1 rather than refusing beforehand - and
   contracts/cli-interface.md is the contract T080 must match exactly.
 
+issue_sweeps:
+  - swept_at: 2026-09-24
+    scope: "issues merged in earlier batches but never closed, plus the three standing review follow-ups"
+    closed: [60, 61, 62, 63, 64, 65]
+    closed_rationale: >-
+      T059-T064, delivered in Batch 9 / PR #125, squash-merged 17073829398aa540b6a8ea56a0155b0e30880dfc.
+      Verified before closing rather than assumed: each task is [x] in tasks.md, #125 reads back as
+      merged, and the implementation is present in internal/sink/telegram. Each carries a comment
+      naming the PR and the merge commit.
+    kept_open: [115, 118, 119]
+    kept_open_rationale: >-
+      NOT bookkeeping - all three are real unfinished work, and closing them would have deleted it.
+      Verified against main d6fcb6b: #115's invariant is still unenforced (internal/post/sink.go's
+      Sink comment says nothing about credential-free errors, and no SanitizeError or shared
+      assertion helper exists); #118's Error() scan in (*Sink).safe still has neither a pinning
+      fixture nor a comment recording it as intentionally unpinned; #119's two-succeeding-sinks path
+      is still unreachable from argv, with telegramThatFailsBeforeTheNetwork still the only
+      Telegram-enabled process fixture. Each now carries a comment recording the check and the date,
+      so the next sweep does not re-derive it or bulk-close them.
+    note: >-
+      #119 is worth deciding BEFORE Batch 11: US6 is the CLI front door's remaining behaviour, so it
+      is the batch that will be working in that seam anyway.
+
 review_followups_filed:
   filed_at: 2026-09-07
   issues:
