@@ -1168,3 +1168,162 @@ func TestValidateBoundsBotTokenLength(t *testing.T) {
 		})
 	}
 }
+
+// TestValidateBoundsRotationFromAbove is issue #130: the two rotation keys were
+// bounded from below only, so a value past the wrap point loaded cleanly and
+// relied on internal/logging's clamp to mean anything sensible. The boundary
+// pair fails a bound written with the wrong comparison; the rows past it are
+// the values that wrap negative, which is "rotate on every write".
+func TestValidateBoundsRotationFromAbove(t *testing.T) {
+	t.Parallel()
+
+	keys := []struct {
+		key   string
+		limit int64
+		set   func(*config.Settings, int)
+	}{
+		{
+			key:   "logging.rotate_size_mib",
+			limit: config.MaxRotateSizeMiB,
+			set:   func(s *config.Settings, v int) { s.Logging.RotateSizeMiB = v },
+		},
+		{
+			key:   "logging.rotate_after_days",
+			limit: config.MaxRotateAfterDays,
+			set:   func(s *config.Settings, v int) { s.Logging.RotateAfterDays = v },
+		},
+	}
+
+	for _, key := range keys {
+		cases := []struct {
+			name     string
+			value    int
+			accepted bool
+		}{
+			{name: "one", value: 1, accepted: true},
+			{name: "zero", value: 0},
+			{name: "negative", value: -1},
+			{name: "the largest that converts", value: int(key.limit), accepted: true},
+			{name: "one past the largest", value: int(key.limit) + 1},
+			{name: "the integer limit", value: int(^uint(0) >> 1)},
+		}
+
+		for _, tc := range cases {
+			t.Run(key.key+"/"+tc.name, func(t *testing.T) {
+				t.Parallel()
+
+				settings := enabledSettings(t)
+				key.set(&settings, tc.value)
+
+				err := settings.Validate()
+
+				if tc.accepted {
+					if err != nil {
+						t.Fatalf("Validate() rejected %s = %d: %v", key.key, tc.value, err)
+					}
+
+					return
+				}
+
+				if err == nil {
+					t.Fatalf("Validate() accepted %s = %d", key.key, tc.value)
+				}
+
+				if !strings.Contains(err.Error(), key.key) {
+					t.Errorf("the problem does not name %s: %v", key.key, err)
+				}
+
+				for _, other := range keys {
+					if other.key != key.key && strings.Contains(err.Error(), other.key) {
+						t.Errorf("the problem for %s also names %s: %v", key.key, other.key, err)
+					}
+				}
+
+				// Above the bound, the message says what the value would have
+				// done; below it, it must not, or the user is told about an
+				// overflow for typing zero.
+				overflow := strings.Contains(err.Error(), "overflows")
+				if above := int64(tc.value) > key.limit; overflow != above {
+					t.Errorf("%s = %d: overflow explanation present = %v, want %v: %v",
+						key.key, tc.value, overflow, above, err)
+				}
+			})
+		}
+	}
+}
+
+// TestTheRotationBoundsAreTheOnesThatCannotOverflow pins what the two bounds
+// are: the largest accepted value converts to a positive threshold and one more
+// wraps, in the units internal/logging converts them with. The values go
+// through variables so the overflow is the runtime's rather than a compile
+// error; see TestTheTimeoutBoundIsTheOneThatCannotOverflow.
+func TestTheRotationBoundsAreTheOnesThatCannotOverflow(t *testing.T) {
+	t.Parallel()
+
+	const bytesPerMiB = int64(1 << 20)
+
+	day := int64(24 * time.Hour)
+
+	for _, tc := range []struct {
+		name  string
+		bound int64
+		unit  int64
+	}{
+		{name: "rotate_size_mib", bound: config.MaxRotateSizeMiB, unit: bytesPerMiB},
+		{name: "rotate_after_days", bound: config.MaxRotateAfterDays, unit: day},
+	} {
+		bound, unit := tc.bound, tc.unit
+
+		if at := bound * unit; at <= 0 || at/unit != bound {
+			t.Errorf("%s: the bound %d converts to %d, which is not the threshold it reads as",
+				tc.name, bound, at)
+		}
+
+		beyond := bound + 1
+		if past := beyond * unit; past > 0 {
+			t.Errorf("%s: one past the bound converts to %d, which is still positive — "+
+				"the bound is lower than it needs to be", tc.name, past)
+		}
+	}
+}
+
+// TestRequireDestination is FR-018's rule at the settings layer (T077, T081):
+// refused only when both destinations are disabled, with the actionable
+// message, and kept out of Validate, which must go on calling the same
+// document valid.
+func TestRequireDestination(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		obsidian, telegram bool
+		refused            bool
+	}{
+		{obsidian: true, telegram: true},
+		{obsidian: true},
+		{telegram: true},
+		{refused: true},
+	} {
+		settings := enabledSettings(t)
+		settings.Sink.Obsidian.Enabled = tc.obsidian
+		settings.Sink.Telegram.Enabled = tc.telegram
+
+		if err := settings.Validate(); err != nil {
+			t.Fatalf("obsidian=%v telegram=%v: Validate() = %v, want the document valid",
+				tc.obsidian, tc.telegram, err)
+		}
+
+		err := settings.RequireDestination()
+
+		if got := errors.Is(err, config.ErrNoDestinationEnabled); got != tc.refused {
+			t.Errorf("obsidian=%v telegram=%v: RequireDestination() = %v, refused = %v, want %v",
+				tc.obsidian, tc.telegram, err, got, tc.refused)
+		}
+	}
+
+	// Actionable: the message names both keys that would fix it.
+	for _, key := range []string{"[sink.obsidian]", "[sink.telegram]", "enabled = true"} {
+		if !strings.Contains(config.ErrNoDestinationEnabled.Error(), key) {
+			t.Errorf("the startup error does not name %q: %v", key, config.ErrNoDestinationEnabled)
+		}
+	}
+}

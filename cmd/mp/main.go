@@ -37,7 +37,7 @@ func main() {
 }
 
 // dispatch parses the command line and hands it to the front door it asked for
-// (FR-001 – FR-003).
+// (FR-001 – FR-003, FR-007).
 //
 // Split out of main so that everything except the exit call itself is an
 // ordinary function: main's body is one statement, and the status it exits with
@@ -53,9 +53,18 @@ func dispatch(argv []string, out, errOut io.Writer) int {
 		return cli.ExitFailure
 	}
 
-	if invocation.Mode == cli.ModeWindow {
-		return gui.Run(errOut)
-	}
+	switch invocation.Mode {
+	case cli.ModeHelp:
+		return cli.Help(out)
 
-	return cli.Run(invocation, out, errOut)
+	case cli.ModeWindow:
+		// Nothing from the invocation is passed on, and nothing can be:
+		// gui.Run takes no settings path, so the -c/--config value cannot
+		// reach the window constructor (FR-005, constitution principle V,
+		// T078). The window always loads the default resolved settings.
+		return gui.Run(errOut)
+
+	default:
+		return cli.Run(invocation, out, errOut)
+	}
 }

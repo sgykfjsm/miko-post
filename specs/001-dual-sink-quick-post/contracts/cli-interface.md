@@ -106,16 +106,20 @@ the log path are required.
 A diagnostics write failure never changes the exit status (FR-076), and adds **exactly one**
 warning to the user-visible output naming the log path and the reason.
 
-## Not yet implemented
+## Verification boundary
 
-Recorded here so a reader can tell a gap from a defect. Everything above is normative; these rows
-say where the binary currently falls short of it.
+Everything above is implemented. One case is verified one layer below the process, and the
+reason is recorded so the gap reads as a decision rather than an oversight (issue #119, option B):
 
-| Row | Owed by | Current behaviour |
-|---|---|---|
-| `mp` (no arguments) opens the window | T041 – T051, batch 7 | Prints that the windowed interface is unimplemented, exits `1` |
-| `mp -c ./c.toml` errors without opening the window (FR-006) | T079, batch 11 | Opens the window path on the **default** settings; the override is dropped at the parse boundary, so FR-005 holds and FR-006 does not |
-| `mp --help` prints help and exits `0` (FR-007) | T080, batch 11 | Prints that help is unimplemented, exits `1` |
-| All-destinations-disabled startup error (FR-018) | T081, batch 11 | Reports `No destination is enabled, so nothing was posted.` after the fact and exits `1`, rather than refusing before a post is attempted with an actionable message |
-| Diagnostic events in the log | T040, batch 6c-2 | The log file is created and left empty; the path it prints on failure is real |
+**Two destinations both succeeding** is driven from a parsed command line through `cli.Run`'s
+whole sequence — settings load, `app.Sinks`, the orchestrator, the note on disk, the report and
+the exit status — with only the chat destination's network call substituted, in
+`internal/cli/startup_test.go`. It is not reachable through a built binary, because the chat
+destination's Bot API origin is unexported and no settings key may redirect it (FR-057,
+constitution principle V). A regression dropping the second destination on the success path is
+therefore caught in `internal/cli`, not only by `cmd/mp`'s partial-failure test.
 
+**The startup-error window** (FR-030) is not exercised by a process test either: it waits to be
+dismissed, so a test would hang, and on a developer's machine would open a real window. Its
+content and every dismissal are tested headlessly in `internal/gui`, and the refusal that leads to
+it is tested in `internal/app`.

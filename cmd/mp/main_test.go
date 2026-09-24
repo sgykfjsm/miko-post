@@ -6,12 +6,16 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/sgykfjsm/miko-post/internal/gui"
 )
 
 // Why this file builds and runs the real binary.
@@ -464,23 +468,76 @@ func TestTheBinaryResolvesTheDefaultSettingsAndLogPaths(t *testing.T) {
 	}
 }
 
-// Startup settings rejection precedes construction of any native window. The
-// interactive route is exercised by the headless GUI suite and desktop checks.
-func TestWindowStartupRejectsInvalidDefaultSettings(t *testing.T) {
-	w := newWorld(t, telegramDisabled)
-	path := filepath.Join(w.home, "config", "miko-post", "config.toml")
-	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
-		t.Fatal(err)
+// The window's startup-settings rejection is not exercised here, and cannot be
+// without a display: since FR-030 (T082) it opens the startup-error window and
+// waits for it to be dismissed, so a process test would hang — and on a
+// developer's Mac would put a real window on screen. It is covered in
+// internal/gui (the error window's content and every dismissal) and
+// internal/app (LoadSettings, which refuses the settings before any window or
+// sink exists). An earlier test here asserted the pre-FR-030 behaviour, a
+// stderr message and exit 1 with no window, and was removed with it.
+
+// TestTheBinaryRefusesAConfigWithoutAMessage is FR-006 end to end: the required
+// text, exit 1, and no window — which in a process test is observable as the
+// process exiting at all, since a window would wait to be dismissed.
+func TestTheBinaryRefusesAConfigWithoutAMessage(t *testing.T) {
+	for _, argv := range [][]string{{"-c", "./c.toml"}, {"--config", "./c.toml"}} {
+		w := newWorld(t, telegramDisabled)
+
+		got := run(t, w.home, argv...)
+
+		if got.status != 1 {
+			t.Errorf("%q: status = %d, want 1\nstderr: %s", argv, got.status, got.stderr)
+		}
+
+		if !strings.Contains(got.stderr, "--config is only available when posting from CLI") {
+			t.Errorf("%q: stderr = %q, want FR-006's required text", argv, got.stderr)
+		}
+
+		if got.stdout != "" {
+			t.Errorf("%q: printed to stdout: %q", argv, got.stdout)
+		}
+
+		if names := w.notes(t); len(names) != 0 {
+			t.Errorf("%q: posted %v", argv, names)
+		}
 	}
-	if err := os.WriteFile(path, []byte("unknown = true\n"), 0600); err != nil {
-		t.Fatal(err)
+}
+
+// TestTheWindowFrontDoorTakesNoSettingsPath is T078's structural guarantee,
+// pinned: gui.Run takes only the error stream, so no -c/--config value can reach
+// the window constructor (FR-005, constitution principle V). A parameter added
+// for "just the path" would make FR-005 a rule each caller had to keep instead
+// of a fact about the signature, and this is the test that notices.
+func TestTheWindowFrontDoorTakesNoSettingsPath(t *testing.T) {
+	run := reflect.TypeOf(gui.Run)
+
+	if run.NumIn() != 1 || run.In(0) != reflect.TypeFor[io.Writer]() {
+		t.Errorf("gui.Run has signature %s; it must take only an io.Writer, so a settings "+
+			"override has no way in", run)
 	}
-	got := run(t, w.home)
-	if got.status != 1 || !strings.Contains(got.stderr, "unknown") {
-		t.Fatalf("invalid settings: %+v", got)
-	}
-	if names := w.notes(t); len(names) != 0 {
-		t.Fatalf("startup contacted sink: %v", names)
+}
+
+// TestTheBinaryPrintsHelp is FR-007 end to end: exit 0, help on stdout, and the
+// default path as resolved in the process's own environment.
+func TestTheBinaryPrintsHelp(t *testing.T) {
+	for _, flag := range []string{"-h", "--help"} {
+		w := newWorld(t, telegramDisabled)
+
+		got := run(t, w.home, flag)
+
+		if got.status != 0 {
+			t.Errorf("%s: status = %d, want 0\nstderr: %s", flag, got.status, got.stderr)
+		}
+
+		want := "Default: " + filepath.Join(w.home, "config", "miko-post", "config.toml") + "\n"
+		if !strings.Contains(got.stdout, want) || !strings.HasPrefix(got.stdout, "Usage:\n") {
+			t.Errorf("%s: stdout = %q, want help naming %q", flag, got.stdout, want)
+		}
+
+		if got.stderr != "" {
+			t.Errorf("%s: wrote to stderr: %q", flag, got.stderr)
+		}
 	}
 }
 
@@ -493,7 +550,7 @@ func TestTheBinaryRejectsACommandLineItCannotParse(t *testing.T) {
 		want string
 	}{
 		{name: "an unknown flag", argv: []string{"-x", "hello"}, want: "not defined"},
-		{name: "help, which is not implemented yet", argv: []string{"--help"}, want: "not implemented"},
+		{name: "an empty config value", argv: []string{"-c", "", "hello"}, want: "needs a path"},
 	}
 
 	for _, tt := range tests {

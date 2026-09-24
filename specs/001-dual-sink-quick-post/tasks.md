@@ -315,21 +315,26 @@ Batch 8; the GUI rendering/status coverage is headless and the HTTP server is lo
 
 ### Tests for User Story 6
 
-- [ ] T075 [P] [US6] Write a help-output test asserting the **resolved** default path appears rather than an unexpanded `$XDG_CONFIG_HOME` expression, in `internal/cli/help_test.go` (FR-007)
-- [ ] T076 [P] [US6] Write override tests asserting `-c` applies to that CLI post only, that `-c` without a message errors without opening the window, and that a subsequently launched window uses the default path, in `internal/cli/cli_test.go` (FR-005, FR-006)
-- [ ] T077 [P] [US6] Write tests for the all-sinks-disabled startup error and for unreadable and invalid settings, asserting no sink is started with partially valid settings, in `internal/config/validate_test.go` (FR-018, FR-058)
+- [x] T075 [P] [US6] Write a help-output test asserting the **resolved** default path appears rather than an unexpanded `$XDG_CONFIG_HOME` expression, in `internal/cli/help_test.go` (FR-007)
+- [x] T076 [P] [US6] Write override tests asserting `-c` applies to that CLI post only, that `-c` without a message errors without opening the window, and that a subsequently launched window uses the default path, in `internal/cli/cli_test.go` (FR-005, FR-006)
+  - **Delivered in Batch 11, across three files, not only `cli_test.go`.** The `-c`-without-a-message rows are in `TestParseRejectsWhatItCannotUnderstand` (plus `-c ""` with a message, now refused with `cli.ErrEmptyConfigPath` rather than silently read as "no override"); "a subsequently launched window uses the default path" is `TestTheWindowReadsOnlyTheDefaultSettings` in `internal/gui/errorwindow_test.go`, since the window's settings step lives there.
+- [x] T077 [P] [US6] Write tests for the all-sinks-disabled startup error and for unreadable and invalid settings, asserting no sink is started with partially valid settings, in `internal/config/validate_test.go` (FR-018, FR-058)
+  - **Delivered in Batch 11.** The settings-layer rule and #130's upper bounds are in `validate_test.go`; "no sink is started with partially valid settings" is asserted through the front door in `internal/cli/startup_test.go` and `internal/app/settings_test.go`, where a sink could actually have been started.
 
 ### Implementation for User Story 6
 
-- [ ] T078 [US6] Enforce that the `-c`/`--config` value reaches only the CLI posting path and is never passed to the window constructor, in `internal/cli/cli.go` and `cmd/mp/main.go` (FR-005, constitution principle V)
-- [ ] T079 [US6] Implement the `--config` without a message error printing `--config is only available when posting from CLI`, not opening the window, and exiting `1`, in `internal/cli/cli.go` (FR-006)
+- [x] T078 [US6] Enforce that the `-c`/`--config` value reaches only the CLI posting path and is never passed to the window constructor, in `internal/cli/cli.go` and `cmd/mp/main.go` (FR-005, constitution principle V)
+- [x] T079 [US6] Implement the `--config` without a message error printing `--config is only available when posting from CLI`, not opening the window, and exiting `1`, in `internal/cli/cli.go` (FR-006)
   - **Batch 6c-1 left this deliberately undone and shaped the parser around it.** `Parse` drops the `--config` value for the window path so FR-005 holds structurally; the consequence is that `mp -c x.toml` opens the window on the default settings instead of erroring. T079 needs to know the flag was *supplied*, which the current `Invocation` cannot say — add a field then rather than now. `TestParseDispatchesToTheWindowOnlyWithNoMessage` pins today's behaviour and must be updated, not deleted.
-- [ ] T080 [US6] Implement help output matching `contracts/cli-interface.md` including the resolved default settings path, in `internal/cli/help.go` (FR-007)
+  - **Delivered in Batch 11.** `Parse` records whether the flag was given (`flag.Visit`) and returns `cli.ErrConfigWithoutMessage` instead of a window request, so no field was needed after all: `ModeWindow` and a settings override never meet.
+- [x] T080 [US6] Implement help output matching `contracts/cli-interface.md` including the resolved default settings path, in `internal/cli/help.go` (FR-007)
   - **`cli.ErrHelpNotAvailable` exists to be deleted by this task.** `-h`/`--help` is recognised today and refused with "help output is not implemented yet", exiting `1` where the contract requires `0`. `TestHelpIsRecognisedRatherThanTreatedAsATypo` and the `--help` row of `TestTheBinaryRejectsACommandLineItCannotParse` both fail once help works, which is intended: they exist so this becomes a deliberate change rather than a discovery.
-- [ ] T081 [US6] Implement the all-sinks-disabled startup error with an actionable message, no post attempt, and a failure exit, in `internal/config/validate.go` and `internal/cli/cli.go` (FR-018)
+  - **Delivered in Batch 11.** `ErrHelpNotAvailable` is deleted; `-h`/`--help` parse to `ModeHelp` and `cmd/mp` prints `cli.Help` to stdout, exit `0`. With no resolvable default, help still prints and says so.
+- [x] T081 [US6] Implement the all-sinks-disabled startup error with an actionable message, no post attempt, and a failure exit, in `internal/config/validate.go` and `internal/cli/cli.go` (FR-018)
   - Today a document with both destinations disabled loads cleanly, posts nowhere, prints `No destination is enabled, so nothing was posted.` and exits `1` — factual, and not FR-018's requirement, which is a refusal *before* a post is attempted carrying a message that names the fix. `cli.Render`'s `noDestinationsLine` and the "no destination was enabled" row of `TestRenderNamesEveryDestination` are what change.
-- [ ] T082 [US6] Implement the minimal startup-error window showing the actionable message and the resolved settings path, offering no message field, exiting `1` when dismissed, in `internal/gui/errorwindow.go` (FR-030) — depends on the `internal/gui` package from US2
-- [ ] T083 [US6] Surface settings load and validation failures through the front door that was used, in `internal/cli/cli.go` and `internal/gui/errorwindow.go` (FR-058)
+  - **Delivered in Batch 11.** `Settings.RequireDestination` / `config.ErrNoDestinationEnabled`, applied by `app.LoadSettings` for both front doors before a logger or sink exists. `noDestinationsLine` stays in `Render` for an empty `Report`, which Run no longer produces.
+- [x] T082 [US6] Implement the minimal startup-error window showing the actionable message and the resolved settings path, offering no message field, exiting `1` when dismissed, in `internal/gui/errorwindow.go` (FR-030) — depends on the `internal/gui` package from US2
+- [x] T083 [US6] Surface settings load and validation failures through the front door that was used, in `internal/cli/cli.go` and `internal/gui/errorwindow.go` (FR-058)
 
 **Checkpoint**: All six user stories are independently functional.
 

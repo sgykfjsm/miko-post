@@ -34,7 +34,33 @@ const errorPrefix = "mp: "
 // rejection to return before anything capable of contacting one has been
 // constructed. Nothing between the guard and the return can reach a sink,
 // because at that point in the function there are none.
+//
+// Settings failures, including FR-018's "no destination is enabled", are
+// reported here on stderr, which is FR-058's "through the front door that was
+// used" for this one (T083). They return before a logger or a sink exists.
 func Run(invocation Invocation, out, errOut io.Writer) int {
+	return run(invocation, out, errOut, app.NewService)
+}
+
+// newServiceFunc builds the posting service from validated settings. It is
+// app.NewService in production.
+type newServiceFunc func(config.Settings, post.Recording) *post.Service
+
+// run is Run with the service constructor supplied (issue #119, option B).
+//
+// The seam exists for exactly one test: two destinations both succeeding,
+// driven from an Invocation through this front door's whole sequence. Neither
+// real destination can be made to succeed here without it — the chat sink's
+// Bot API origin is unexported, deliberately, and no settings key may point it
+// elsewhere (FR-057, constitution principle V) — so without a seam the success
+// path with both sinks enabled is one no test in this package can reach, and a
+// regression dropping the second destination on that path would only be caught
+// by inference from other layers.
+//
+// It replaces the constructor and not the sink list, so the test still goes
+// through app.Sinks and post.New: a truncation in either is a lost result that
+// the test can see.
+func run(invocation Invocation, out, errOut io.Writer, newService newServiceFunc) int {
 	message := post.Message{Original: invocation.Message}
 	if err := message.Validate(); err != nil {
 		fmt.Fprintln(errOut, correctionPrompt(err))
@@ -42,7 +68,7 @@ func Run(invocation Invocation, out, errOut io.Writer) int {
 		return ExitFailure
 	}
 
-	settings, err := load(invocation.ConfigPath)
+	_, settings, err := app.LoadSettings(invocation.ConfigPath)
 	if err != nil {
 		fmt.Fprintln(errOut, errorPrefix+err.Error())
 
@@ -58,7 +84,7 @@ func Run(invocation Invocation, out, errOut io.Writer) int {
 	// this line owns is that the two are connected at all — a service built
 	// without one posts identically and records nothing, and nothing in the
 	// output would say so.
-	outcome := app.NewService(settings, app.NewRecording(logger, settings.Logging)).Post(message)
+	outcome := newService(settings, app.NewRecording(logger, settings.Logging)).Post(message)
 
 	// Closed before the report is assembled, not in a defer. A deferred Close
 	// would run after everything had been printed, so a failure to flush and
@@ -82,28 +108,6 @@ func Run(invocation Invocation, out, errOut io.Writer) int {
 	}
 
 	return ExitFailure
-}
-
-// load resolves the settings path and reads it (FR-005, FR-053).
-//
-// An empty configured path means the default resolved location, and the
-// resolution happens here rather than in Parse because a path is only needed by
-// the code that opens one: making Parse resolve it would put a filesystem-shaped
-// dependency into argument parsing and give the window path a resolved value it
-// must not use.
-func load(configured string) (config.Settings, error) {
-	path := configured
-
-	if path == "" {
-		resolved, err := config.DefaultConfigPath()
-		if err != nil {
-			return config.Settings{}, err
-		}
-
-		path = resolved
-	}
-
-	return config.Load(path)
 }
 
 // correctionPrompt is FR-010's correction prompt: what the user has to change
