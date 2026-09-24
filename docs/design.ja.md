@@ -454,3 +454,22 @@ go install <module-path>/cmd/mp@latest
 ```
 
 `<module-path>` はrepositoryで確定したGo module pathに置き換える。インストールされる実行ファイル名は `mp` とする。プラットフォーム固有のapp bundle、code signing、notarization、個別installerはv0.1の配布要件に含めない。
+
+### リリース手順（#94 の決定）
+
+**リリースはlinker flag経由でversionとcommitを必ず埋め込む。** `make install` がそれを行う:
+
+```bash
+make install          # go install -ldflags "-X …version=… -X …commit=…" ./cmd/mp
+```
+
+module cacheからのbuildは `vcs.*` のbuild settingsを一切記録しないため、`internal/version` にcommitを
+復元する手段が無い。`v0.1.0` をtagすると `@latest` はそのtagに解決されるので、素の
+`go install …@latest` では **事実上すべてのend userで** `git_commit` が `unknown` になる。edge case
+ではない。FR-066はrecordがapplication versionとcommitを持つことを要求し、憲章原則IIIはこのlogを
+失われたmessageを復元するための記録と位置づけているため、主要な配布経路でcommit fieldが死ぬのは
+既定値として受け入れられない。
+
+tagの無いpseudo-version install（`@v0.0.0-…-aaaabbbbcccc`）はpseudo-version自体からcommitを復元でき、
+git tree内のローカル `go build` は `vcs.revision` から復元できる。flagが必要なのは、ユーザーが実際に
+手にするtag付きmodule cache buildに限られる。
