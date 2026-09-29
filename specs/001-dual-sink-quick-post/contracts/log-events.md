@@ -44,7 +44,7 @@ The formatting-fallback path is observable as a distinct sequence (FR-039):
 | `path` | string | note events (FR-066) |
 | `message` | string | see message-capture rule |
 | `message_len` / `message_bytes` | int | rune count / byte count (R-010) |
-| `app_version`, `git_commit` | string | when enabled (FR-066) |
+| `app_version`, `git_commit` | string | when enabled (FR-066). `git_commit` is the 12-character lowercase hex commit prefix on every build path that identifies one, unless an operator stamps a shorter value, which passes through unchanged; or `unknown` for a tagged `go install` (DEC-J2, #96; DEC-I1) |
 | `stack` | string | when a trace is available and useful (FR-071) |
 
 The terminal event reports the aggregate outcome and elapsed time. It does not repeat
@@ -201,7 +201,7 @@ If that name already exists, append `-1`, `-2`, … rather than overwriting (R-0
 ## Example record
 
 ```json
-{"ts":"2026-08-27T11:42:03+09:00","level":"error","event":"telegram_send_failed","source":"cli","message_id":"01K...","sink":"telegram","message":"...","error_type":"timeout","error":"request timed out","duration_ms":10012,"app_version":"0.1.0","git_commit":"abc1234"}
+{"ts":"2026-08-27T11:42:03+09:00","level":"error","event":"telegram_send_failed","source":"cli","message_id":"01K...","sink":"telegram","message":"...","error_type":"timeout","error":"request timed out","duration_ms":10012,"app_version":"0.1.0","git_commit":"abc1234def56"}
 ```
 
 

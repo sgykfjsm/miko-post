@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 )
 
 // redactedMarker stands in for a credential in every render of a Secret.
@@ -100,6 +101,69 @@ func (s Secret) Len() int {
 // would put the plain value in a caller's expression for no reason.
 func (s Secret) IsEmpty() bool {
 	return s.value == nil || *s.value == ""
+}
+
+// Trimmed returns the credential without leading or trailing whitespace
+// (DEC-I2, #137).
+//
+// It is a method rather than strings.TrimSpace(s.Reveal()) at the call site for
+// the same reason as Len: trimming is a question about the credential's shape,
+// and answering it must not add a route to the real value. The receiver is left
+// untouched and a new Secret is returned, because a Secret is immutable after
+// construction and copies alias one string (see the value field). The empty
+// credential trims to itself.
+func (s Secret) Trimmed() Secret {
+	if s.value == nil {
+		return s
+	}
+
+	trimmed := strings.TrimSpace(*s.value)
+	if trimmed == *s.value {
+		return s
+	}
+
+	return NewSecret(trimmed)
+}
+
+// IsPrintableASCII reports whether every byte of the credential is printable
+// ASCII other than space, 0x21 to 0x7E (DEC-J9, #137), without exposing it.
+//
+// It answers a question about the credential's shape, like Len and Trimmed, so
+// validation can ask it without adding a route to the real value.
+//
+// Every genuine Bot API token is printable ASCII, so the rule refuses nothing
+// legitimate, and "printable ASCII" is a generic constraint on a credential
+// rather than a copy of a third party's token format, which DEC-J6 declined to
+// encode. What it refuses is every corruption that survives Trimmed: interior
+// whitespace, controls, format characters such as a zero-width space (U+200B)
+// or a byte-order mark (U+FEFF), graphic runes that render as nothing (U+FE0F,
+// U+3164, U+2800), and visible non-ASCII lookalikes such as smart quotes or an
+// IME's fullwidth colon. A token carrying any of these arms a redaction pattern
+// that the bare token in a message body does not contain, and the review
+// reproduced that leak through each class.
+//
+// It checks bytes rather than runes, so a byte that is not valid UTF-8 is
+// refused as itself rather than depending on how a decoder would replace it.
+// The two readings refuse the same tokens today: every byte from 0x80 up
+// belongs to a rune above U+007F or decodes to U+FFFD, and both are out of
+// range. So a mutant that ranges over runes survives, and no test can pin the
+// choice; bytes are used because they state the rule without that argument.
+//
+// The empty credential reports true: it contains no byte outside the range, and
+// whether absence is allowed is the Enabled question validation asks
+// separately.
+func (s Secret) IsPrintableASCII() bool {
+	if s.value == nil {
+		return true
+	}
+
+	for i := 0; i < len(*s.value); i++ {
+		if b := (*s.value)[i]; b < 0x21 || b > 0x7e {
+			return false
+		}
+	}
+
+	return true
 }
 
 // UnmarshalText lets go-toml decode a bare string key into the type.

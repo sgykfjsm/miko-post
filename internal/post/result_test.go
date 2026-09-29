@@ -258,12 +258,19 @@ func TestSinkResultExposesNoAccessorThatEmitsTheDiagnosticError(t *testing.T) {
 				}
 			}
 
-			// Not a failure: a method taking arguments has no safe value to
-			// pass, and Format is the expected entry. Reported rather than
-			// dropped, so a new uninvokable method is visible to whoever reads
-			// the output instead of vanishing from the enumeration.
-			if len(found.skipped) > 0 {
-				t.Logf("not invoked, takes arguments: %v", found.skipped)
+			// A method taking arguments has no safe value to pass, so it cannot
+			// be invoked here. Format is the one expected entry, and it is
+			// asserted by its own tests. Any other is a failure rather than a
+			// log line (#103): t.Logf never reaches make check's output, so a
+			// new render path such as encoding.TextAppender would otherwise
+			// leave the enumeration silently, as an unproven claim.
+			// Names arrive qualified for both method sets, as post.SinkResult.Format
+			// and *post.SinkResult.Format, so the method is the last element.
+			for _, name := range found.skipped {
+				if method := name[strings.LastIndex(name, ".")+1:]; method != "Format" {
+					t.Errorf("%s takes arguments and cannot be evaluated here; "+
+						"prove it keeps Err out, then list it as expected", name)
+				}
 			}
 
 			for _, tt := range found.renders {

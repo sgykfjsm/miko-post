@@ -27,6 +27,15 @@ type Sink interface {
 	// every other sink (FR-015). Send must honour it and must not assume
 	// cancellation says anything about a sibling: no sink is ever cancelled
 	// because another failed (constitution principle I).
+	//
+	// The returned error must not carry a credential, in its message or in any
+	// field fmt can reach (DEC-J4, #115). It flows unredacted into
+	// SinkResult.Err and from there to the diagnostic logger, and net/http puts
+	// the full request URL into a *url.Error, which is where the Telegram
+	// token lives. So a sink holding a credential sanitizes at its own Send
+	// boundary, as internal/sink/telegram does. internal/post cannot check this
+	// for an arbitrary error; TestSecretLeakGate is the end-to-end net, not the
+	// guarantee.
 	Send(ctx context.Context, message Message) error
 }
 

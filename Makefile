@@ -51,7 +51,11 @@ export COMMIT
 # reports when it changed something rather than rewriting silently. An explicitly
 # supplied VERSION or COMMIT is never rewritten: it is validated and the build
 # fails, because silently shipping a release labelled differently from what the
-# operator asked for is worse than stopping.
+# operator asked for is worse than stopping. "Never rewritten" is about the
+# stamp: `make stamp` shows the COMMIT as given. The binary's records are a
+# separate step: under DEC-J2 (#96) internal/version reports a lowercase hex
+# COMMIT longer than 12 characters as its 12-character prefix, so a full SHA
+# stamped here appears in git_commit cut to 12. Anything else passes through.
 #
 # One caveat on that guarantee: make expands $(...) in a variable given on its
 # own command line before the recipe ever runs, so `make VERSION='1.0$(x)'`
@@ -85,7 +89,7 @@ if [ "$$version_explicit" = false ]; then \
   [ -n "$$version" ] || version=dev; \
 fi; \
 if [ "$$commit_explicit" = false ]; then \
-  commit=$$(git rev-parse --short HEAD 2>/dev/null || echo unknown); \
+  commit=$$(git rev-parse --short=12 HEAD 2>/dev/null || echo unknown); \
   filtered=$$(printf '%s' "$$commit" | tr -cd '$(STAMP_CHARS)'); \
   if [ "$$filtered" != "$$commit" ]; then \
     printf 'warning: commit stamp filtered from %s to %s\n' "$$commit" "$$filtered" >&2; \

@@ -323,3 +323,126 @@ func TestAStartupFailureWithNoPathOpensNoWindow(t *testing.T) {
 		t.Error("the application was constructed with no settings path to show")
 	}
 }
+
+// TestNoHomeDirectoryOpensNoWindow is DEC-J1 (#136) and DEC-J7: with no home
+// directory, or one that is not an absolute path, neither window opens, and
+// the application is never constructed, even though XDG_CONFIG_HOME resolves a
+// settings path.
+//
+// Fyne derives its storage from the home directory alone, so constructing the
+// application here is what would write Library/ and fyne/ into the working
+// directory, or under a relative HOME inside it. The constructor stops the test
+// the moment it is called, so a regression fails here instead of opening a
+// window. Both settings outcomes are driven because the issue was that DEC-H2
+// guarded one of the two windows.
+func TestNoHomeDirectoryOpensNoWindow(t *testing.T) {
+	documents := map[string]string{
+		"settings load, so the posting window would open": "[sink.telegram]\nenabled = false\n\n" +
+			"[sink.obsidian]\nenabled = true\ndaily_note_dir = \"/tmp/miko-post-gui-test-vault\"\n",
+		"settings fail, so the startup-error window would open": "[sink.telegram]\nenabled = false\n\n" +
+			"[sink.obsidian]\nenabled = false\n",
+	}
+
+	homes := []struct {
+		name    string
+		homeDir func() (string, error)
+		// want is what the message must say for this home: the reason, and
+		// the way out.
+		want []string
+		// notWant is text the message must not carry.
+		notWant []string
+	}{
+		{
+			name:    "no home directory",
+			homeDir: func() (string, error) { return "", errors.New("$HOME is not defined") },
+			want:    []string{"home directory", "$HOME is not defined", "Set HOME"},
+		},
+		{
+			// HOME=tmp: os.UserHomeDir returns it without complaint, so only
+			// the absolute-path check stands between it and the constructor.
+			name:    "a relative home directory",
+			homeDir: func() (string, error) { return "tmp", nil },
+			want:    []string{"home directory is not an absolute path", "Set HOME to an absolute path"},
+			// The value is not echoed back; see runWith.
+			notWant: []string{`"tmp"`, "tmp/"},
+		},
+	}
+
+	for _, home := range homes {
+		for name, document := range documents {
+			t.Run(home.name+"/"+name, func(t *testing.T) {
+				withSettingsAt(t, document)
+
+				var errOut strings.Builder
+
+				status := runWith(&errOut, home.homeDir, func() fyne.App {
+					t.Fatal("the application was constructed without an absolute home directory")
+
+					return nil
+				})
+
+				if status != 1 {
+					t.Errorf("status = %d, want 1", status)
+				}
+
+				for _, want := range home.want {
+					if !strings.Contains(errOut.String(), want) {
+						t.Errorf("errOut does not contain %q:\n%s", want, errOut.String())
+					}
+				}
+
+				for _, notWant := range home.notWant {
+					if strings.Contains(errOut.String(), notWant) {
+						t.Errorf("errOut contains %q:\n%s", notWant, errOut.String())
+					}
+				}
+			})
+		}
+	}
+
+	// The control: the same failing settings with a home directory do reach
+	// the startup-error window, so what stopped the runs above is the home
+	// check and nothing earlier.
+	t.Run("control: with a home directory the startup-error window opens", func(t *testing.T) {
+		withSettingsAt(t, documents["settings fail, so the startup-error window would open"])
+
+		base := test.NewApp()
+		t.Cleanup(base.Quit)
+
+		a := &recordingApp{App: base, t: t}
+
+		var errOut strings.Builder
+
+		status := runWith(&errOut, func() (string, error) { return "/Users/someone", nil }, func() fyne.App { return a })
+
+		if status != 1 {
+			t.Errorf("status = %d, want 1", status)
+		}
+
+		if !a.ran || len(a.windows) != 1 {
+			t.Errorf("ran = %t with %d windows, want the error window alone", a.ran, len(a.windows))
+		}
+	})
+}
+
+// withSettingsAt points XDG_CONFIG_HOME at a fresh directory holding document
+// as the default settings file, so the window front door resolves and loads it.
+func withSettingsAt(t *testing.T, document string) {
+	t.Helper()
+
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "miko-post"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(filepath.Join(root, "miko-post", "config.toml"), []byte(document), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("XDG_CONFIG_HOME", root)
+	t.Setenv("MIKO_POST_TELEGRAM_BOT_TOKEN", "")
+
+	if err := os.Unsetenv("MIKO_POST_TELEGRAM_BOT_TOKEN"); err != nil {
+		t.Fatal(err)
+	}
+}

@@ -42,6 +42,15 @@ import (
 // can still reach it deliberately as r.Err — the guards stop accidental
 // renders, not intentional ones.
 //
+// The five are the mechanisms this program uses, not every one Go has
+// (#103). encoding/xml consults none of them and walks exported fields
+// directly, so xml.Marshal of a result would reach Err. Nothing in this
+// repository imports encoding/xml, and adding it for a SinkResult means adding
+// a sixth guard (a redacting MarshalText, which encoding/xml honours) first.
+// The method-enumeration test in result_test.go fails on any method other than
+// Format that it cannot evaluate, so a new render path cannot join the type
+// unnoticed.
+//
 // Hold a SinkResult as a named field, never embedded. The guards are promoted
 // along with the fields, so an embedding struct would render and marshal as a
 // bare SinkResult and silently lose every field of its own.

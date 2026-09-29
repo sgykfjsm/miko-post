@@ -389,7 +389,7 @@ request_completed | request_completed_with_error
 panic、予期しないエラー、traceが有用な失敗ではstack traceを記録する。通常の運用エラーに意味のないtraceを作る必要はない。収集の有無は `stack_trace` 設定に従う。
 
 ```json
-{"ts":"2026-08-27T11:42:03+09:00","level":"error","event":"telegram_send_failed","source":"cli","message_id":"01K...","sink":"telegram","message":"今日も美琴が可愛い♡","error_type":"timeout","error":"request timed out","duration_ms":10012,"app_version":"0.1.0","git_commit":"abc1234"}
+{"ts":"2026-08-27T11:42:03+09:00","level":"error","event":"telegram_send_failed","source":"cli","message_id":"01K...","sink":"telegram","message":"今日も美琴が可愛い♡","error_type":"timeout","error":"request timed out","duration_ms":10012,"app_version":"0.1.0","git_commit":"abc1234def56"}
 ```
 
 ### 11.3 ローテーション

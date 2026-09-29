@@ -99,6 +99,55 @@ func TestResolve(t *testing.T) {
 	}
 }
 
+// TestCommitHasOneShapeOnEveryPath is DEC-J2 (#96): every build path that
+// identifies the commit reports the same 12-character prefix, so records from
+// a make build, a local go build and a go install of one commit agree.
+func TestCommitHasOneShapeOnEveryPath(t *testing.T) {
+	const (
+		full   = "50c860568dd2b4f1e9a7c3d2e1f0a9b8c7d6e5f4"
+		prefix = "50c860568dd2"
+	)
+
+	paths := []struct {
+		name          string
+		stamp         string
+		readBuildInfo func() (*debug.BuildInfo, bool)
+	}{
+		{
+			name:          "local go build, full vcs.revision",
+			readBuildInfo: buildInfo("(devel)", debug.BuildSetting{Key: "vcs.revision", Value: full}),
+		},
+		{name: "make build, git rev-parse --short=12", stamp: prefix, readBuildInfo: noBuildInfo},
+		{
+			// git lengthens a --short prefix when twelve characters are
+			// ambiguous in the repository; the shape must not follow it.
+			name: "make build in a repository where twelve is ambiguous", stamp: full[:14], readBuildInfo: noBuildInfo,
+		},
+		{name: "linker stamp of the full SHA", stamp: full, readBuildInfo: noBuildInfo},
+		{
+			name:          "untagged go install, pseudo-version",
+			readBuildInfo: buildInfo("v0.0.0-20260901063448-" + prefix),
+		},
+	}
+
+	for _, path := range paths {
+		t.Run(path.name, func(t *testing.T) {
+			if got := resolve("", path.stamp, path.readBuildInfo).commit; got != prefix {
+				t.Errorf("commit = %q, want %q", got, prefix)
+			}
+		})
+	}
+
+	// Values that are not a longer hex commit pass through: a short stamp
+	// cannot be lengthened without the repository, and Unknown or a non-hex
+	// operator COMMIT is not a prefix to cut.
+	for _, kept := range []string{"abc1234", Unknown, "release-build-42-not-hex"} {
+		if got := resolve("", kept, noBuildInfo).commit; got != kept {
+			t.Errorf("commit %q became %q; it should pass through unchanged", kept, got)
+		}
+	}
+}
+
 // Version and Commit must never return an empty string: a diagnostic record
 // with an empty version field is indistinguishable from a missing field.
 func TestExportedAccessorsAreNeverEmpty(t *testing.T) {

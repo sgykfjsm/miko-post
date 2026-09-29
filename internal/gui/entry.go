@@ -43,8 +43,15 @@ func (e *messageEntry) TypedKey(k *fyne.KeyEvent) {
 	e.Entry.TypedKey(k)
 }
 
-// A button can acquire keyboard focus after a click or Tab. Esc must still
-// dismiss the window there rather than disappearing into Button.TypedKey.
+// commandButton makes Esc dismiss the window even when a button holds keyboard
+// focus, rather than disappearing into Button.TypedKey.
+//
+// That state is reachable in the startup-error window, which focuses its Quit
+// button itself. In the posting window it is not reachable through user input
+// (Batch 12, T091 window checks): the multi-line entry consumes Tab, and
+// Fyne's Button.Tapped calls Focus(nil), so a click leaves nothing focused.
+// There it is a defensive path, kept so that a layout change which does let a
+// button take focus cannot bring back the dead Esc Batch 11 found.
 type commandButton struct {
 	widget.Button
 	cancel func()

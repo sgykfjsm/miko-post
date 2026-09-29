@@ -8,7 +8,6 @@ import (
 	"io"
 	"io/fs"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -280,15 +279,23 @@ func (f leakFixture) assertWrittenFilesClean(t *testing.T, skipNote bool, wantIn
 // the property those unit tests cannot see: that the wired stack, end to end,
 // still holds it.
 //
-// The overlap does not hold for a token with trailing whitespace, which
-// validation accepts today (#137). url.JoinPath escapes the space to %20, so
-// the URL no longer contains the token as configured, and neither safe nor the
-// logger's Redact — both searching for the exact token — recognise it. Only
-// withoutRequestURL keeps the core credential out of the URL / error path, and
-// the whitespace case below pins that single remaining layer end to end. The
-// message-body path has no layer for such a token: a message containing the
-// core credential reaches the log verbatim, because Redact searches for the
-// padded token. That exposure is tracked on #137 and is not covered here.
+// A token saved with surrounding whitespace used to break that overlap (#137).
+// url.JoinPath escaped the space to %20, safe and Redact both searched for the
+// padded value, and a message containing the bare token reached the log
+// verbatim. A zero-width character, a byte-order mark or a smart quote did the
+// same, because it is not whitespace and trimming kept it. Since DEC-I2 and
+// DEC-J9 a token either trims to printable ASCII or cannot load at all, so
+// whitespace, invisible and non-ASCII corruptions no longer reach any layer.
+// That is not every corruption: a mistake inside printable ASCII, such as a
+// token pasted with its straight quotes or a "bot" prefix, still loads, and
+// while it is configured leaves a bare token in any recorded message body
+// unredacted: a failed post's captured body, or every intake record when
+// logging.message_on_error_only is false. This gate does not claim that case; it
+// pins the ones the rule closes. The two whitespace cases below pin the trim
+// end to end: the wire carries the trimmed token and never the escaped one,
+// and a bare token pasted into a message is redacted. The zero-width and
+// smart-quote cases pin the refusal: the run stops at load, no request is
+// made, no file is written, and nothing carries the sentinel.
 func TestSecretLeakGate(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -316,6 +323,13 @@ func TestSecretLeakGate(t *testing.T) {
 		// case whose message is the sentinel: the user typed it, and FR-011
 		// requires the note to carry the original text.
 		skipNote bool
+
+		// wantRefused marks a case whose settings must be refused at load.
+		// The wire witness cannot apply, because no request may be made, so
+		// it is replaced by stricter ones: no request at all, the refusal
+		// message on stderr and from LoadSettings, and no file written. A
+		// refused case has no log to witness, so wantInLog must be empty.
+		wantRefused bool
 	}{
 		{
 			name:       "both destinations succeed",
@@ -334,13 +348,54 @@ func TestSecretLeakGate(t *testing.T) {
 			wantInLog:  []string{"connection refused"},
 		},
 		{
-			name:       "the token has trailing whitespace and the transport fails",
+			name:       "the token is saved with surrounding whitespace and the transport fails",
 			message:    "hello from the leak gate",
-			token:      leakSentinel + " ",
+			token:      " " + leakSentinel + " \n",
 			replies:    []telegramReply{{err: errors.New("connection refused")}},
 			createNote: true,
 			wantExit:   cli.ExitFailure,
 			wantInLog:  []string{"connection refused"},
+		},
+		{
+			// The path #137 found: with a padded token, Redact searched for the
+			// padded value and the bare token in a message body went to the log
+			// verbatim. Trimming at load (DEC-I2) is what makes this pass.
+			name:       "the token is saved with whitespace and the message contains the bare token",
+			message:    "pasted by mistake: " + leakSentinel,
+			token:      leakSentinel + " ",
+			replies:    []telegramReply{{status: http.StatusOK, body: `{"ok":true,"result":{"message_id":10}}`}},
+			createNote: true,
+			wantExit:   cli.ExitSuccess,
+			wantInLog:  []string{"[redacted]"},
+			skipNote:   true,
+		},
+		{
+			// A zero-width space is not whitespace, so trimming keeps it
+			// (DEC-J9 refuses it). Before the refusal, the redaction pattern was the token with
+			// the U+200B attached and the bare token in this message reached
+			// the log verbatim, the leak the Batch 13 review reproduced. Now
+			// the run must stop at load, before anything is logged or sent.
+			name:        "the token carries a zero-width character",
+			message:     "pasted by mistake: " + leakSentinel,
+			token:       leakSentinel + "\u200b",
+			replies:     []telegramReply{{status: http.StatusOK, body: `{"ok":true,"result":{"message_id":11}}`}},
+			createNote:  true,
+			wantExit:    cli.ExitFailure,
+			wantRefused: true,
+		},
+		{
+			// Smart quotes are graphic and visible, so DEC-J6's category rule
+			// let this load, and the cycle-1 review reproduced the leak with
+			// it: the redaction pattern carried the quotes and the bare token
+			// in this message did not. DEC-J9's printable-ASCII rule is what
+			// refuses it.
+			name:        "the token is wrapped in smart quotes",
+			message:     "pasted by mistake: " + leakSentinel,
+			token:       "\u201c" + leakSentinel + "\u201d",
+			replies:     []telegramReply{{status: http.StatusOK, body: `{"ok":true,"result":{"message_id":12}}`}},
+			createNote:  true,
+			wantExit:    cli.ExitFailure,
+			wantRefused: true,
 		},
 		{
 			name:       "the request times out",
@@ -404,7 +459,11 @@ func TestSecretLeakGate(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if len(tc.wantInLog) == 0 {
+			if tc.wantRefused && len(tc.wantInLog) > 0 {
+				t.Fatal("a refused case writes no log, so a log witness could never hold")
+			}
+
+			if !tc.wantRefused && len(tc.wantInLog) == 0 {
 				t.Fatal("every case needs a log witness; an empty wantInLog matches any log")
 			}
 
@@ -432,7 +491,16 @@ func TestSecretLeakGate(t *testing.T) {
 					ConfigPath: fixture.configPath,
 				}, &out, &errOut)
 
-				requireSentinelOnTheWire(t, fake, token)
+				if tc.wantRefused {
+					requireNoRequest(t, fake)
+
+					if !strings.Contains(errOut.String(), refusalMessage) {
+						t.Errorf("stderr does not carry the refusal %q, so the run did not stop for the reason this case names:\n%s",
+							refusalMessage, errOut.String())
+					}
+				} else {
+					requireSentinelOnTheWire(t, fake, token)
+				}
 
 				if exit != tc.wantExit {
 					t.Errorf("exit = %d, want %d\nstdout:\n%s\nstderr:\n%s", exit, tc.wantExit, out.String(), errOut.String())
@@ -440,6 +508,12 @@ func TestSecretLeakGate(t *testing.T) {
 
 				assertNoSentinel(t, "stdout", out.String())
 				assertNoSentinel(t, "stderr", errOut.String())
+
+				if tc.wantRefused {
+					fixture.assertNothingWritten(t)
+
+					return
+				}
 
 				fixture.assertWrittenFilesClean(t, tc.skipNote, tc.wantInLog)
 			})
@@ -449,6 +523,22 @@ func TestSecretLeakGate(t *testing.T) {
 				fake := installFakeTelegram(t, tc.replies...)
 
 				_, settings, err := app.LoadSettings(fixture.configPath)
+				if tc.wantRefused {
+					if err == nil {
+						t.Fatal("LoadSettings accepted a token the window must refuse")
+					}
+
+					if !strings.Contains(err.Error(), refusalMessage) {
+						t.Errorf("LoadSettings failed, but not with the refusal %q: %v", refusalMessage, err)
+					}
+
+					assertNoSentinel(t, "LoadSettings error", err.Error())
+					requireNoRequest(t, fake)
+					fixture.assertNothingWritten(t)
+
+					return
+				}
+
 				if err != nil {
 					t.Fatalf("LoadSettings: %v", err)
 				}
@@ -500,24 +590,69 @@ func TestSecretLeakGate(t *testing.T) {
 // environment, a disabled sink, a changed fixture — and every absence
 // assertion after this one would hold for the wrong reason.
 //
-// The token is matched in its path-escaped form, which is how it travels: an
-// exact sentinel is unchanged by escaping, and one with trailing whitespace
-// arrives as "/bot<sentinel>%20/". Both forms contain the core sentinel.
+// Every case's token that loads trims to the sentinel (DEC-I2), so the request
+// must carry exactly "/bot<sentinel>/". A request carrying the sentinel
+// followed by an escape — the "%20" a padded token produced before trimming —
+// fails the case outright, because it means the trimming did not happen. The
+// token parameter is the configured value, kept so that failure message can
+// name it.
+//
+// That escape check is a second net, and today no single change reaches it. A
+// token with whitespace left in it is refused at load (DEC-I2, DEC-J9) before
+// any request is built, so removing the trim alone makes the run fail at load
+// instead: the front door then fails the "no request carried the sentinel"
+// check below, and the window's LoadSettings fails, before any escape can be
+// seen. The branch fires only if the trim and the refusal are both removed.
+// It stays for that case, and because it names the symptom a reader of a
+// failure would otherwise have to decode.
 func requireSentinelOnTheWire(t *testing.T, fake *fakeTelegram, token string) {
 	t.Helper()
 
-	onTheWire := "/bot" + url.PathEscape(token) + "/"
-	if !strings.Contains(onTheWire, leakSentinel) {
-		t.Fatalf("the wire form %q does not contain the core sentinel, so the witness proves nothing", onTheWire)
-	}
+	trimmed := "/bot" + leakSentinel + "/"
+	escaped := "/bot" + leakSentinel + "%"
+	found := false
 
 	for _, request := range fake.seen() {
-		if strings.Contains(request, onTheWire) {
-			return
+		if strings.Contains(request, escaped) {
+			t.Fatalf("a request carried the configured token %q untrimmed (%q); DEC-I2 requires it trimmed at load", token, request)
+		}
+
+		if strings.Contains(request, trimmed) {
+			found = true
 		}
 	}
 
-	t.Fatalf("no request to the Bot API carried the sentinel token, so the gate checked nothing; requests: %q", fake.seen())
+	if !found {
+		t.Fatalf("no request to the Bot API carried the sentinel token, so the gate checked nothing; requests: %q", fake.seen())
+	}
+}
+
+// refusalMessage is the part of config.Validate's DEC-J9 problem that a refused
+// case must show. The whole sentence is not repeated here, so rewording its
+// advice does not break the gate, but this part is what says why.
+const refusalMessage = "sink.telegram.bot_token must contain only printable ASCII characters"
+
+// requireNoRequest is the refused cases' replacement for the wire witness: a
+// run refused at load must not have sent anything, with or without the token.
+func requireNoRequest(t *testing.T, fake *fakeTelegram) {
+	t.Helper()
+
+	if requests := fake.seen(); len(requests) != 0 {
+		t.Fatalf("a run refused at load still reached the Bot API: %q", requests)
+	}
+}
+
+// assertNothingWritten is the refused cases' file check, and it is stricter
+// than assertWrittenFilesClean: a run refused at load must not have written
+// any file at all, so there is nothing that could carry the sentinel. Without
+// this, a refusal that came after the logger opened would pass the sentinel
+// scan while still having recorded the run.
+func (f leakFixture) assertNothingWritten(t *testing.T) {
+	t.Helper()
+
+	for path := range f.writtenFiles(t) {
+		t.Errorf("a run refused at load wrote %s", path)
+	}
 }
 
 func assertNoSentinel(t *testing.T, where, text string) {

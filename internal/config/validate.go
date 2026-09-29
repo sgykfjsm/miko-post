@@ -311,6 +311,7 @@ func (t TelegramSettings) validate(found *problems) {
 	//
 	// Empty is not short: an absent token arms no pattern, and whether absence is
 	// allowed is the Enabled question answered above.
+	//
 	// Secret.Len rather than len(Reveal()): the number of routes to the real
 	// value is a review obligation in this project, and this rule needs the
 	// token's length, not the token.
@@ -319,6 +320,21 @@ func (t TelegramSettings) validate(found *problems) {
 			"a shorter value is used as a redaction pattern and would replace ordinary "+
 			"text in every diagnostic record, including the identifier each post is "+
 			"correlated by", MinBotTokenLength, t.BotToken.Len())
+	}
+
+	// A token that is not printable ASCII after the trim is refused rather than
+	// repaired (DEC-I2 and DEC-J9, #137). ResolveCredential has already trimmed
+	// whitespace from both ends, so any byte outside 0x21-0x7E is interior
+	// whitespace, an invisible character or a non-ASCII lookalike, none of which
+	// a Bot API token contains; see Secret.IsPrintableASCII. A token carrying one
+	// arms a redaction pattern that the bare token does not match. It is checked
+	// outside the Enabled block for the reason above: the token arms the
+	// redaction pattern either way. The value is never quoted, because it is the
+	// credential.
+	if !t.BotToken.IsPrintableASCII() {
+		found.addf("sink.telegram.bot_token must contain only printable ASCII characters — no spaces, "+
+			"invisible characters or non-ASCII characters; copy the token again from @BotFather "+
+			"(in the file or in %s), or remove it if you do not use Telegram", TelegramBotTokenEnv)
 	}
 
 	// An explicit thread_id = 0 is rejected rather than passed through. The
@@ -481,9 +497,11 @@ func (l LoggingSettings) validate(found *problems) {
 //
 // One rendering is enough, and that is a consequence of the zone-name rule
 // rather than an assumption. See rendersZoneName: with the MST element refused,
-// every remaining reference element renders out of a fixed alphabet — digits,
-// Go's own English month and day names, and " +-,.:" — none of which contains a
-// path separator, a control character, or a lone dot. So every character the
+// every remaining reference element renders out of a fixed alphabet that
+// contains no path separator, no control character and no lone dot (#102). The
+// property is what the argument needs, and it is stated as one because a list
+// goes stale; for today's elements the alphabet is digits, Go's English month
+// and day names, AM/PM and am/pm, the zone letter Z, and " +-,.:". So every character the
 // rendered-value rules can object to comes from the layout's own literal text,
 // which is the same at every instant. Checking a second instant would therefore
 // reach the same verdict by construction, and checking *which* second instant

@@ -54,8 +54,35 @@ func resolve(version, commit string, readBuildInfo func() (*debug.BuildInfo, boo
 
 	return info{
 		version: firstNonEmpty(version, buildVersion, Unknown),
-		commit:  firstNonEmpty(commit, buildCommit, Unknown),
+		commit:  normalizeCommit(firstNonEmpty(commit, buildCommit, Unknown)),
 	}
+}
+
+// commitLength is the one shape git_commit takes on every build path that
+// identifies a commit (DEC-J2, #96).
+//
+// Twelve rather than the full forty because forty is unreachable on the path
+// end users take: a pseudo-version carries exactly twelve characters of the
+// commit and nothing else records it. So twelve is the longest prefix every
+// path can produce. make stamps git rev-parse --short=12, and vcs.revision's
+// forty characters are cut here, so a make build and an unstamped go build of
+// the same commit report the same value.
+const commitLength = 12
+
+// normalizeCommit cuts a lowercase-hex commit longer than commitLength to that
+// prefix, and leaves every other value as given.
+//
+// Normalizing here, at the one point every source passes through, rather than
+// at each source, is what keeps a new build path from reintroducing a second
+// shape. Values it cannot extend or does not recognise pass through unchanged:
+// a shorter hex stamp cannot be lengthened without a repository, and Unknown or
+// an operator's non-hex COMMIT is not a commit prefix to cut.
+func normalizeCommit(commit string) string {
+	if len(commit) > commitLength && isLowerHex(commit, len(commit)) {
+		return commit[:commitLength]
+	}
+
+	return commit
 }
 
 // fromBuildInfo reads the module version and commit the toolchain embeds. A
