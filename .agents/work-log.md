@@ -1273,3 +1273,8 @@ confirmed. Valid git-generated publication patches now reverse-check successfull
 - **Archive:** batch working files, the `issue-122-*` files and `change-groups.json` (read by nothing current) moved to `.agents/archive/batch-artifacts/`, with an index README that maps old paths to new ones. `state.yaml` paths were rewritten. Earlier entries in this log keep the old paths.
 - **Records:** Batch 13 moved to `completed` with its merge facts, `in_progress` is empty, `status: closing`, and a `feature_closeout` block was added. `project-status.md` was rewritten, with the outgoing copy archived.
 - **Next:** merge the closeout PR, then close #105. #101 and #138 stay open.
+
+### 2026-09-29 — Feature 001 closed
+- The closeout PR #141 (the spec-reconciler pass, with no code changes) squash-merged as `3fb79dd`. Head `ad23c91` and the squash share tree `3874df82`.
+- #105 was closed with a comment walking each checklist item: the body, plus the comments of 2026-09-07, 2026-09-28 and 2026-09-29.
+- `state.yaml` `status: closed`. Feature 001 is done. #101 (deferred) and #138 (future) remain open as work beyond v0.1.
