@@ -1264,3 +1264,12 @@ confirmed. Valid git-generated publication patches now reverse-check successfull
   - With the sink disabled, nothing fails at Telegram.
 - Those notes, the refusal message's "or remove it if you do not use Telegram" clause, and the FR-043/SC-006 hand-off to #105 were applied as post-review edits, listed in the PR body.
 - The correctness stage's first cycle-2 attempt stopped on a usage limit. Following the lost-agent rule, the worktree bytes were verified unchanged (`522ea1b9`) before a fresh attempt 2 ran. Its prompt had a bounded step list and a mutant cap, and it completed.
+
+### 2026-09-29 — Feature 001 closeout: spec-reconciler pass
+- Ran on `sgykfjsm/close-feature-001` from `main` `56e0212`, with #105's body and comments as the checklist. Records and docs only; no `.go` file changed.
+- **#105 acceptance:** `data-model.md` now describes `SinkResult`'s five guards through `errMarker`, the named-field rule and the `encoding/xml` boundary; `AllSucceeded(nil) == false`; and `Secret`'s five methods with the pointer-held value, why four are not enough, and the shape accessors. It also corrects the `Reveal()` count to three. `config-schema.md` states `thread_id > 0`. `log-events.md` admits the `"unknown"` sentinel, and design §11.2 matches in both languages. `spec.md` carries notes under FR-066/A-008 (DEC-I1, DEC-J2, #138) and FR-043/SC-006 (DEC-J9). The requirement text is unchanged.
+- **Other staleness:** FR-030 notes that no window opens without an absolute home (DEC-H2, DEC-J1, DEC-J7). A-007 gives the module path as built. `cli-interface.md` records that the owed native FR-030 check was run.
+- **Guides:** USER_GUIDE gains troubleshooting entries. DEVELOPER_GUIDE gains the leak gate and network-seam rule, mutation practice, the credential-shape accessors, the `runWith` seams and the build stamp.
+- **Archive:** batch working files, the `issue-122-*` files and `change-groups.json` (read by nothing current) moved to `.agents/archive/batch-artifacts/`, with an index README that maps old paths to new ones. `state.yaml` paths were rewritten. Earlier entries in this log keep the old paths.
+- **Records:** Batch 13 moved to `completed` with its merge facts, `in_progress` is empty, `status: closing`, and a `feature_closeout` block was added. `project-status.md` was rewritten, with the outgoing copy archived.
+- **Next:** merge the closeout PR, then close #105. #101 and #138 stay open.

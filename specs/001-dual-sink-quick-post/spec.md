@@ -411,6 +411,11 @@ it, while a subsequently launched window still used the default.
 - **FR-030**: When settings are invalid or every destination is disabled and the windowed path was
   launched, a minimal error window MUST display the actionable message and the resolved settings
   path, MUST NOT offer a message field, and MUST exit with failure when dismissed.
+  *As built (DEC-H2, 2026-09-24; DEC-J1 and DEC-J7, 2026-09-29)*: when the home directory cannot be
+  resolved or is not an absolute path, neither window opens, this one included: the reason goes to
+  stderr and the process exits `1` before the window framework is constructed, because it would
+  otherwise write its storage relative to the working directory (`runWith` in
+  `internal/gui/run.go`; `contracts/gui-interface.md`).
 
 **Chat destination**
 
@@ -444,6 +449,20 @@ it, while a subsequently launched window still used the default.
   override in this version.
 - **FR-043**: The chat credential MUST NEVER appear in logs, on-screen errors, command-line errors,
   or settings dumps.
+
+> **Accepted residual under FR-043 and SC-006** (issue #137, decision DEC-J9, taken 2026-09-29).
+>
+> After the trim of DEC-I2, a `bot_token` from the file or `MIKO_POST_TELEGRAM_BOT_TOKEN` is refused
+> at load unless every byte is printable ASCII other than space (`0x21`–`0x7E`), and this holds with
+> the chat destination disabled too (`Secret.IsPrintableASCII`, checked outside the `Enabled` block
+> in `internal/config/validate.go`). That closes the leak for whitespace, invisible and non-ASCII
+> corruptions. A token corrupted **inside** printable ASCII — pasted with its straight quotes, or
+> with a `bot` or `TOKEN=` prefix — still loads. The log's redaction pattern is the configured value,
+> not the bare token, so while such a token is configured a bare token in a recorded message body is
+> not redacted: a failed post's captured body, and every intake record when
+> `logging.message_on_error_only` is false (`ResolveCredential` in `internal/config/credential.go`).
+> The credential therefore never appears in a log record **unless** such a token is configured and
+> the user pastes the bare token into a message. The requirement's wording is unchanged.
 
 **Note destination**
 
@@ -508,6 +527,19 @@ it, while a subsequently launched window still used the default.
   event name; the originating front door; a per-post correlation identifier; destination name and
   outcome; duration in milliseconds; error type, detailed error text, and service status code when
   available; the note target path when relevant; and application version and commit when enabled.
+
+> **Commit on a tagged `go install`** (issue #94, decision DEC-I1, taken 2026-09-28; commit shape
+> DEC-J2, issue #96, taken 2026-09-29).
+>
+> A build by `go install github.com/sgykfjsm/miko-post/cmd/mp@<tag>` records `app_version` as the tag
+> and `git_commit` as `unknown`, because a module-cache build carries no `vcs.*` settings
+> (`version.Unknown` in `internal/version/version.go`). This is an accepted, documented v0.1
+> limitation, not a defect: the tag maps to exactly one commit, so a record stays attributable.
+> `make install` from a checkout is the stamped build. Wherever a build identifies the commit —
+> `make build` and `make install`, a local `go build` from `vcs.revision`, and an untagged
+> `go install` from the pseudo-version — `git_commit` is its 12-character lowercase hex prefix
+> (DEC-J2, `normalizeCommit`); an operator-supplied shorter value passes through unchanged. The
+> recorded relaxation is publishing stamped release binaries (#138).
 - **FR-067**: Stable event names MUST at minimum cover: message received; note append started,
   succeeded, and failed; chat send started, succeeded, and failed; chat formatting rejected; chat
   unformatted attempt succeeded and failed; and request completed with and without error.
@@ -584,6 +616,9 @@ The following are explicitly excluded and MUST NOT be implemented, even opportun
 - **SC-005**: A message that ordinary formatting rules would reject is still delivered to the chat
   destination, and the user is not required to know that a rescue occurred.
 - **SC-006**: In 100% of runs, no credential appears in any user-visible output or any log record.
+  *Accepted residual (DEC-J9, 2026-09-29)*: a token corrupted inside printable ASCII loads, and
+  while it is configured a bare token pasted into a message is not redacted from a recorded message
+  body; see the note under FR-043.
 - **SC-007**: 100% of log lines parse independently as valid records, and all records from one post
   can be gathered by its correlation identifier alone.
 - **SC-008**: For any failed post, the diagnostic log contains enough information — original
@@ -626,8 +661,13 @@ Reasonable defaults adopted where `docs/design.md` was silent. Each is cheap to 
 - **A-007**: The final module path used for distribution is not yet decided (the design document
   leaves it as a placeholder). Choosing it is a planning-time task and does not affect any
   requirement in this specification.
+  *As built*: the module path is `github.com/sgykfjsm/miko-post` (`go.mod`).
 - **A-008**: "Version" and "commit" recorded in diagnostics are stamped into the binary at build
   time; how they are stamped is a planning concern.
+  *As built (DEC-I1, 2026-09-28)*: this holds for `make install` and other linker-stamped builds
+  only. A tagged `go install` is not stamped and records `git_commit = "unknown"`; see the note under
+  FR-066. It becomes true again for the recommended install path once stamped release binaries are
+  published (#138).
 - **A-009**: A rotation timestamp suffix is precise to the second. Two rotations within the same
   second are assumed not to occur in normal single-user operation; if planning finds otherwise, a
   collision rule is a planning-level decision, not a change to these requirements.

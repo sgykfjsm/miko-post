@@ -30,7 +30,7 @@ rather than a silent no-op.
 | `enabled` | bool | `false` | — |
 | `bot_token` | string | — | Required when enabled and `MIKO_POST_TELEGRAM_BOT_TOKEN` is unset. At least 16 characters whenever present, enabled or not. Leading and trailing whitespace is trimmed; after that, every byte must be printable ASCII other than space (`0x21`–`0x7E`), enabled or not (DEC-I2, DEC-J9). Never logged or printed (FR-043). See **Credential length** and **Credential characters** below. |
 | `chat_id` | string | — | Required when enabled; non-empty |
-| `thread_id` | int | *absent* | Optional. **Absence**, not a sentinel, means "post to the chat directly" (FR-032, A-006). |
+| `thread_id` | int | *absent* | Optional. **Absence**, not a sentinel, means "post to the chat directly" (FR-032, A-006). When present, must be > 0: an explicit `0` or a negative value is a load error, not a request for the chat itself (`Validate` in `internal/config/validate.go`). |
 | `parse_mode` | string | `"MarkdownV2"` | Accepted and validated, **inert in v0.1** (FR-034) |
 | `fallback_to_plain_text` | bool | `true` | Accepted and validated, **inert in v0.1** (FR-034) |
 | `http_timeout_seconds` | int | `30` | > 0 and <= `9223372036` (FR-040). See **Timeout bounds** below. |

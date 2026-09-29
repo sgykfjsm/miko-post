@@ -3,7 +3,8 @@ current_goal: >-
   message to Telegram and today's Obsidian daily note concurrently and independently, from a CLI
   and a GUI front door, through one shared posting core.
 
-status: in-execution
+status: closing
+status_note: "all 91 tasks done and Batch 13 merged; feature 001 is closed pending the spec-reconciler closeout PR on sgykfjsm/close-feature-001"
 
 completed:
   - id: batch-1
@@ -787,7 +788,7 @@ completed:
     implementation_commit: 2b78af1
     pull_request: 124
     pull_request_url: https://github.com/sgykfjsm/miko-post/pull/124
-    prepared_pr_body: .agents/batch-8-pr-body.md
+    prepared_pr_body: .agents/archive/batch-artifacts/batch-8-pr-body.md
     review_mode: review-and-fix
     prior_review_verdict: request-changes
     review_verdict: passed
@@ -819,7 +820,7 @@ completed:
     pull_request: 125
     squashed_as: 17073829398aa540b6a8ea56a0155b0e30880dfc
     merged_at: 2026-09-16T01:50:32Z
-    prepared_pr_body: .agents/batch-9-pr-body.md
+    prepared_pr_body: .agents/archive/batch-artifacts/batch-9-pr-body.md
     review_mode: review-and-fix
     review_verdict: passed
     review_cycle: 1
@@ -841,7 +842,7 @@ completed:
     pull_request: 125
     squashed_as: 17073829398aa540b6a8ea56a0155b0e30880dfc
     merged_at: 2026-09-16T01:50:32Z
-    prepared_pr_body: .agents/issue-122-pr-body.md
+    prepared_pr_body: .agents/archive/batch-artifacts/issue-122-pr-body.md
     review_mode: review-and-fix
     review_verdict: passed
     review_cycle: 1
@@ -870,14 +871,14 @@ completed:
       The reviewed tree is now published. f3ab572 is the implementation; 333799a carries all three
       review correction passes, including the one production behaviour change in
       internal/logging/rotate.go open() (DEC-F4). PR #126's description was replaced from
-      .agents/batch-10a-pr-body.md at the same time, so the stale cycle-0 text - which wrongly
+      .agents/archive/batch-artifacts/batch-10a-pr-body.md at the same time, so the stale cycle-0 text - which wrongly
       attributed the load-time upper bound to issue #101 - is gone (finding CON-004, discharged by
       the coordinator; reviewers and fix passes are both barred from pushing).
       Verified after pushing: PR #126 head is sgykfjsm/batch-10-diagnostics-2, state OPEN, and
       closingIssuesReferences is empty, so no issue auto-closes on merge.
     pull_request: 126
     opened_at_head: f3ab572e8b9c4d1b6eb72db7e6942831bfccdb12
-    prepared_pr_body: .agents/batch-10a-pr-body.md
+    prepared_pr_body: .agents/archive/batch-artifacts/batch-10a-pr-body.md
     merged_from_head: 73d9c575137aab69bcf56d96ecb14362e532be0f
     squashed_as: 0e3df5ec524df20e0d1d46b4572e11dbe83e810a
     merged_at: 2026-09-16T14:32:40Z
@@ -1127,7 +1128,7 @@ completed:
         cited_by: >-
           internal/logging/birthtime_other.go and internal/logging/birthtime_darwin.go, both of
           which name DEC-ADV-006 in their doc comments and point here;
-          .agents/batch-10a-pr-body.md; .agents/work-log.md
+          .agents/archive/batch-artifacts/batch-10a-pr-body.md; .agents/work-log.md
   - id: 10b
     name: US5 post diagnostics
     tasks: [T066, T067, T071, T072, T073, T074]
@@ -1172,7 +1173,7 @@ completed:
     publication_note: >-
       Opened 2026-09-18 from sgykfjsm/batch-10b-post-diagnostics at 06d2c1d against main 86a05f5.
       Nine commits, 27 files, +2780/-68, mergeable. Body published from
-      .agents/batch-10b-pr-body.md, which already carried all three review stages' outcomes and
+      .agents/archive/batch-artifacts/batch-10b-pr-body.md, which already carried all three review stages' outcomes and
       CON-002's resolution.
       closingIssuesReferences verified EMPTY after opening. That is DELIBERATE and is stated in the
       body: #67, #68 and #72-#75 stay open until this is reviewed and merged, so closing them is an
@@ -1180,7 +1181,7 @@ completed:
       #69-#71 open for two days after #126, and #60-#65, #115, #118 and #119 open since earlier
       batches - so the check confirms the linkage is what was intended, not that it is absent by
       accident.
-    prepared_pr_body: .agents/batch-10b-pr-body.md
+    prepared_pr_body: .agents/archive/batch-artifacts/batch-10b-pr-body.md
     branch_note: >-
       NOT sgykfjsm/batch-10b-diagnostics. That name was already taken by a pushed branch carrying
       a competing reconciliation of the 10a merge (commit d057f45, see completed 10a
@@ -1207,7 +1208,7 @@ completed:
           along with a code change, which is what CON-002 asked for. Batch 10b must be REBASED onto
           the new main once that PR merges, so its own PR carries only its own commits. Until then
           10b's branch still contains e0a0c39 and a PR opened from it would still show four commits.
-        con_002_prepared_body: .agents/batch-10a-records-pr-body.md
+        con_002_prepared_body: .agents/archive/batch-artifacts/batch-10a-records-pr-body.md
         con_002_published: >-
           PR #131, https://github.com/sgykfjsm/miko-post/pull/131, opened 2026-09-18 from
           sgykfjsm/batch-10a-records at e0a0c39 against main 0e3df5e. One commit, four files, all
@@ -1387,7 +1388,7 @@ completed:
       and to be filed as an issue. All three disclosed in the PR body.
     decisions_note: >-
       Defined here as structured blocks, where DEC-A1 through DEC-F4 and DEC-ADV-006 live, and
-      mirrored in prose in .agents/batch-10b-pr-body.md. Contract finding CON-009: the first draft
+      mirrored in prose in .agents/archive/batch-artifacts/batch-10b-pr-body.md. Contract finding CON-009: the first draft
       defined them ONLY in the PR body, and state.yaml recorded that 10a's PR description was
       replaced wholesale after review - so seven rationales were one rewrite away from being
       unreachable from state.yaml. The citations resolved; the durability did not.
@@ -1567,7 +1568,7 @@ completed:
       reached main: until Batch 12 this entry sat under in_progress reading "not pushed, no PR", and
       project-status.md and next_best_action still described Batch 11 as awaiting review. Recorded
       in Batch 12's PR, the usual batch-N-record-in-batch-N+1 pattern.
-    prepared_pr_body: .agents/batch-11-pr-body.md
+    prepared_pr_body: .agents/archive/batch-artifacts/batch-11-pr-body.md
     review_mode: review-and-fix (authorized 2026-09-24)
     review_cycle_0:
       contract: {status: valid, findings: [CON-001, CON-002, CON-003, CON-004]}
@@ -1808,7 +1809,7 @@ completed:
       conclusion: "premise holds; #104 stays closed"
       recorded_in: specs/001-dual-sink-quick-post/validation/t091-quickstart.md
     spec_reconciler_handoff:
-      - {issue: 105, item: "annotate spec.md FR-066 and A-008 with DEC-I1: a tagged go install records app_version = the tag and git_commit = unknown, accepted for v0.1; make install is the stamped build. A-008's 'stamped into the binary at build time' holds only for make install", source: CON-007, published_as: "https://github.com/sgykfjsm/miko-post/issues/105#issuecomment-5865686841 (2026-09-28)"}
+      - {issue: 105, item: "annotate spec.md FR-066 and A-008 with DEC-I1: a tagged go install records app_version = the tag and git_commit = unknown, accepted for v0.1; make install is the stamped build. A-008's 'stamped into the binary at build time' holds only for make install", source: CON-007, published_as: "https://github.com/sgykfjsm/miko-post/issues/105#issuecomment-5865686841 (2026-09-28)", reconciled_in: "feature closeout, spec.md FR-066 note and A-008"}
     window_checks:
       date: 2026-09-29
       by: maintainer, at the keyboard, native macOS window, binary from 1fd507c
@@ -1829,12 +1830,23 @@ completed:
       - "internal/gui/entry.go:46 comment: a button gains focus neither by click nor by Tab from the message field (window_checks.finding)"
       - "#137 / DEC-I2: implement after Batch 12 merges, before close-feature"
       - "#138: a release workflow publishing stamped macOS binaries (DEC-I1's relaxation); future work, to be considered later"
-in_progress:
   - id: 13
     name: Hardening
     branch: sgykfjsm/batch-13-hardening
     base: aa202f68da6049bd2a991e426f3510bf743ee1d9
-    state: implemented, uncommitted, under review
+    state: merged
+    committed: true
+    pushed: true
+    pull_request: 140
+    pull_request_url: https://github.com/sgykfjsm/miko-post/pull/140
+    merged_from_head: fe506f817bb60496c824a72b07510606d4ef9f7d
+    squashed_as: 56e02128e705a731604f6e9306f74c5e4f902212
+    merged_at: 2026-09-29T06:52:53Z
+    merge_verification: "head fe506f8 and the squash 56e0212 share tree 945c514b449e16f1dd73a053e8e6937b704e5e76 (re-checked locally at closeout with git rev-parse)"
+    issues_closed: [96, 102, 103, 115, 118, 136, 137]
+    issues_closed_at: 2026-09-29
+    issues_closed_note: "each closed 2026-09-29 after the merge with a comment naming the merge 56e02128; #115 as a partial close (item 1 delivered, item 4 through #103, items 2 and 3 declined by DEC-J4, DEC-J8)"
+    issue_105_comment: "https://github.com/sgykfjsm/miko-post/issues/105#issuecomment-5885237791 (2026-09-29): the FR-043/SC-006 hand-off under DEC-J9"
     selected_at: 2026-09-29
     delivered:
       - "DEC-I2 and DEC-J9 (#137): config.Secret gains Trimmed and IsPrintableASCII (no new Reveal call site); ResolveCredential trims the file and the environment token (Unicode whitespace), and a blank environment value counts as unset; Validate refuses, enabled or not and without quoting the token, a token with any byte outside 0x21-0x7E after the trim (DEC-J9 replaced DEC-J6's whitespace/Cf/non-graphic rule in fix pass 2). TestANonPrintableASCIICredentialIsRefused covers space, tab, newline, U+200B suffix, U+FEFF prefix, U+0007, DEL, U+FE0F, U+3164, U+2800, smart quotes, a fullwidth colon and an invalid UTF-8 byte from both sources, enabled and disabled; an NBSP-padded token trims and validates; a clean token and a punctuation token (1234567:AA-_.~!token) validate. TestSecretLeakGate's whitespace cases require the trimmed token on the wire (never the %20 form) and a padded token plus the bare token in a message to be redacted; its zero-width and smart-quote cases must be refused at load (exit 1, refusal on stderr and from LoadSettings, no request, no file written). Residual: mistakes inside printable ASCII (pasted straight quotes, a bot or TOKEN= prefix) still load; such a token fails at Telegram, and while configured a bare token in a failed post's captured body is not redacted"
@@ -1943,7 +1955,7 @@ in_progress:
         - {ids: [CON-008], what: "FR-043/SC-006 annotation added to spec_reconciler_handoff, to be commented on #105 with the closures"}
         - {ids: [], what: "#137's closing plan says DEC-J9 superseded DEC-J6; result.go says the enumeration test fails on any method other than Format"}
     spec_reconciler_handoff:
-      - {issue: 105, item: "annotate spec.md FR-043 and SC-006 with DEC-J9's accepted residual: a token corrupted inside printable ASCII loads, and while configured a bare token in a recorded message body is not redacted", source: CON-008, published_as: null}
+      - {issue: 105, item: "annotate spec.md FR-043 and SC-006 with DEC-J9's accepted residual: a token corrupted inside printable ASCII loads, and while configured a bare token in a recorded message body is not redacted", source: CON-008, published_as: "https://github.com/sgykfjsm/miko-post/issues/105#issuecomment-5885237791 (2026-09-29)", reconciled_in: "feature closeout, spec.md FR-043 note and SC-006"}
     decisions:
       - id: DEC-J1
         issue: 136
@@ -2063,6 +2075,8 @@ in_progress:
           prefix) still load. Such a token fails at Telegram, and while it is configured a bare token
           in a failed post's captured body is not redacted. The records say so instead of claiming the
           leak is closed unconditionally.
+in_progress: []
+
 blockers: []
 
 time_sensitive:
@@ -2120,27 +2134,36 @@ time_sensitive:
     deadline: before tagging v0.1.0
 
 next_best_action: >-
-  Batch 13's review converged: cycle 2 ended passed-with-notes after fix passes 1 and 2 (DEC-J9),
-  followed by the post-review edits recorded under the Batch 13 entry. The work is uncommitted on
-  sgykfjsm/batch-13-hardening. Re-run make check on the final bytes, then with the maintainer's
-  go-ahead commit, push and open the PR from
-  .agents/batch-13-pr-body.md; it carries no closing keywords, so closingIssuesReferences must read
-  back empty. After merge, close each issue explicitly with a comment that names the merge commit
-  and carries the decision text and its date: #136 with DEC-J1 and DEC-J7 (2026-09-29); #96 with
-  DEC-J2 (2026-09-29); #137 with DEC-I2 (2026-09-28) and DEC-J9 (2026-09-29), saying DEC-J9
-  superseded DEC-J6's category rule, and naming the residual (mistakes inside printable ASCII, such
-  as pasted straight quotes or a bot or TOKEN= prefix, still load; while configured, a bare token
-  in any recorded message body stays unredacted: a failed post's captured body, and every intake
-  record when logging.message_on_error_only is false); #115 with DEC-J4 and DEC-J8 (2026-09-29), worded as a partial
-  close (acceptance item 1 delivered, item 4, re-evaluating #103's XML path, delivered through
-  #103, items 2 and 3 declined by DEC-J4, to be revisited when a second credential-bearing sink
-  appears); #118 with
-  DEC-J5 (2026-09-29); #102 and #103 naming what changed. With the closures, and with the
-  maintainer's go-ahead, comment on #105 with the second hand-off item: annotate spec.md FR-043
-  and SC-006 with DEC-J9's accepted residual. Then run close-feature: #105 is spec-reconciler's
-  checklist, including the FR-066 and A-008 annotation and that FR-043/SC-006 item. #101 (DEC-J3, deferred)
-  and #138 (future) stay open.
+  Merge the feature-001 closeout PR from sgykfjsm/close-feature-001 (spec-reconciler pass, records
+  and docs only, no .go file; see feature_closeout), after checking that closingIssuesReferences
+  reads back as intended. Then close #105 with a comment naming what was reconciled: data-model.md
+  SinkResult (five guards, errMarker, named-field rule, encoding/xml boundary), AllSucceeded's
+  empty-slice fail-closed rule, the five-method pointer-held Secret prescription with the shape
+  accessors; config-schema.md thread_id positivity; log-events.md "unknown" sentinel for source and
+  message_id, with design.md/design.ja.md 11.2; spec.md FR-066 and A-008 under DEC-I1/DEC-J2, and
+  FR-043 and SC-006 under DEC-J9. #101 (deferred, DEC-J3) and #138 (future, DEC-I1's relaxation)
+  stay open. Nothing else remains for feature 001.
 
+feature_closeout:
+  date: 2026-09-29
+  branch: sgykfjsm/close-feature-001
+  base: 56e02128e705a731604f6e9306f74c5e4f902212
+  skill: spec-reconciler (under close-feature)
+  checklist: "#105 body and comments"
+  code_changes: none
+  durable_specs:
+    - "data-model.md: SinkResult render guards, named-field rule, encoding/xml boundary (#103); AllSucceeded empty slice returns false; Secret five guards, pointer-held value, why four are not enough, shape accessors, Reveal call sites now three"
+    - "contracts/config-schema.md: thread_id must be > 0 when present"
+    - "contracts/log-events.md: \"unknown\" sentinel for source and message_id (sourceUnknown, missingMessageID) and what it means"
+    - "contracts/cli-interface.md: the owed native FR-030 check is recorded as run (Batch 12, T091 7a-7d)"
+    - "spec.md: notes under FR-043 and SC-006 (DEC-J9 residual), FR-066 and A-008 (DEC-I1, DEC-J2, #138), FR-030 (DEC-H2, DEC-J1, DEC-J7: no window without an absolute home), A-007 (module path as built)"
+    - "docs/design.md and docs/design.ja.md 11.2: the source sentinel, minimally"
+  guides:
+    - "docs/USER_GUIDE.md: points to README; troubleshooting for no destination, the bot_token rule, no absolute HOME, the log location, git_commit unknown"
+    - "docs/DEVELOPER_GUIDE.md: secret-leak gate and the network-seam rule, mutation testing, credential-shape accessors, runWith seams, build stamp"
+  archived: "the batch-*.md, batch-*.txt and issue-122-* working files and change-groups.json (read by nothing current) moved from .agents/ to .agents/archive/batch-artifacts/ with their names kept; every state.yaml reference to them was rewritten to the new path (index: README.md there); project-status.md outgoing copy -> .agents/archive/project-status-before-closeout.md"
+  left_open: ["#101 (DEC-J3, deferred beyond v0.1)", "#138 (stamped release binaries, future)"]
+  kept_as_record: "specs/001-dual-sink-quick-post/ stays in place as the feature's record"
 decisions_resolved:
   - resolved_at: 2026-09-24
     by: maintainer
@@ -2303,24 +2326,25 @@ batch_6_split:
 
 remaining_batches: []
 remaining_batches_note: >-
-  Batch 12 is the last task-backed batch. Open non-task issues remain: #96, #101, #102, #103,
+  Superseded at closeout (2026-09-29): Batch 13 was the last batch; only #101 and #138 stay open, and
+  #105 closes after the closeout PR. Earlier text follows as history. Batch 12 is the last task-backed batch. Open non-task issues remain: #96, #101, #102, #103,
   #105 (spec-reconciler), #115, #118, #136, #137, #138. Whether any becomes a batch before
   close-feature is a maintainer decision. #105 is spec-reconciler's checklist. #137 is decided
   (DEC-I2) and scheduled after Batch 12 merges; #138 is future work, to be considered later.
 
 touched_files:
   - .agents/archive/project-status-before-batch-9.md
-  - .agents/batch-10-plan.md
-  - .agents/batch-10a-pr-body.md
-  - .agents/batch-9-cycle.md
-  - .agents/batch-9-pr-body.md
-  - .agents/batch-9-pr-title.txt
-  - .agents/batch-9-reconciliation.md
-  - .agents/batch-9-review.md
-  - .agents/change-groups.json
-  - .agents/issue-122-pr-body.md
-  - .agents/issue-122-pr-title.txt
-  - .agents/issue-122-review.md
+  - .agents/archive/batch-artifacts/batch-10-plan.md
+  - .agents/archive/batch-artifacts/batch-10a-pr-body.md
+  - .agents/archive/batch-artifacts/batch-9-cycle.md
+  - .agents/archive/batch-artifacts/batch-9-pr-body.md
+  - .agents/archive/batch-artifacts/batch-9-pr-title.txt
+  - .agents/archive/batch-artifacts/batch-9-reconciliation.md
+  - .agents/archive/batch-artifacts/batch-9-review.md
+  - .agents/archive/batch-artifacts/change-groups.json
+  - .agents/archive/batch-artifacts/issue-122-pr-body.md
+  - .agents/archive/batch-artifacts/issue-122-pr-title.txt
+  - .agents/archive/batch-artifacts/issue-122-review.md
   - .agents/project-status.md
   - .agents/state.yaml
   - .agents/work-log.md
@@ -2391,7 +2415,7 @@ next_batch_preparation:
     "immediate next action". The branch that was created, pushed and opened as PR #126 is
     sgykfjsm/batch-10-diagnostics-2; the name above is the real one.
   base: 17073829398aa540b6a8ea56a0155b0e30880dfc
-  plan: .agents/batch-10-plan.md
+  plan: .agents/archive/batch-artifacts/batch-10-plan.md
   selected: 10a
   tasks: [T065, T068, T069, T070]
   issues: [66, 69, 70, 71]
