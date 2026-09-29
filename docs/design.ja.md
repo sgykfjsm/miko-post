@@ -450,26 +450,36 @@ app.jsonl -> app.jsonl.20260827114203
 Go toolchainによる配布を前提とし、`go install` でインストールする。
 
 ```bash
-go install <module-path>/cmd/mp@latest
+go install github.com/sgykfjsm/miko-post/cmd/mp@latest
 ```
 
-`<module-path>` はrepositoryで確定したGo module pathに置き換える。インストールされる実行ファイル名は `mp` とする。プラットフォーム固有のapp bundle、code signing、notarization、個別installerはv0.1の配布要件に含めない。
+インストールされる実行ファイル名は `mp` とする。プラットフォーム固有のapp bundle、code signing、notarization、個別installerはv0.1の配布要件に含めない。
 
-### リリース手順（#94 の決定）
+### リリース手順（#94 の決定、DEC-I1 で範囲を限定）
 
-**リリースはlinker flag経由でversionとcommitを必ず埋め込む。** `make install` がそれを行う:
+**versionとcommitを埋め込むbuildは、checkoutからの `make install` である。** linker flag経由で両方を
+埋め込む。maintainerと、sourceからbuildするすべての人のためのbuildである:
 
 ```bash
 make install          # go install -ldflags "-X …version=… -X …commit=…" ./cmd/mp
 ```
 
+上記の `go install …@latest` は引き続き主要な、文書化されたinstall経路であり、flagを埋め込まない。
 module cacheからのbuildは `vcs.*` のbuild settingsを一切記録しないため、`internal/version` にcommitを
-復元する手段が無い。`v0.1.0` をtagすると `@latest` はそのtagに解決されるので、素の
-`go install …@latest` では **事実上すべてのend userで** `git_commit` が `unknown` になる。edge case
-ではない。FR-066はrecordがapplication versionとcommitを持つことを要求し、憲章原則IIIはこのlogを
-失われたmessageを復元するための記録と位置づけているため、主要な配布経路でcommit fieldが死ぬのは
-既定値として受け入れられない。
+復元する手段が無い。`v0.1.0` をtagすると `@latest` はそのtagに解決されるので、このbuildは
+**事実上すべてのend userで** `app_version` にtagを、`git_commit` に `unknown` を記録する。edge case
+ではない。
+
+v0.1ではこれを **受け入れ済みで文書化された制約**（決定 DEC-I1）とし、欠陥とはみなさない。FR-066は
+recordがapplication versionとcommitを持つことを求め、憲章原則IIIはこのlogを失われたmessageを
+復元するための記録と位置づけている。version fieldはreleaseを特定し、tagはそれをただ一つのcommitに
+対応づけるので、recordの出所は辿れる。READMEのinstall節はこの制約を明記する。`make install` は
+実際のcommitを記録し、T090で検証済みである。
+
+この制約を緩めるには、埋め込み済みbinaryを公開する（例えば `make install` を実行するか同じlinker flagを
+渡すCI release job）。そのうえでREADMEのinstall節をそれに向ける。そのために `internal/version` を
+変更する必要は無い。
 
 tagの無いpseudo-version install（`@v0.0.0-…-aaaabbbbcccc`）はpseudo-version自体からcommitを復元でき、
-git tree内のローカル `go build` は `vcs.revision` から復元できる。flagが必要なのは、ユーザーが実際に
-手にするtag付きmodule cache buildに限られる。
+git tree内のローカル `go build` は `vcs.revision` から復元できる。commitが失われるのは、tag付きの
+module cache buildに限られる。

@@ -461,22 +461,32 @@ go install github.com/sgykfjsm/miko-post/cmd/mp@latest
 
 The installed executable name is `mp`. Platform-specific application bundles, code signing, notarization, and separate installers are outside the v0.1 distribution requirement.
 
-### Releasing (decision on #94)
+### Releasing (decision on #94, narrowed by DEC-I1)
 
-**A release MUST stamp the version and commit through linker flags.** `make install` does this:
+**The stamped build is `make install` from a checkout.** It stamps the version and commit through
+linker flags, and it is the build for the maintainer and for anyone building from source:
 
 ```bash
 make install          # go install -ldflags "-X …version=… -X …commit=…" ./cmd/mp
 ```
 
-The reason is that a build from the module cache records no `vcs.*` build settings, so
-`internal/version` has nothing to recover a commit from. Once `v0.1.0` is tagged, `@latest`
-resolves to that tag, and a plain `go install …@latest` would therefore report
-`git_commit = "unknown"` for **effectively every end user** — not in an edge case. FR-066 requires
-records to carry the application version and commit, and constitution principle III makes these
-logs the record of record for reconstructing a lost message, so a dead commit field on the primary
-distribution channel is not an acceptable default.
+`go install …@latest`, above, stays the primary documented install path, and it does not stamp.
+A build from the module cache records no `vcs.*` build settings, so `internal/version` has nothing
+to recover a commit from. Once `v0.1.0` is tagged, `@latest` resolves to that tag, and such a build
+records `app_version` as the tag and `git_commit = "unknown"` for **effectively every end user** —
+not in an edge case.
+
+For v0.1 that is an **accepted, documented limitation** (decision DEC-I1), not a defect. FR-066
+asks records to carry the application version and commit, and constitution principle III makes
+these logs the record of record for reconstructing a lost message. The version field still
+identifies the release, and the tag maps it to exactly one commit, so a record stays attributable.
+The README's install section states the limitation. `make install` records a real commit, which
+T090 verified.
+
+Relaxing it means publishing stamped binaries, for example from a CI release job that runs
+`make install` or passes the same linker flags, and pointing the README's install section at them.
+`internal/version` does not need to change for that.
 
 An untagged pseudo-version install (`@v0.0.0-…-aaaabbbbcccc`) does recover the commit from the
 pseudo-version itself, and a local `go build` in a git tree recovers it from `vcs.revision`. It is
-specifically the tagged module-cache build — the one users will get — that needs the flags.
+specifically the tagged module-cache build that loses the commit.

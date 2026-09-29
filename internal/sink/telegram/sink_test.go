@@ -1621,6 +1621,22 @@ func TestNewTargetsTheTelegramAPI(t *testing.T) {
 	}
 }
 
+// TestNewLeavesTheClientOnTheDefaultTransport pins that New sets no Transport,
+// so the client sends through http.DefaultTransport.
+//
+// Nothing in this package depends on that. The secret-leak gate in
+// internal/post does: it swaps http.DefaultTransport for a fake that answers
+// in-process, and that swap only contains the gate while the sink uses the
+// default transport. Were New to install its own, the gate's runs would reach
+// api.telegram.org with the sentinel token instead of reaching the fake.
+func TestNewLeavesTheClientOnTheDefaultTransport(t *testing.T) {
+	t.Parallel()
+
+	if got := telegram.ClientTransport(telegram.New(baseSettings())); got != nil {
+		t.Errorf("New(...).client.Transport = %T, want nil; the secret-leak gate in internal/post relies on the sink using http.DefaultTransport, which it replaces with an in-process fake", got)
+	}
+}
+
 // TestWireNamesMatchTheBotAPI pins the spellings against literals.
 //
 // Every other assertion in this file reads the same constants the builder

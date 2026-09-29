@@ -35,6 +35,15 @@ func BaseURL(s *Sink) string { return s.baseURL }
 // see.
 func ClientTimeout(s *Sink) time.Duration { return s.client.Timeout }
 
+// ClientTransport reports the RoundTripper New installed, nil meaning
+// http.DefaultTransport.
+//
+// internal/post's secret-leak gate replaces http.DefaultTransport with an
+// in-process fake and relies on that fake being the only way out. A client
+// that carried a transport of its own would bypass it, and the gate would
+// dial api.telegram.org instead of failing, so the premise is pinned here.
+func ClientTransport(s *Sink) http.RoundTripper { return s.client.Transport }
+
 // RequestTimeout exposes the seconds-to-Duration conversion (issue #114,
 // decision DEC-C3).
 //
