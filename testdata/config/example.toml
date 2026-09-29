@@ -37,8 +37,11 @@ enabled = true
 
 # REPLACE: your bot's token from @BotFather. It must be at least 16
 # characters. The environment variable MIKO_POST_TELEGRAM_BOT_TOKEN, when set
-# and non-empty, is used instead, so you can leave this line out and keep the
-# credential out of the file. The token is never logged or printed.
+# and not blank, is used instead, so you can leave this line out and keep the
+# credential out of the file. Spaces around the token are trimmed; after that,
+# anything but printable ASCII without spaces (whitespace inside it, an
+# invisible character such as a zero-width space, a smart quote) is an error,
+# even with the sink disabled. The token is never logged or printed.
 bot_token = "replace-with-your-bot-token"
 
 # REPLACE: the chat to post to. Group and channel ids are negative.

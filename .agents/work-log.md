@@ -1209,3 +1209,58 @@ confirmed. Valid git-generated publication patches now reverse-check successfull
   I found both by reading Fyne v2.8.1 source before recording a result that I had not actually observed. Case 4c then showed that a button cannot gain keyboard focus in the posting window at all. `internal/gui/entry.go:46`'s comment says otherwise; it is left for the next code change.
 - One case-2 run stayed open for about 266 s. The maintainer did not state why; a rerun with no interaction closed at about 30 s, as designed.
 - Housekeeping: the maintainer revoked the test token. The temporary settings files that held it were deleted, and a scan of the scratch space, the review run state and the repository found no copy.
+
+### 2026-09-29 — Batch 12 closed out; Batch 13 (hardening) implemented
+- **Batch 12 merged** as `aa202f6`; head and squash share tree `e216bdc2`. #85–#88, #90–#92, #94 and #95 were closed with comments naming the merge. The Batch 12 record moved to `completed`.
+- **The maintainer's calls on the remaining non-task issues, 2026-09-29:**
+  - DEC-J1: #136 option 1.
+  - DEC-J2: #96 uses 12 characters, now.
+  - DEC-J3: #101 is deferred; this was commented on the issue.
+  - #102 and #103 go into v0.1.
+  - DEC-J4: #115 option 1.
+  - DEC-J5: #118 is handled with a comment.
+- **Implemented**, with every guard mutated and killed:
+  - DEC-I2's trim and interior-whitespace refusal, with no new `Reveal()`.
+  - A home-directory check before either window is built.
+  - A 12-character commit, normalized in one place, with `make` stamping `--short=12`.
+  - The enumeration test fails on an unevaluated method.
+  - The contract comments.
+- **One slip:** my first version of the #103 check compared skipped method names to `"Format"` exactly. The names arrive qualified (`post.SinkResult.Format` and `*post.SinkResult.Format`), so the test failed on the expected method. It was found by running it, and it now compares the last element.
+- **Found while choosing #96's shape:** the issue's preferred 40 characters cannot be produced on the `go install` path, because a pseudo-version carries only 12. So 12 is the longest shape every path can produce.
+
+### 2026-09-29 — Batch 13 review cycle 0 and fix pass 1
+- **Review cycle 0** of the uncommitted Batch 13 diff found that DEC-I2's trim did not cover invisible characters: a token carrying U+200B or U+FEFF passed validation and armed a redaction pattern that the bare token did not match, which reproduced the ADV-007 leak (ADV-001 / COR-001). It also found that a relative `HOME` passed DEC-J1's check (ADV-002), plus minor record, contract and comment findings.
+- **The maintainer's calls, 2026-09-29:**
+  - DEC-J6 (#137): refuse, at load, a token containing whitespace, a Cf format character or a non-graphic rune, anywhere.
+  - DEC-J7 (#136): refuse a home directory that is not absolute.
+  - DEC-J8 (#115): close as partial after merge.
+  - The minor findings are fixed too.
+- **Fix pass 1:**
+  - `Secret.ContainsSpaceOrInvisible` replaces `ContainsSpace`, with the refusal below the length check, outside the Enabled block. The credential tests cover tab, newline, U+200B, U+FEFF, U+0007 and an NBSP pad, from both sources, enabled and disabled.
+  - The leak gate gains a refused-at-load case: no request, no file written, and the refusal on stderr and from `LoadSettings`.
+  - `runWith` refuses a relative home without printing it.
+  - The comment, contract, PR body and closure-plan corrections.
+- **Found while fixing:** `unicode.IsGraphic` is false for every Cf rune, so DEC-J6's Cf test is subsumed by the graphic test. Its mutant is equivalent. The test is kept because the decision names the class, and the comment says why it can never be pinned.
+- **Mutants:** 14 new, in 15 runs, each predicted. Eleven were killed. Three survived, as predicted: the equivalent Cf mutant (against the credential tests and the leak gate), the gate's escaped-`%` branch (pre-empted by the refusal; only the trim-and-refusal double mutant reaches it, and it did), and the refused case's no-request check (the stricter stderr, exit and `LoadSettings` checks also catch such a run). None touched a network seam.
+- **One slip:** my first mutant runs passed the substitutions through a shell `eval`, which stripped the quoting. Every run aborted before writing anything, and the checksums confirmed it. They were rerun from a JSON spec.
+
+### 2026-09-29 — Batch 13 review cycle 1 and fix pass 2
+- **Review cycle 1** found that DEC-J6's category rule still let graphic invisible runes (U+FE0F, U+3164, U+2800) and visible non-ASCII lookalikes (smart quotes, a fullwidth colon) load, reproducing ADV-007 through them. It also found that several records claimed the leak closed unconditionally (COR-005 / ADV-004), plus ADV-005, ADV-006, CON-005 and CON-006.
+- **The maintainer's call, 2026-09-29:** DEC-J9 (#137). After the trim, a token must be printable ASCII other than space (0x21–0x7E), checked on bytes.
+- **Fix pass 2:**
+  - `Secret.IsPrintableASCII` replaces `ContainsSpaceOrInvisible`. The credential tests add DEL, U+FE0F, U+3164, U+2800, smart quotes, a fullwidth colon, an invalid UTF-8 byte and a punctuation control.
+  - The leak gate gains a refused smart-quote case.
+  - The leak claims are reworded at the six named sites to the accurate one: whitespace, invisible and non-ASCII corruptions cannot load, and mistakes inside printable ASCII still can.
+  - The DEC-J2 note is added to the Makefile and quickstart, and the compatibility note to the PR body and config-schema.md.
+  - The #115 and #137 closing plans are updated, and so is the PR body's Validation section.
+- **Found while fixing:** the brief's placeholder example, `"TODO add later"`, is 14 characters, so the existing length rule already refused it. The compatibility note uses `"TODO add the token later"`, and a native probe confirmed that it is refused.
+- **Mutants:** 5, each predicted. Four were killed: the lower bound 0x20, the upper bound 0x7F, the refusal disabled, and Enabled-only. One survived, as predicted and equivalent: the loop over runes, because every non-ASCII byte decodes to a rune above U+007F or to U+FFFD. The method comment says so. None touched a network seam.
+- **Native probes,** with no HOME and Telegram disabled: a smart-quoted token and the placeholder are each refused at load, exit 1, and write nothing.
+
+### 2026-09-29 — Batch 13: review converged
+- Cycle 1, run after fix pass 1, found that DEC-J6's category rule still let graphic invisible characters and non-ASCII corruptions load. Examples: U+FE0F, U+3164, U+2800, smart quotes, a fullwidth colon, and an invalid byte from `$(cat)`. The review reproduced the ADV-007 leak end to end through them. The maintainer then chose DEC-J9: printable ASCII only. It is a generic constraint, not Telegram's token format.
+- Fix pass 2 implemented DEC-J9. Cycle 2 passed with notes, and no findings were required. The notes corrected how the residual is scoped:
+  - A bare token in *any* recorded message body stays unredacted while a printable-ASCII mistake is configured. That covers intake records when `message_on_error_only` is false.
+  - With the sink disabled, nothing fails at Telegram.
+- Those notes, the refusal message's "or remove it if you do not use Telegram" clause, and the FR-043/SC-006 hand-off to #105 were applied as post-review edits, listed in the PR body.
+- The correctness stage's first cycle-2 attempt stopped on a usage limit. Following the lost-agent rule, the worktree bytes were verified unchanged (`522ea1b9`) before a fresh attempt 2 ran. Its prompt had a bounded step list and a mutant cap, and it completed.

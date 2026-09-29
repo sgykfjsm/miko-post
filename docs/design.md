@@ -395,7 +395,7 @@ Record a stack trace for panics, unexpected errors, and failures where a trace i
 Illustrative failure event:
 
 ```json
-{"ts":"2026-08-27T11:42:03+09:00","level":"error","event":"telegram_send_failed","source":"cli","message_id":"01K...","sink":"telegram","message":"今日も美琴が可愛い♡","error_type":"timeout","error":"request timed out","duration_ms":10012,"app_version":"0.1.0","git_commit":"abc1234"}
+{"ts":"2026-08-27T11:42:03+09:00","level":"error","event":"telegram_send_failed","source":"cli","message_id":"01K...","sink":"telegram","message":"今日も美琴が可愛い♡","error_type":"timeout","error":"request timed out","duration_ms":10012,"app_version":"0.1.0","git_commit":"abc1234def56"}
 ```
 
 ### 11.3 Rotation

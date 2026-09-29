@@ -1617,7 +1617,6 @@ completed:
       - "Owned by T091 / #92 (quickstart.md FR-030 scenario). Native dismissal of the startup-error window by a real keypress or click: osascript blocked on Accessibility permission. Covered headlessly for Quit, close box, Esc (focused and unfocused) and Cmd+Q. RESOLVED 2026-09-29: the maintainer dismissed the real window by Quit, the close box, Esc and Cmd+Q, each exit 1 (Batch 12, T091 case 7a-7d)"
     process_incidents:
       - "Three test-time requests reached api.telegram.org with fake tokens and nothing was posted: the cycle-0 adversarial reviewer's probe (an env token overrode the file token), the coordinator's run-ignore-seam mutant, and the same mutant re-run by the cycle-1 correctness reviewer. Both run-ignore-seam runs bypass the substitute sink by construction"
-in_progress:
   - id: 12
     name: Polish and gates
     tasks: [T084, T085, T086, T087, T089, T090, T091]
@@ -1626,7 +1625,15 @@ in_progress:
     closes_under_decision: "#94 closes under DEC-I1: the documented stamped build (make install) records a real commit, verified by T090; go-install users of a tag get git_commit = unknown by accepted decision"
     branch: sgykfjsm/batch-12-cycle
     base: e0ef849024a97db44584ae808c0fecc89c36c71a
-    state: implemented, uncommitted, under review
+    state: merged
+    committed: true
+    pushed: true
+    merged_from_head: 14468d96420bfd10204637fa373b821e4cfb083d
+    squashed_as: aa202f68da6049bd2a991e426f3510bf743ee1d9
+    merged_at: 2026-09-29T01:53:47Z
+    merge_verification: "head 14468d9 and the squash aa202f6 share tree e216bdc2cc6433928d628a89ca96dd81ae8a8369; closingIssuesReferences empty"
+    issues_closed: [85, 86, 87, 88, 90, 91, 92, 94, 95]
+    issues_closed_note: "all nine closed 2026-09-29 after the merge, each with a comment naming aa202f68; #94's comment carries DEC-I1's four points and links #105 and #138; #92's carries the live and window results"
     delivered:
       - "T084: internal/post/secret_leak_test.go TestSecretLeakGate - cli.Run and app.NewService with a sentinel token behind an in-process http.DefaultTransport that never dials; eight cases, one a token with trailing whitespace (#137); stdout, stderr, every file either front door wrote, and the strings gui.resultText reads. internal/sink/telegram's TestNewLeavesTheClientOnTheDefaultTransport pins the gate's no-dial premise"
       - "T085/T086: specs/001-dual-sink-quick-post/acceptance-matrix.md"
@@ -1817,10 +1824,245 @@ in_progress:
     pull_request: 139
     pull_request_url: https://github.com/sgykfjsm/miko-post/pull/139
     pull_request_note: "opened as a draft on 2026-09-29 from 1fd507c; closingIssuesReferences read back empty"
+    open_after_batch_note: "carried into Batch 13"
     open_after_batch:
       - "internal/gui/entry.go:46 comment: a button gains focus neither by click nor by Tab from the message field (window_checks.finding)"
       - "#137 / DEC-I2: implement after Batch 12 merges, before close-feature"
       - "#138: a release workflow publishing stamped macOS binaries (DEC-I1's relaxation); future work, to be considered later"
+in_progress:
+  - id: 13
+    name: Hardening
+    branch: sgykfjsm/batch-13-hardening
+    base: aa202f68da6049bd2a991e426f3510bf743ee1d9
+    state: implemented, uncommitted, under review
+    selected_at: 2026-09-29
+    delivered:
+      - "DEC-I2 and DEC-J9 (#137): config.Secret gains Trimmed and IsPrintableASCII (no new Reveal call site); ResolveCredential trims the file and the environment token (Unicode whitespace), and a blank environment value counts as unset; Validate refuses, enabled or not and without quoting the token, a token with any byte outside 0x21-0x7E after the trim (DEC-J9 replaced DEC-J6's whitespace/Cf/non-graphic rule in fix pass 2). TestANonPrintableASCIICredentialIsRefused covers space, tab, newline, U+200B suffix, U+FEFF prefix, U+0007, DEL, U+FE0F, U+3164, U+2800, smart quotes, a fullwidth colon and an invalid UTF-8 byte from both sources, enabled and disabled; an NBSP-padded token trims and validates; a clean token and a punctuation token (1234567:AA-_.~!token) validate. TestSecretLeakGate's whitespace cases require the trimmed token on the wire (never the %20 form) and a padded token plus the bare token in a message to be redacted; its zero-width and smart-quote cases must be refused at load (exit 1, refusal on stderr and from LoadSettings, no request, no file written). Residual: mistakes inside printable ASCII (pasted straight quotes, a bot or TOKEN= prefix) still load; such a token fails at Telegram, and while configured a bare token in a failed post's captured body is not redacted"
+      - "DEC-J1 and DEC-J7 (#136): gui.Run delegates to runWith(errOut, homeDir, newApp); with no home directory, or one that is not an absolute path, it prints the reason and exits 1 before loading settings or constructing the app, for both windows. TestNoHomeDirectoryOpensNoWindow drives both settings outcomes for both homes with a constructor that stops the test, plus a control"
+      - "DEC-J8 (#115): no code; #115 closes after merge as partial (item 1 delivered, items 2 and 3 declined by DEC-J4)"
+      - "DEC-J2 (#96): version.resolve normalizes a lowercase-hex commit longer than 12 to its 12-character prefix; make stamps git rev-parse --short=12. TestCommitHasOneShapeOnEveryPath covers vcs.revision, make, a lengthened make stamp, a full-SHA stamp and the pseudo-version"
+      - "#102: validate.go comment and config-schema.md state the layout alphabet as a property; the list gains AM/PM, am/pm and Z"
+      - "#103: result.go names the encoding/xml boundary; the method-enumeration test fails on any argument-taking method other than Format"
+      - "DEC-J4 (#115): post.Sink.Send's contract says a returned error must not carry a credential"
+      - "DEC-J5 (#118): safe()'s Error() scan documented as an intentionally unpinned fast path subsumed by %#v"
+      - "internal/gui/entry.go commandButton comment matches the Batch 12 window checks"
+      - "Makefile and quickstart.md: an explicitly supplied COMMIT is never rewritten by make, and the binary's records report a lowercase-hex COMMIT longer than 12 as its 12-character prefix (DEC-J2)"
+      - "contracts: config-schema.md (credential characters under DEC-J9, and the compatibility note that a placeholder bot_token is now refused with the sink disabled), gui-interface.md (DEC-J1, DEC-J7), log-events.md (git_commit shape, a shorter operator stamp passes through); quickstart.md stamp example; docs/design.md and design.ja.md log example; README and example.toml token wording"
+    mutation: >-
+      Predicted killed, all killed: file-token trim removed (credential precedence and both leak-gate
+      whitespace cases), environment trim removed, blank environment counted as set, interior
+      whitespace check removed, home-directory check removed (the constructor stopped the test, no
+      window), normalizeCommit made the identity, commit length 7, and an argument-taking
+      AppendText added to SinkResult (the enumeration test now fails instead of logging). No mutant
+      touched a network seam. Fix pass 1 added 14 mutants in 15 runs; see fix_pass_1.mutation.
+      Fix pass 2 added 5 DEC-J9 mutants; see fix_pass_2.mutation.
+    validation: >-
+      make check (gofmt, vet, go test -race, 10 packages) and go build ./... clean on go1.27.1
+      darwin/arm64. Native probes, run from an empty directory with env -i and XDG_CONFIG_HOME set:
+      both windows exit 1 at once with the home-directory message and leave the directory empty; a
+      CLI post without HOME still succeeds and writes nothing to the working directory. make build
+      and an unstamped go build of the same tree both record git_commit=aa202f68da60.
+    native_probes_fix_pass_1: >-
+      2026-09-29, coordinator: HOME=tmp with XDG_CONFIG_HOME set, from an empty directory: exit 1 at
+      once with the not-absolute message, directory still empty (DEC-J7). A CLI post with a
+      settings file whose bot_token ends in U+200B and Telegram disabled: refused at load with the
+      whitespace-or-invisible message, which quotes nothing; exit 1; nothing posted (DEC-J6).
+      Coordinator also corrected acceptance-matrix.md row 13 to the gate's ten cases.
+    fix_pass_1:
+      authorized: "2026-09-29, maintainer: decisions DEC-J6, DEC-J7, DEC-J8 made; fix the minor findings too"
+      items:
+        - {ids: [ADV-001, COR-001], what: "DEC-J6: Secret.ContainsSpaceOrInvisible replaces ContainsSpace (IsSpace, Cf, !IsGraphic); the refusal moved below the length check, outside the Enabled block, message quotes nothing; credential tests for tab, newline, U+200B, U+FEFF, U+0007 and an NBSP pad, both sources, enabled and disabled; leak-gate case 'the token carries a zero-width character' with wantRefused"}
+        - {ids: [ADV-002], what: "DEC-J7: runWith refuses a home directory that is not absolute, without printing it; TestNoHomeDirectoryOpensNoWindow gains the HOME=tmp home; gui-interface.md covers it"}
+        - {ids: [CON-002, ADV-003], what: "DEC-J8: PR body lists #115 as partial; 'ADV-007, now closed' qualified to whitespace and invisible characters"}
+        - {ids: [CON-001], what: "next_best_action and project-status.md name each closure comment's decision text and date, and the merge commit"}
+        - {ids: [CON-003], what: "log-events.md git_commit row: a shorter operator stamp passes through"}
+        - {ids: [CON-004], what: "PR body Summary lists the user-visible behaviour changes; the enumeration-test tightening is listed as a test change"}
+        - {ids: [COR-002], what: "(c) the gate's escaped-% branch is documented as a second net that fires only if the trim and the refusal are both removed (confirmed by mutant); (a)/(b) M3 and M5 are now killed by the tab/newline and NBSP tests"}
+        - {ids: [COR-003], what: "runWith's comment says the line supplying os.UserHomeDir stays untested like the constructor line and is covered by the DEC-J1 native probe"}
+        - {ids: [COR-004], what: "(a) safe() comment: a clean error pays for both scans; (b) AM/PM and am/pm; (c) the Secret.Len comment sits directly above the length check; (d) design docs log example uses a 12-character git_commit"}
+      mutation: >-
+        Killed: IsSpace removed (interior space), !IsGraphic removed (U+0007), only IsSpace kept
+        (leak gate zero-width case: request made, LoadSettings accepted), ASCII-space-only check
+        (tab, newline, U+200B, U+FEFF, U+0007), ASCII-only trim (NBSP pad), refusal removed (credential
+        tests and leak gate), refusal moved inside Enabled (every disabled subtest), IsAbs check removed
+        (both relative-home subtests; the constructor stopped the test), trim removed (leak gate, at
+        load), trim and refusal both removed (leak gate, including the escaped-% branch). Survived, as
+        predicted: Cf removed (against the credential tests and the leak gate; equivalent, since no Cf rune is graphic; kept because DEC-J6 names the
+        class, and the comment says so), escaped-% branch removed (pre-empted by the load refusal,
+        documented), the refused case's no-request check removed (the stderr, exit and LoadSettings
+        checks also fail such a run; it fires first on every product mutant that reaches the wire). No
+        mutant touched a network seam.
+    fix_pass_2:
+      authorized: "2026-09-29, maintainer: DEC-J9 decided (option b, printable ASCII only); all findings authorized earlier the same day"
+      items:
+        - {ids: [ADV-D2], what: "DEC-J9: Secret.IsPrintableASCII (bytes 0x21-0x7E) replaces ContainsSpaceOrInvisible and its Cf/!IsGraphic logic; the refusal stays outside the Enabled block and quotes nothing; credential tests add DEL, U+FE0F, U+3164, U+2800, smart quotes, a fullwidth colon and an invalid UTF-8 byte, and a punctuation control; the leak gate adds 'the token is wrapped in smart quotes' with wantRefused"}
+        - {ids: [COR-005, ADV-004], what: "the unconditional 'cannot load' / 'every layer sees the real token' / '(b) closes the leak' claims reworded at credential.go, config-schema.md, acceptance-matrix.md row 13, the secret_leak_test.go doc, DEC-J6's why (note appended) and the PR body's ADV-007 sentence: a token either trims to printable ASCII or is refused; mistakes inside printable ASCII still load and are named"}
+        - {ids: [ADV-005], what: "Makefile and quickstart.md say the records report a long lowercase-hex COMMIT as its 12-character prefix (DEC-J2); make stamp is unchanged"}
+        - {ids: [ADV-006], what: "compatibility note in the PR body and config-schema.md: with the sink disabled, a placeholder bot_token is refused at load. The example is 'TODO add the token later', because the brief's 'TODO add later' is 14 characters and was already refused by the 16-character length rule"}
+        - {ids: [CON-005], what: "#115's closing plan names acceptance item 4 (re-evaluating #103's XML path) as delivered through #103; DEC-J8 gains a note"}
+        - {ids: [CON-006], what: "PR body Validation: fix-pass-1 and fix-pass-2 native probes, current test names, mutant table grouped by pass"}
+        - {ids: ["#137 closing plan"], what: "the planned #137 comment carries DEC-I2, DEC-J6 and DEC-J9 and names the printable-ASCII residual"}
+      mutation: >-
+        Killed: lower bound b < 0x21 made b < 0x20 (interior space, 4 variants), upper bound b > 0x7e
+        made b > 0x7f (interior DEL, 4 variants), refusal disabled with `if false &&` (all 13 refusal
+        cases in 4 variants, and the leak gate's zero-width and smart-quote cases), refusal made
+        Enabled-only (every disabled subtest; the leak gate runs enabled and survives it). Survived,
+        as predicted and equivalent: the byte loop made a range over runes, because every byte from
+        0x80 belongs to a rune above U+007F or decodes to U+FFFD, both refused; IsPrintableASCII's
+        comment says so. Each run was gated on go vet and the file restored and sha256-verified. No
+        mutant touched a network seam.
+      native_probes: >-
+        2026-09-29: env -i with no HOME, XDG_CONFIG_HOME and XDG_STATE_HOME in a scratch directory,
+        Telegram disabled, 10 s timeout, from an empty directory: a bot_token wrapped in smart quotes
+        and the placeholder 'TODO add the token later' are each refused at load with the DEC-J9
+        message, quoting nothing; exit 1; the vault, the state directory and the working directory
+        stay empty.
+    selected_by: maintainer
+    scope:
+      - "#137 / DEC-I2: trim bot_token and MIKO_POST_TELEGRAM_BOT_TOKEN at load; reject interior whitespace"
+      - "#136 / DEC-J1: refuse any window launch when the home directory cannot be resolved"
+      - "#96 / DEC-J2: one 12-character git_commit shape on every build path"
+      - "#102: restate the rendered-layout safety argument as a property"
+      - "#103: SinkResult comment names the XML boundary; the method-enumeration test fails instead of logging on an unevaluated method"
+      - "#115 / DEC-J4: the post.Sink contract states that a returned error must be credential-free"
+      - "#118 / DEC-J5: safe()'s Error() scan documented as an intentionally unpinned fast path"
+      - "internal/gui/entry.go:46 comment (Batch 12 window checks)"
+      - "Batch 12 merge record"
+    excluded: ["#101 (DEC-J3, deferred)", "#105 (spec-reconciler, at feature close)", "#138 (future)"]
+    review_run_state: /Users/shige/.agents/review-runs/sgykfjsm__miko-post/20260929T030000Z-b13
+    review:
+      - {cycle: 0, mode: review-only, verdict: needs-human-decision, required: [CON-001, CON-002], decisions: "ADV-D1 -> DEC-J6; #115 -> DEC-J8; ADV-002 -> DEC-J7"}
+      - {cycle: 1, after: fix pass 1, verdict: needs-human-decision, required: [COR-005], decisions: "ADV-D2 -> DEC-J9"}
+      - {cycle: 2, after: fix pass 2, verdict: passed-with-notes, required: [], note: "the correctness stage's first attempt stopped on a usage limit; the worktree was verified unchanged and a fresh attempt 2 completed"}
+    post_review_edits:
+      date: 2026-09-29
+      note: "Applied by the coordinator after the passed-with-notes verdict. Wording, records and the refusal message's last clause only; not re-reviewed. Listed in the PR body."
+      what:
+        - {ids: [COR-006, CON-007], what: "the DEC-J9 residual names every recorded body (failed-post capture, and intake when message_on_error_only is false) and the disabled-sink case, in credential.go, config-schema.md, secret_leak_test.go, acceptance-matrix row 13, README and the PR body"}
+        - {ids: [ADV-007], what: "the refusal message adds 'or remove it if you do not use Telegram'; the compatibility note covers a value left in MIKO_POST_TELEGRAM_BOT_TOKEN"}
+        - {ids: [CON-008], what: "FR-043/SC-006 annotation added to spec_reconciler_handoff, to be commented on #105 with the closures"}
+        - {ids: [], what: "#137's closing plan says DEC-J9 superseded DEC-J6; result.go says the enumeration test fails on any method other than Format"}
+    spec_reconciler_handoff:
+      - {issue: 105, item: "annotate spec.md FR-043 and SC-006 with DEC-J9's accepted residual: a token corrupted inside printable ASCII loads, and while configured a bare token in a recorded message body is not redacted", source: CON-008, published_as: null}
+    decisions:
+      - id: DEC-J1
+        issue: 136
+        decided_at: 2026-09-29
+        by: maintainer
+        decision: >-
+          When os.UserHomeDir() fails, neither window opens: mp prints the reason to stderr and exits
+          1 before the Fyne app is constructed. This covers the posting window and the startup-error
+          window alike, and extends DEC-H2 from "no settings path" to "no home directory".
+        why: >-
+          Fyne derives its storage from the home directory alone, so without one it writes Library/
+          and fyne/ relative to the working directory. Not writing outside the application's own
+          locations comes first, and a window whose storage would land in a random directory gains
+          nothing from opening. Option 2, a storage-less Fyne app, was not researched; the
+          maintainer chose option 1.
+        relax_by: "find a supported way to construct the Fyne app without persistent storage and open the window in that mode"
+      - id: DEC-J2
+        issue: 96
+        decided_at: 2026-09-29
+        by: maintainer
+        decision: >-
+          git_commit is the 12-character lowercase hex prefix of the commit on every build path that
+          identifies one: make build and make install, a local go build from vcs.revision, and an
+          untagged go install from the pseudo-version. A tagged go install stays "unknown" (DEC-I1).
+        why: >-
+          The issue's first suggestion, the full 40-character SHA, is unreachable on the go install
+          path: a pseudo-version carries only 12 characters of the commit, and nothing else is
+          recorded there. 12 is therefore the longest shape every path can produce, and it is
+          collision-resistant enough for this repository.
+      - id: DEC-J3
+        issue: 101
+        decided_at: 2026-09-29
+        by: maintainer
+        decision: "Deferred beyond v0.1: no change to elide's coverage or truncation in this feature."
+        why: "Needs pathological inputs (values of hundreds of thousands of characters); the maintainer judged it not worth v0.1 effort."
+      - id: DEC-J4
+        issue: 115
+        decided_at: 2026-09-29
+        by: maintainer
+        decision: >-
+          Option 1: the post.Sink contract states that an error returned from Send must not carry a
+          credential. No SanitizeError helper and no shared assertion helper in v0.1.
+        why: >-
+          v0.1 has one credential-bearing sink, which sanitizes at its own boundary, and Batch 12's
+          TestSecretLeakGate now checks the wired stack end to end. Options 2 and 3 are worth
+          building when a second credential-bearing sink appears.
+      - id: DEC-J5
+        issue: 118
+        decided_at: 2026-09-29
+        by: maintainer
+        decision: >-
+          The Error() half of (*telegram.Sink).safe stays unpinned by design, and its comment says
+          why: it is a fast path that the %#v scan subsumes for every error shape known today.
+        why: "It is a performance choice, not a safety property; the house style since Batch 10b is to write down what a surviving mutant means."
+      - id: DEC-J6
+        issue: 137
+        finding: Batch 13 review ADV-001 / COR-001 (decision item ADV-D1)
+        decided_at: 2026-09-29
+        by: maintainer
+        decision: >-
+          Option (b). In addition to DEC-I2's trim and whitespace refusal, a bot_token (from the file
+          or MIKO_POST_TELEGRAM_BOT_TOKEN) containing an invisible character anywhere is refused at
+          load: any rune in Unicode category Cf (format characters such as U+200B zero-width space
+          and U+FEFF byte-order mark) or any rune that is not graphic (controls). The message quotes
+          nothing.
+        why: >-
+          Zero-width characters and a BOM are not unicode.IsSpace, so DEC-I2 neither trimmed nor
+          refused them, and a token carrying one made the redaction pattern differ from the bare
+          token. The review reproduced the ADV-007 leak through it. Option (a), restricting the token
+          to Telegram's alphabet, was rejected because contracts/config-schema.md deliberately does
+          not encode a third party's credential format as a validation rule; (b) closes the leak
+          without doing so.
+        superseded_note: >-
+          Superseded by DEC-J9 (2026-09-29): the claim above that (b) closes the leak did not hold,
+          since graphic invisible and non-ASCII corruptions still loaded; DEC-J6's rejection of a
+          Telegram-alphabet rule stands.
+      - id: DEC-J7
+        issue: 136
+        finding: Batch 13 review ADV-002
+        decided_at: 2026-09-29
+        by: maintainer
+        decision: "DEC-J1's refusal also applies when the home directory resolves to a path that is not absolute (for example HOME=tmp)."
+        why: >-
+          os.UserHomeDir returns $HOME without checking it, and Fyne joins its storage onto it, so a
+          relative HOME makes Fyne write Library/ relative to the working directory: the #136 failure
+          through another door.
+      - id: DEC-J8
+        issue: 115
+        finding: Batch 13 review CON-002
+        decided_at: 2026-09-29
+        by: maintainer
+        decision: >-
+          Close #115 after merge with a comment saying acceptance item 1 was delivered (the post.Sink
+          contract) and items 2 and 3 were declined by DEC-J4, to be revisited when a second
+          credential-bearing sink appears.
+        why: "Leaving it open keeps an obligation that may never become real; the revisit condition is recorded in DEC-J4 and in the closing comment."
+        note: "Batch 13 cycle-1 CON-005: #115's acceptance item 4 (re-evaluating #103's XML path) is delivered in this batch through #103, and the closing comment says so."
+      - id: DEC-J9
+        issue: 137
+        finding: Batch 13 cycle-1 review COR-005 / ADV-004 (decision item ADV-D2)
+        decided_at: 2026-09-29
+        by: maintainer
+        supersedes: "DEC-J6's rule (DEC-J6's rejection of a Telegram-alphabet rule still stands)"
+        decision: >-
+          Option (b). After DEC-I2's trim, a bot_token (from the file or MIKO_POST_TELEGRAM_BOT_TOKEN)
+          is refused at load unless every byte is printable ASCII other than space (0x21-0x7E). That
+          one rule covers whitespace, format and control characters, graphic invisible runes (U+FE0F,
+          U+3164, U+2800), visible non-ASCII corruptions (smart quotes, a fullwidth colon from an IME)
+          and invalid UTF-8 bytes. The message quotes nothing.
+        why: >-
+          DEC-J6's category rule let graphic invisible and non-ASCII corruptions load, and the cycle-1
+          review reproduced the ADV-007 leak through them end to end. Every genuine Bot API token is
+          printable ASCII, so nothing legitimate is refused, and "printable ASCII" is a generic
+          credential constraint rather than a third party's token format.
+        residual: >-
+          Mistakes inside printable ASCII (the token pasted with its quotes, a "bot" prefix, a TOKEN=
+          prefix) still load. Such a token fails at Telegram, and while it is configured a bare token
+          in a failed post's captured body is not redacted. The records say so instead of claiming the
+          leak is closed unconditionally.
 blockers: []
 
 time_sensitive:
@@ -1878,23 +2120,26 @@ time_sensitive:
     deadline: before tagging v0.1.0
 
 next_best_action: >-
-  Batch 12's review converged (cycle 3 passed-with-notes). PR #139 is open as a draft from
-  sgykfjsm/batch-12-cycle, and its closingIssuesReferences read back empty. The window checks of
-  2026-09-29 completed T091; they are added to the PR as a records-only commit. Mark the PR ready
-  and merge with the maintainer's go-ahead. After merge, in the same session:
-  explicitly close #85, #86, #87, #88, #90, #91, #92, #94 and #95, each with a comment naming the
-  merge commit, and move batch 12 to completed. GitHub #94 records only the 2026-09-24 option (b), so its
-  closing comment must also say four things: DEC-I1 (2026-09-28) narrowed option (b); make install,
-  the documented stamped build, records a real commit, as verified by T090 (v0.1.0 / e0ef849 under
-  a local-only tag); a tagged go install records git_commit = unknown, which is accepted and
-  documented in design §14 and README; and FR-066 and A-008 are not yet annotated, handed to
-  spec-reconciler (#105). That last precondition is already met: the item was posted on #105 on
-  2026-09-28 (issuecomment-5865686841). #92's closing comment (CON-017) must give the 2026-09-28
-  live results, the DEC-D4 rider outcome (HTTP 400 "strings must be encoded in UTF-8", so the
-  premise holds and #104 stays closed), the 2026-09-29 window checks, and that Scenario 1 with
-  thread_id is not applicable (the test chat is a DM). Then implement DEC-I2 (#137) before close-feature, and
-  decide the remaining open non-task issues (#96, #101, #102, #103, #105 (spec-reconciler), #115,
-  #118, #136, #137, #138) before close-feature. #138 is future work, to be considered later.
+  Batch 13's review converged: cycle 2 ended passed-with-notes after fix passes 1 and 2 (DEC-J9),
+  followed by the post-review edits recorded under the Batch 13 entry. The work is uncommitted on
+  sgykfjsm/batch-13-hardening. Re-run make check on the final bytes, then with the maintainer's
+  go-ahead commit, push and open the PR from
+  .agents/batch-13-pr-body.md; it carries no closing keywords, so closingIssuesReferences must read
+  back empty. After merge, close each issue explicitly with a comment that names the merge commit
+  and carries the decision text and its date: #136 with DEC-J1 and DEC-J7 (2026-09-29); #96 with
+  DEC-J2 (2026-09-29); #137 with DEC-I2 (2026-09-28) and DEC-J9 (2026-09-29), saying DEC-J9
+  superseded DEC-J6's category rule, and naming the residual (mistakes inside printable ASCII, such
+  as pasted straight quotes or a bot or TOKEN= prefix, still load; while configured, a bare token
+  in any recorded message body stays unredacted: a failed post's captured body, and every intake
+  record when logging.message_on_error_only is false); #115 with DEC-J4 and DEC-J8 (2026-09-29), worded as a partial
+  close (acceptance item 1 delivered, item 4, re-evaluating #103's XML path, delivered through
+  #103, items 2 and 3 declined by DEC-J4, to be revisited when a second credential-bearing sink
+  appears); #118 with
+  DEC-J5 (2026-09-29); #102 and #103 naming what changed. With the closures, and with the
+  maintainer's go-ahead, comment on #105 with the second hand-off item: annotate spec.md FR-043
+  and SC-006 with DEC-J9's accepted residual. Then run close-feature: #105 is spec-reconciler's
+  checklist, including the FR-066 and A-008 annotation and that FR-043/SC-006 item. #101 (DEC-J3, deferred)
+  and #138 (future) stay open.
 
 decisions_resolved:
   - resolved_at: 2026-09-24

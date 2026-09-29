@@ -28,7 +28,7 @@ go build -o ./bin/mp ./cmd/mp
 # not exist — so a wrong path here produces an unstamped binary with no error.
 go build -ldflags "\
   -X github.com/sgykfjsm/miko-post/internal/version.version=0.1.0 \
-  -X github.com/sgykfjsm/miko-post/internal/version.commit=$(git rev-parse --short HEAD)" \
+  -X github.com/sgykfjsm/miko-post/internal/version.commit=$(git rev-parse --short=12 HEAD)" \
   -o ./bin/mp ./cmd/mp
 
 # Confirm what a build would embed, without building:
@@ -37,7 +37,10 @@ make stamp
 
 `VERSION` and `COMMIT` may be overridden, from the command line or the
 environment. Both must match `[A-Za-z0-9._+/-]+`; anything else fails the build
-rather than being rewritten into a different release label. Note that make reads
+rather than being rewritten into a different release label; `make stamp` shows
+them as given. The binary's records then apply DEC-J2: a lowercase hex `COMMIT`
+longer than 12 characters is reported in `git_commit` as its 12-character prefix,
+and any other value passes through. Note that make reads
 the environment, so an ambient `VERSION` in your shell affects a plain
 `make build`.
 

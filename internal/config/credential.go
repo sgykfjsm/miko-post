@@ -27,22 +27,47 @@ const TelegramBotTokenEnv = "MIKO_POST_TELEGRAM_BOT_TOKEN"
 // validation's "required when enabled" check be a single test of the resolved
 // value rather than a two-source condition it would have to restate.
 //
-// An empty environment variable counts as absent, so the file's value survives.
-// That matches how FR-053 and FR-065 treat the XDG variables and is the useful
-// reading of `export MIKO_POST_TELEGRAM_BOT_TOKEN=` in a shell profile: the
-// user has no token in the environment, not a deliberate empty credential.
+// Both sources are trimmed of leading and trailing whitespace (DEC-I2, #137).
+// An environment variable that is empty, or only whitespace, counts as absent,
+// so the file's value survives. That matches how FR-053 and FR-065 treat the
+// XDG variables and is the useful reading of `export MIKO_POST_TELEGRAM_BOT_TOKEN=`
+// in a shell profile: the user has no token in the environment, not a
+// deliberate empty credential.
 //
-// The value is otherwise taken exactly as given, with no trimming. A token
-// carrying a stray newline from `export TOKEN=$(cat file)` will therefore fail
-// at the chat service rather than being silently repaired here. That is the
-// deliberate choice: this package must not alter a credential, because a
-// credential it has altered is one no one can compare against the source they
-// copied it from.
+// Trimming replaces an earlier rule that the value was taken exactly as given,
+// on the grounds that an altered credential cannot be compared with its source.
+// That rule leaked. A token saved with a trailing space passed validation, the
+// URL carried it percent-escaped, and the logger's redaction pattern was the
+// padded value, so a message body containing the bare token reached the log
+// verbatim (Batch 12, ADV-007, reproduced). Whitespace can never be part of a
+// Bot API token, so removing it loses nothing and the result still compares
+// equal to what the user copied. Interior whitespace is a different mistake and
+// is refused by validation rather than repaired here.
+//
+// Nothing else is trimmed (DEC-J9). A zero-width space, a byte-order mark, a
+// smart quote or any other byte outside printable ASCII survives this trim
+// wherever it is, and validation refuses it. Between the two, a token either
+// trims to printable ASCII or is refused, so whitespace, invisible and non-ASCII
+// corruptions can no longer load. Mistakes inside printable ASCII still can: a
+// token pasted with its quotes, with a "bot" prefix or with a TOKEN= prefix
+// passes both. While it is configured, a bare token in any recorded message
+// body is not redacted, because the redaction pattern is the configured value
+// and not the bare token: a failed post's captured body, and, when
+// logging.message_on_error_only is false, every post's intake record. With the
+// chat destination enabled such a token fails at Telegram; with it disabled
+// nothing fails, and only the intake case applies.
 func ResolveCredential(settings *Settings) {
+	settings.Sink.Telegram.BotToken = settings.Sink.Telegram.BotToken.Trimmed()
+
 	token, ok := os.LookupEnv(TelegramBotTokenEnv)
-	if !ok || token == "" {
+	if !ok {
 		return
 	}
 
-	settings.Sink.Telegram.BotToken = NewSecret(token)
+	fromEnv := NewSecret(token).Trimmed()
+	if fromEnv.IsEmpty() {
+		return
+	}
+
+	settings.Sink.Telegram.BotToken = fromEnv
 }

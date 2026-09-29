@@ -423,6 +423,16 @@ func (s *Sink) safe(err error) error {
 	// Error() first because it is the cheap surface and the usual carrier; the
 	// reflected form only when the message came back clean, since that is the
 	// case where a suppressed exported field can still be one verb away.
+	//
+	// The Error() scan is a fast path that no test pins, deliberately
+	// (DEC-J5, #118). %#v renders unexported fields as well as exported ones,
+	// so for every error shape known today it already finds whatever Error()
+	// would, and deleting the Error() half changes no observable result. It is
+	// consulted first, and the reflective render is skipped only when Error()
+	// already carries the token; a clean error, the usual case, pays for both
+	// scans. So the saving is on the leaking path, not the common one. If a
+	// future error type leaks through Error() but not %#v, this scan becomes
+	// load-bearing, and that type needs a fixture here that pins it.
 	rendered := err.Error()
 	if !strings.Contains(rendered, token) && !strings.Contains(fmt.Sprintf("%#v", err), token) {
 		return err

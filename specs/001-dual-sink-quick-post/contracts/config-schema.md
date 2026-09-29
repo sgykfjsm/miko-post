@@ -28,7 +28,7 @@ rather than a silent no-op.
 | Key | Type | Default | Validation |
 |---|---|---|---|
 | `enabled` | bool | `false` | — |
-| `bot_token` | string | — | Required when enabled and `MIKO_POST_TELEGRAM_BOT_TOKEN` is unset. At least 16 characters whenever present, enabled or not. Never logged or printed (FR-043). See **Credential length** below. |
+| `bot_token` | string | — | Required when enabled and `MIKO_POST_TELEGRAM_BOT_TOKEN` is unset. At least 16 characters whenever present, enabled or not. Leading and trailing whitespace is trimmed; after that, every byte must be printable ASCII other than space (`0x21`–`0x7E`), enabled or not (DEC-I2, DEC-J9). Never logged or printed (FR-043). See **Credential length** and **Credential characters** below. |
 | `chat_id` | string | — | Required when enabled; non-empty |
 | `thread_id` | int | *absent* | Optional. **Absence**, not a sentinel, means "post to the chat directly" (FR-032, A-006). |
 | `parse_mode` | string | `"MarkdownV2"` | Accepted and validated, **inert in v0.1** (FR-034) |
@@ -46,6 +46,38 @@ ordinary field names, and a shorter pattern must. It is deliberately not Telegra
 `<digits>:<35 chars>` shape, which would encode a third party's credential format as a validation
 rule. `internal/logging` skips any pattern shorter than the same bound, as a second guard for callers
 that construct settings without going through `Load` (issue #117).
+
+**Credential characters** (DEC-I2 and DEC-J9, #137): both sources, `bot_token` and
+`MIKO_POST_TELEGRAM_BOT_TOKEN`, are trimmed of leading and trailing whitespace (Unicode, so a
+no-break space counts) at load, and an environment value that is only whitespace counts as unset,
+like an empty one. After trimming, the token is refused, whether or not the chat destination is
+enabled, unless every byte is printable ASCII other than space (`0x21`–`0x7E`). The check is on
+bytes, so a byte that is not valid UTF-8 is refused too. That one rule refuses interior
+whitespace, controls, format characters (U+200B zero-width space, U+FEFF byte-order mark),
+graphic characters that render as nothing (U+FE0F, U+3164, U+2800), and visible non-ASCII
+lookalikes (smart quotes, a fullwidth colon typed by an IME). These are refused rather than
+repaired, with a message that does not quote the token. This matters for more than tidiness.
+Before it, a token saved with a trailing space, a zero-width space or smart quotes passed
+validation and armed a redaction pattern that did not match the bare token, so a message
+containing the bare token was logged verbatim. Every genuine Bot API token is printable ASCII, so
+nothing legitimate is refused, and the rule is a generic credential constraint rather than
+Telegram's token format, which this contract deliberately does not encode.
+
+A token therefore either trims to printable ASCII or is refused: whitespace, invisible and
+non-ASCII corruptions can no longer load. Mistakes inside printable ASCII still load — the token
+pasted with its straight quotes, with a `bot` prefix, or with a `TOKEN=` prefix. While such a token
+is configured, a bare token in any recorded message body is not redacted, because the redaction
+pattern is the configured value: a failed post's captured body, and, when
+`logging.message_on_error_only` is false, every post's intake record. With the chat destination
+enabled the token fails at Telegram; with it disabled nothing fails, and only the intake case
+applies.
+
+**Compatibility**: because the rule applies with the chat destination disabled, a placeholder
+`bot_token` such as `"TODO add the token later"`, or a non-ASCII value left in
+`MIKO_POST_TELEGRAM_BOT_TOKEN` (for example exported from a shell profile), is now refused at load,
+and it blocks both the command line and the window until it is removed or replaced with the real
+token. The message says so, including that a user who does not use Telegram can simply remove it. This is deliberate: the token
+arms the redaction pattern whether or not the sink is enabled.
 
 **Credential precedence** (FR-042): `MIKO_POST_TELEGRAM_BOT_TOKEN` wins over `bot_token`. It is
 the only setting with an environment override in v0.1.
@@ -75,8 +107,10 @@ Rejecting the element is the rule, rather than inspecting what it renders, becau
 does not imply a fixed zone: one `Location` selects among arbitrarily many zones by instant
 (`America/New_York` renders `EST` in January and `EDT` in July), so no fixed number of sampled
 instants is sound — the transition schedule is an input, not a constant. With the element refused,
-every remaining element renders from digits, Go's English month and day names, and `` +-,.: ``, so the
-rendered value is instant-independent and one rendering decides the rules above.
+every remaining element renders from a fixed alphabet that contains no path separator, no control
+character and no lone dot, so the rendered value is instant-independent and one rendering decides the
+rules above. The property, not a list, is the claim (#102). For today's elements the alphabet is
+digits, Go's English month and day names, `AM`/`PM` and `am`/`pm`, the zone letter `Z`, and `` +-,.: ``.
 
 The numeric offsets — `Z0700`, `Z07:00`, `Z07`, `Z070000`, `Z07:00:00`, `-0700`, `-07:00`, `-07`,
 `-070000`, `-07:00:00` — remain accepted and are the supported way to put the zone in a name. Note

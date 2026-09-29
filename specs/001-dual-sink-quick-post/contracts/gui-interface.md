@@ -78,6 +78,19 @@ When no settings path can be resolved at all (`$HOME` and `XDG_CONFIG_HOME` both
 is opened: the error goes to stderr and the process exits `1`. Constructing the application would
 write Fyne's storage relative to the working directory, and there is no path for the window to show (decision DEC-H2, 2026-09-24).
 
+More generally, **when the home directory cannot be resolved, neither window opens** (decision DEC-J1,
+2026-09-29, #136). Fyne derives its storage from the home directory alone and ignores
+`XDG_CONFIG_HOME`, so `HOME` unset with `XDG_CONFIG_HOME` set would still make it write `Library/`
+and `fyne/` into the working directory. The window front door checks the home directory before it
+loads settings, prints the reason to stderr, and exits `1` before the application is constructed.
+This covers the posting window and the startup-error window alike. The command line is unaffected,
+because it never constructs the application.
+
+A home directory that **is not an absolute path** is refused the same way (decision DEC-J7,
+2026-09-29, #136). `os.UserHomeDir` returns `$HOME` without checking it, so `HOME=tmp` resolves,
+and Fyne would write `Library/` under `./tmp`. The message says that the home directory is not an
+absolute path and does not print the value.
+
 ## Durability (spec Edge Cases)
 
 If the window is dismissed while a post is in flight, the post's outcome is still recorded in the

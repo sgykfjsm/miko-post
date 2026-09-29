@@ -64,9 +64,14 @@ Then replace the lines marked `REPLACE`:
 
 - `[sink.telegram]`: `bot_token` and `chat_id`. Instead of writing the token into the file, you
   can set `MIKO_POST_TELEGRAM_BOT_TOKEN`, which takes precedence. The token is never logged or
-  printed. Enter it exactly, with no spaces around it. Until #137 is fixed, a token saved with
-  surrounding whitespace is not trimmed, and pasting the bare token into a message would then
-  leave it unredacted in the log.
+  printed. Spaces or a newline around the token are trimmed, from the file and from the
+  environment variable alike. After that, the token must be printable ASCII with no spaces: one
+  with whitespace inside it, an invisible character such as a zero-width space, or a non-ASCII
+  character such as a smart quote is refused at startup, even with the chat destination
+  disabled, so copy it again from @BotFather (or remove a placeholder, if you do not use Telegram).
+  Pasted straight quotes or a `bot` prefix are not caught this way: Telegram refuses such a token
+  when you post, and until you fix it, the token pasted into a message is not hidden in the
+  diagnostic log.
 - `[sink.obsidian]`: `daily_note_dir`, the absolute path of your daily-notes folder.
 
 Set `enabled = false` on a destination you do not use. At least one must be enabled. Unknown keys
