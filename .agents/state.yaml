@@ -3,8 +3,8 @@ current_goal: >-
   message to Telegram and today's Obsidian daily note concurrently and independently, from a CLI
   and a GUI front door, through one shared posting core.
 
-status: closing
-status_note: "all 91 tasks done and Batch 13 merged; feature 001 is closed pending the spec-reconciler closeout PR on sgykfjsm/close-feature-001"
+status: closed
+status_note: "feature 001 closed 2026-09-29: all 91 tasks done, Batches 1-13 merged, the spec-reconciler closeout merged as PR #141 (3fb79dd), and #105 closed; only #101 (deferred) and #138 (future) remain open"
 
 completed:
   - id: batch-1
@@ -2134,15 +2134,10 @@ time_sensitive:
     deadline: before tagging v0.1.0
 
 next_best_action: >-
-  Merge the feature-001 closeout PR from sgykfjsm/close-feature-001 (spec-reconciler pass, records
-  and docs only, no .go file; see feature_closeout), after checking that closingIssuesReferences
-  reads back as intended. Then close #105 with a comment naming what was reconciled: data-model.md
-  SinkResult (five guards, errMarker, named-field rule, encoding/xml boundary), AllSucceeded's
-  empty-slice fail-closed rule, the five-method pointer-held Secret prescription with the shape
-  accessors; config-schema.md thread_id positivity; log-events.md "unknown" sentinel for source and
-  message_id, with design.md/design.ja.md 11.2; spec.md FR-066 and A-008 under DEC-I1/DEC-J2, and
-  FR-043 and SC-006 under DEC-J9. #101 (deferred, DEC-J3) and #138 (future, DEC-I1's relaxation)
-  stay open. Nothing else remains for feature 001.
+  None for feature 001; it is closed. Open work outside it: #101 (DEC-J3, deferred beyond v0.1) and
+  #138 (a release workflow publishing stamped macOS binaries, DEC-I1's relaxation). Two stale code
+  comments await the next code change: Reveal's "exactly one place" in internal/config/secret.go
+  and "four-method" in internal/post/result.go. Tagging v0.1.0 is the maintainer's call.
 
 feature_closeout:
   date: 2026-09-29
@@ -2164,6 +2159,12 @@ feature_closeout:
   archived: "the batch-*.md, batch-*.txt and issue-122-* working files and change-groups.json (read by nothing current) moved from .agents/ to .agents/archive/batch-artifacts/ with their names kept; every state.yaml reference to them was rewritten to the new path (index: README.md there); project-status.md outgoing copy -> .agents/archive/project-status-before-closeout.md"
   left_open: ["#101 (DEC-J3, deferred beyond v0.1)", "#138 (stamped release binaries, future)"]
   kept_as_record: "specs/001-dual-sink-quick-post/ stays in place as the feature's record"
+  merged:
+    pull_request: 141
+    squashed_as: 3fb79dd687e1019d633a7bd6a43142ac66caa026
+    merged_at: 2026-09-29T08:07:19Z
+    merge_verification: "head ad23c91 and the squash share tree 3874df82c97b7634519e46637207217037626cb7; closingIssuesReferences empty"
+  issue_105_closed: "2026-09-29, with a comment naming each reconciled item and PR #141 (issuecomment-5886248934)"
 decisions_resolved:
   - resolved_at: 2026-09-24
     by: maintainer
