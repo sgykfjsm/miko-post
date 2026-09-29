@@ -1538,7 +1538,6 @@ completed:
         recorded_in: >-
           specs/001-dual-sink-quick-post/contracts/log-events.md Traces section;
           specs/001-dual-sink-quick-post/tasks.md T073
-in_progress:
   - id: 11
     name: US6 settings resolution
     tasks: [T075, T076, T077, T078, T079, T080, T081, T082, T083]
@@ -1547,7 +1546,27 @@ in_progress:
     branch: sgykfjsm/record-pr134-run-batch11
     base: dfdc69fb8c55065d6a2f470f801c0ddc1718ef13
     implementation_commit: 25a4f1d72cb3818c50dd821d6e861b49043072f2
-    state: implemented, reviewed locally through cycle 1 with two fix passes; review converged: passed-with-notes after cycles 0-2 and three fix passes; committed locally, not pushed, no PR; not pushed, no PR
+    state: merged
+    committed: true
+    pushed: true
+    pull_request: 135
+    pull_request_url: https://github.com/sgykfjsm/miko-post/pull/135
+    merged_from_head: 5005ea8cdcfe16be94f70056d5682d3dcc4cd0a3
+    squashed_as: e0ef849024a97db44584ae808c0fecc89c36c71a
+    merged_at: 2026-09-24T06:46:43Z
+    merge_verification: >-
+      Checked 2026-09-25 rather than asserted: head 5005ea8 and the squashed commit e0ef849 share
+      tree 776bbbb52b7c20776474f0692b7c2ba63dbd8a6f, so main carries exactly what was reviewed.
+      closingIssuesReferences read back empty, as intended.
+    issues_closed: [76, 77, 78, 79, 80, 81, 82, 83, 84, 119, 130]
+    issues_closed_note: >-
+      All eleven closed 2026-09-24 between 06:47:36 and 06:47:57 UTC, about a minute after the
+      merge (06:46:43 UTC), each with a comment naming PR #135 and e0ef849. Verified 2026-09-25.
+    record_gap: >-
+      The merge, the closures and both follow-ups were done in the merging session, but no record
+      reached main: until Batch 12 this entry sat under in_progress reading "not pushed, no PR", and
+      project-status.md and next_best_action still described Batch 11 as awaiting review. Recorded
+      in Batch 12's PR, the usual batch-N-record-in-batch-N+1 pattern.
     prepared_pr_body: .agents/batch-11-pr-body.md
     review_mode: review-and-fix (authorized 2026-09-24)
     review_cycle_0:
@@ -1587,17 +1606,221 @@ in_progress:
       correctness: {status: pass-with-notes, findings: [COR-001], note: "30 mutants, all killed; COR-001 was a stale test comment, now fixed"}
       adversarial: {status: findings, findings: [ADV-001, ADV-002], decision_items: [DEC-ADV-1]}
     followup_candidates:
-      - {source: cycle-2 ADV-001 / DEC-ADV-1, target: "new issue", action: "with HOME unset but XDG_CONFIG_HOME set, both the posting window and the startup-error window let Fyne write Library/ and fyne/ into the cwd, because Fyne derives storage from os.UserHomeDir() alone. The posting-window case predates Batch 11. Decide whether any window launch should refuse, or construct the app differently, when HOME is unset", status: planned, needs: "GitHub write authorization"}
-      - {source: cycle-2 CON-005, target: "issue #126 (closed)", action: "comment correcting its rotation-clamp rationale: a wrapped threshold disables rotation or becomes arbitrary, never rotate-every-write", status: planned, needs: "GitHub write authorization"}
+      - {source: cycle-2 ADV-001 / DEC-ADV-1, target: "new issue", published_as: "#136, 2026-09-24T07:43:40Z", action: "with HOME unset but XDG_CONFIG_HOME set, both the posting window and the startup-error window let Fyne write Library/ and fyne/ into the cwd, because Fyne derives storage from os.UserHomeDir() alone. The posting-window case predates Batch 11. Decide whether any window launch should refuse, or construct the app differently, when HOME is unset", status: published}
+      - {source: cycle-2 CON-005, target: "issue #126 (closed)", published_as: "issue comment, 2026-09-24T07:43:24Z", action: "comment correcting its rotation-clamp rationale: a wrapped threshold disables rotation or becomes arbitrary, never rotate-every-write", status: published}
     native_checks_final_tree: >-
       2026-09-24 on HEAD 25a4f1d plus the uncommitted fix passes (worktree diff sha256 prefix
       bf8975efb186): --help printed the resolved path and exited 0; -c ./c.toml printed the FR-006 text
       and exited 1; an all-disabled default config kept the error window open until the 5s kill and
       created no log; with HOME and XDG_CONFIG_HOME both unset, exit 1 and nothing written to the cwd (DEC-H2).
     validation_gaps:
-      - "Owned by T091 / #92 (quickstart.md FR-030 scenario). Native dismissal of the startup-error window by a real keypress or click: osascript blocked on Accessibility permission. Covered headlessly for Quit, close box, Esc (focused and unfocused) and Cmd+Q"
+      - "Owned by T091 / #92 (quickstart.md FR-030 scenario). Native dismissal of the startup-error window by a real keypress or click: osascript blocked on Accessibility permission. Covered headlessly for Quit, close box, Esc (focused and unfocused) and Cmd+Q. RESOLVED 2026-09-29: the maintainer dismissed the real window by Quit, the close box, Esc and Cmd+Q, each exit 1 (Batch 12, T091 case 7a-7d)"
     process_incidents:
       - "Three test-time requests reached api.telegram.org with fake tokens and nothing was posted: the cycle-0 adversarial reviewer's probe (an env token overrode the file token), the coordinator's run-ignore-seam mutant, and the same mutant re-run by the cycle-1 correctness reviewer. Both run-ignore-seam runs bypass the substitute sink by construction"
+in_progress:
+  - id: 12
+    name: Polish and gates
+    tasks: [T084, T085, T086, T087, T089, T090, T091]
+    issues: [85, 86, 87, 88, 90, 91, 92]
+    additionally_delivered_issues: [95]
+    closes_under_decision: "#94 closes under DEC-I1: the documented stamped build (make install) records a real commit, verified by T090; go-install users of a tag get git_commit = unknown by accepted decision"
+    branch: sgykfjsm/batch-12-cycle
+    base: e0ef849024a97db44584ae808c0fecc89c36c71a
+    state: implemented, uncommitted, under review
+    delivered:
+      - "T084: internal/post/secret_leak_test.go TestSecretLeakGate - cli.Run and app.NewService with a sentinel token behind an in-process http.DefaultTransport that never dials; eight cases, one a token with trailing whitespace (#137); stdout, stderr, every file either front door wrote, and the strings gui.resultText reads. internal/sink/telegram's TestNewLeavesTheClientOnTheDefaultTransport pins the gate's no-dial premise"
+      - "T085/T086: specs/001-dual-sink-quick-post/acceptance-matrix.md"
+      - "T087: README.md; testdata/config/example.toml pinned by TestExampleSettingsAreTheDefaults and TestExampleSettingsNameEveryKey"
+      - "T089: gofmt, go vet ./..., go build ./..., go test -race ./... clean on go1.27.1 darwin/arm64"
+      - "T090: go install ...@latest -> v0.0.0-20260924064643-e0ef849024a9, no vcs.* settings, records carry that version and commit e0ef849024a9; make install stamps e0ef849/e0ef849 untagged and v0.1.0/e0ef849 under a local-only tag"
+      - "T091: specs/001-dual-sink-quick-post/validation/t091-quickstart.md; local part 2026-09-25, live command-line part 2026-09-28 against the maintainer's test bot, native-window part by the maintainer 2026-09-29, all pass; Scenario 1 with thread_id not applicable (the test chat is a DM)"
+      - "#95: docs/design.ja.md section 14 uses the real module path; grep -rn module-path docs is empty"
+    mutation_t084: >-
+      Predicted, then run. Killed: logger Redact removed (by the message-contains-credential case),
+      safe and withoutRequestURL both removed, decodeResponse scrub and safe both removed, fixture
+      using another token (vacuity witness), recorder dropping error text (log witness). Survived as
+      predicted: safe alone, withoutRequestURL alone - they mask each other and decodeResponse, and
+      are pinned by internal/sink/telegram's own tests. The witness-disabled control also survived,
+      confirming the witness is what kills the recorder mutant. No mutant touched a network seam.
+      Fix pass 1 re-ran the table against the revised gate: every kill still holds, safe alone
+      still survives, and withoutRequestURL alone is now killed, by the trailing-whitespace case
+      only. Also killed: the rescue never running (COR-001), the both-fail note succeeding
+      (COR-001), Redact armed only for non-GUI sources (ADV-001). The Transport mutant for ADV-004
+      was run only against TestNewLeavesTheClientOnTheDefaultTransport and was killed.
+      Re-run by the cycle-2 correctness review on the fix-pass-2 bytes (e95d86d2). Killed: rescue
+      predicate forced false; both-fail case's note succeeding; GUI-only Redact removal; CLI-only
+      Redact removal; logger Redact nil; withoutRequestURL short-circuit (by the trailing-whitespace
+      case only); safe plus withoutRequestURL together; safe plus the decodeResponse scrub
+      together; the client Transport mutant (against the seam test only); four example-file
+      mutants. Survived, as expected: safe alone; the decodeResponse scrub alone. The fixture and
+      recorder witness mutants and the control were not part of that run.
+    review_mode: review-and-fix (cycle 0 review-only; fixes authorised by the maintainer 2026-09-28)
+    review_run_state: /Users/shige/.agents/review-runs/sgykfjsm__miko-post/20260925T024500Z-b12
+    review_cycle_0:
+      target_diff_sha256: c316dee8d5f7414a2ae1dbf2fed1130e338c9aea68e1da953bba33b602abb560
+      contract: {status: valid, findings: [CON-001, CON-002, CON-003, CON-004]}
+      correctness: {status: findings, findings: [COR-001, COR-002, COR-003]}
+      adversarial: {status: findings, findings: [ADV-001, ADV-002, ADV-003, ADV-004, ADV-005], decision_items: [DI-001]}
+      verdict: needs-human-decision
+      required: [COR-001, ADV-001, ADV-002, CON-001, CON-002, ADV-003]
+      required_summary:
+        - "COR-001: the rescue and both-fail leak cases lack witnesses specific to their path; the rescue-never-runs and note-succeeds mutants survive"
+        - "ADV-001: the window subtest writes a GUI-source log it never scans; a GUI-only Redact regression survives"
+        - "ADV-002: README's configure step copies testdata/ that go-install users do not have, and plain cp overwrites a real config"
+        - "CON-001: next_best_action below still says 'auto-close'; the PR carries no closing keywords, so closingIssuesReferences must be empty and every close is explicit"
+        - "CON-002: the T091 owed list omits #92's 2026-09-10 rider (a live sendMessage with text=a%FFb, which settles DEC-D4 and may reopen #104)"
+        - "ADV-003 (with CON-003): #94 is 'discharged' through make install, but README's primary path is go install @latest, which reports unknown once v0.1.0 is tagged; blocked on DI-001"
+      decisions:
+        - id: DEC-I1
+          finding: ADV-003 / CON-003 (DI-001)
+          decided_at: 2026-09-28
+          by: maintainer
+          decision: >-
+            `go install github.com/sgykfjsm/miko-post/cmd/mp@latest` stays the primary, documented
+            install path for end users. Once v0.1.0 is tagged, such a build records
+            app_version = the tag and git_commit = "unknown". That is an accepted, documented
+            limitation, not a defect. `make install` from a checkout is the stamped build, for
+            the maintainer and anyone building from source.
+          why: >-
+            The project ships no release pipeline or prebuilt binaries, and #94's decision (b) was
+            satisfied by the mechanism (make install stamps both fields, verified by T090), not by
+            what end users reach. Keeping go install means accepting that the commit field is dead
+            on that channel. The version field still identifies the release, and the tag maps it
+            to exactly one commit, so a record stays attributable. This narrows design §14's
+            "not an acceptable default" to "accepted for v0.1".
+          relax_by: >-
+            Publish stamped binaries (for example a CI release job running make install or
+            equivalent linker flags) and point README's install section at them. That restores a
+            real commit for end users without changing internal/version. Tracked as #138 (filed
+            2026-09-28), future work to be considered later.
+          recorded_in: "docs/design.md §14, docs/design.ja.md §14, README.md Install; spec.md FR-066 and A-008 not yet annotated, handed to spec-reconciler (#105), see spec_reconciler_handoff"
+          notes: >-
+            spec.md A-008 says version and commit "are stamped into the binary at build time",
+            which is false for the go install path under DEC-I1. Batch 12 does not edit spec.md;
+            the FR-066/A-008 annotation is handed to spec-reconciler under #105 (CON-007).
+        - id: DEC-I2
+          issue: 137
+          finding: ADV-005 / ADV-007
+          decided_at: 2026-09-28
+          by: maintainer
+          decision: >-
+            sink.telegram.bot_token and MIKO_POST_TELEGRAM_BOT_TOKEN are trimmed of leading and trailing
+            whitespace at load, and a value that still contains any whitespace after trimming is rejected
+            by config.Validate with an actionable message. An environment value that is only whitespace
+            becomes empty and counts as absent.
+          why: >-
+            A whitespace-padded token passes validation today and leaks: the logger's Redact pattern is
+            the padded value, so a message body containing the bare token is written to app.jsonl
+            verbatim (ADV-007, reproduced), and only withoutRequestURL protects the URL path (ADV-005).
+            Trimming makes the URL, safe() and Redact all use the real credential. It deliberately
+            reverses ResolveCredential's "taken exactly as given" rationale: whitespace can never be part
+            of a valid Bot API token, so the trimmed value still compares equal to its source. Interior
+            whitespace is refused rather than removed, because silently repairing it would hide a
+            different mistake.
+          scheduled: "after Batch 12 merges, before close-feature; not implemented in Batch 12"
+          recorded_in: "GitHub #137 comment 2026-09-28 (issuecomment-5865747812)"
+      decision_items:
+        - {id: DI-001, resolved_by: DEC-I1, question: "After v0.1.0, what do README users run: go install @latest with git_commit=unknown accepted and documented, make install from a clone as the primary path, or published stamped binaries? Decides ADV-003 and the #94 closure wording"}
+      non_blocking: [CON-004, COR-002, COR-003, ADV-004, ADV-005]
+      followup_candidates:
+        - {id: ADV-005, target: new issue, action: "a bot_token with surrounding whitespace passes validation; JoinPath escapes it, so only withoutRequestURL keeps the core token out of the log. Trim or reject it at validation, or pin that layer end to end", status: published, published_as: "#137, 2026-09-28"}
+        - {id: ADV-007, source: cycle 1, target: "issue #137", action: "evidence that a message body containing the bare token reaches app.jsonl verbatim when the configured token is whitespace-padded", status: published, published_as: "#137 comment 2026-09-28 (issuecomment-5865685202)"}
+        - {id: DEC-I2, target: "issue #137", action: "the maintainer's decision: trim at load, reject interior whitespace", status: published, published_as: "#137 comment 2026-09-28 (issuecomment-5865747812)"}
+        - {id: DEC-I1 relax_by, target: new issue, action: "consider a release workflow that publishes stamped macOS binaries; future work, to be considered later", status: published, published_as: "#138, 2026-09-28"}
+    fix_pass_1:
+      date: 2026-09-28
+      findings: "the 11 cycle-0 findings (required and non_blocking above)"
+      scope: "tests, docs and records; no production code"
+      result_diff_sha256: 1d80687093faf5515a83883dba46b2ae1eda63b28530395dbdf787cccc4a036e
+    review_cycle_1:
+      target_diff_sha256: 1d80687093faf5515a83883dba46b2ae1eda63b28530395dbdf787cccc4a036e
+      contract: {status: valid, findings: [CON-005, CON-006, CON-007, CON-008, CON-009, CON-010, CON-011]}
+      correctness: {status: pass-with-notes, findings: [COR-004, COR-005]}
+      adversarial: {status: findings, findings: [ADV-006, ADV-007, ADV-008, ADV-009]}
+      verdict: request-changes
+      required: [CON-005, ADV-006, CON-006]
+      required_summary:
+        - "CON-005 / ADV-006: the branch name"
+        - "CON-006: the #94 comment plan"
+    fix_pass_2:
+      date: 2026-09-28
+      findings: "the 13 cycle-1 findings (CON-005 to CON-011, COR-004, COR-005, ADV-006 to ADV-009)"
+      result_diff_sha256: e95d86d229025120d27c8481e8fa67268c1678c0e2267cd3eaa3de04a1581f90
+    review_cycle_2:
+      target_diff_sha256: e95d86d229025120d27c8481e8fa67268c1678c0e2267cd3eaa3de04a1581f90
+      contract: {status: valid, findings: [CON-012, CON-013, CON-014, CON-015, CON-016]}
+      correctness: {status: pass-with-notes, findings: [COR-006, COR-007], note: "COR-006 duplicates CON-016; COR-007 relates to CON-013"}
+      adversarial: {status: findings, findings: [ADV-010, ADV-011], note: "ADV-010 duplicates CON-016; ADV-011 duplicates CON-015"}
+      verdict: request-changes
+      code_converged: true
+      required: [CON-012, CON-013, CON-014, CON-015, CON-016]
+      required_summary:
+        - "CON-012: the review history after cycle 0 is unrecorded"
+        - "CON-013 (COR-007): validation citations name the fix-pass-1 run, not the latest"
+        - "CON-014: the 2026-09-28 live T091 run and the complete owed list are unrecorded"
+        - "CON-015 (ADV-011): the #105 handoff comment is not recorded as published"
+        - "CON-016 (COR-006, ADV-010): the PR body does not disclose that FR-066 and A-008 are unannotated"
+      validation: "make check and go build ./... both exit 0 on the e95d86d2 bytes; the coordinator re-runs make check on the final bytes at commit"
+      mutation: "see mutation_t084: e95d86d2 run"
+    fix_pass_3:
+      date: 2026-09-28
+      findings: [CON-012, CON-013, CON-014, CON-015, CON-016, COR-006, COR-007, ADV-010, ADV-011]
+      scope: "records and docs only; the last fix pass the loop allows"
+      what:
+        - {ids: [CON-012], what: "fix passes 1-3 and review cycles 1-2 recorded here, in project-status.md and in work-log.md"}
+        - {ids: [CON-013, COR-007], what: "T089 note, PR body make check line and mutant table, and mutation_t084 cite the e95d86d2 run"}
+        - {ids: [CON-014], what: "live run recorded in validation/t091-quickstart.md; owed list, acceptance-matrix Result log, T091 note, PR body and open_after_batch updated"}
+        - {ids: [CON-015, ADV-011], what: "spec_reconciler_handoff published_as the #105 comment; next_best_action says the #94 precondition is met"}
+        - {ids: [CON-016, COR-006, ADV-010], what: "PR body #94 and DEC-I1 bullets and Out of scope disclose the unannotated FR-066 and A-008"}
+      next: "review cycle 3, a full re-review of the final bytes"
+    review_cycle_3:
+      date: 2026-09-28
+      target_diff_sha256: 7668d973d6fae62f7d83b2c39bf3b20507a762d30d6ab4284c0183ff34c1a590
+      contract: {status: valid, findings: [CON-017]}
+      correctness: {status: pass-with-notes, findings: [COR-008, COR-009], validation: "make check, go test -race ./..., go build ./... exit 0 on 7668d973; 104/104 matrix names exist; the PR body's mutant table reproduced row for row"}
+      adversarial: {status: pass-with-notes, findings: [ADV-012, ADV-013], note: "ADV-012 duplicates CON-017; an offline tagged v0.1.0 module-cache build recorded app_version=v0.1.0 and git_commit=unknown, as DEC-I1 documents"}
+      verdict: passed-with-notes
+      required: []
+    post_review_edits:
+      date: 2026-09-28
+      note: >-
+        Applied by the coordinator after the passed-with-notes verdict, outside the fix loop (all three
+        fix passes were used). Wording and records only, not re-reviewed; the exact delta from the
+        reviewed bytes 7668d973 is listed in the PR body.
+      what:
+        - {ids: [COR-008], what: "example.toml: filename_format must end in .md, as validate.go checks"}
+        - {ids: [COR-009], what: "tasks.md T089: the 2026-09-25 run was on the initial tree"}
+        - {ids: [ADV-013], what: "README: the token-never-logged sentence names the #137 exception until DEC-I2 lands"}
+        - {ids: [CON-017, ADV-012], what: "post-merge plan: comment the live results and the DEC-D4 outcome on #92"}
+        - {ids: [], what: "review_cycle_3 and this entry recorded"}
+    dec_d4_live_check:
+      date: 2026-09-28
+      by: coordinator, against the maintainer's test bot
+      request: "raw sendMessage with text=a%FFb"
+      result: 'HTTP 400, {"ok": false, "error_code": 400, "description": "Bad Request: strings must be encoded in UTF-8"}'
+      conclusion: "premise holds; #104 stays closed"
+      recorded_in: specs/001-dual-sink-quick-post/validation/t091-quickstart.md
+    spec_reconciler_handoff:
+      - {issue: 105, item: "annotate spec.md FR-066 and A-008 with DEC-I1: a tagged go install records app_version = the tag and git_commit = unknown, accepted for v0.1; make install is the stamped build. A-008's 'stamped into the binary at build time' holds only for make install", source: CON-007, published_as: "https://github.com/sgykfjsm/miko-post/issues/105#issuecomment-5865686841 (2026-09-28)"}
+    window_checks:
+      date: 2026-09-29
+      by: maintainer, at the keyboard, native macOS window, binary from 1fd507c
+      result: "all cases pass: auto-close 15 s / 30 s with exit 0 / 1, keypress cancel, Esc (field focused and nothing focused), Cmd+Q, -c then the window on the default path, startup-error window dismissed by Quit, close box, Esc and Cmd+Q, each exit 1"
+      finding: >-
+        In the posting window a button cannot gain keyboard focus through user input: the
+        multi-line entry consumes Tab (fyne v2.8.1 Entry.AcceptsTab == MultiLine), and
+        Button.Tapped calls Focus(nil). gui.TestEscapeWithButtonFocused therefore covers a
+        defensive path only. internal/gui/entry.go:46's comment ("after a click or Tab") is
+        inaccurate for the posting window; fix it with the next code change.
+      token: "the maintainer revoked the test bot token on 2026-09-29; the temporary settings files that held it were deleted"
+      recorded_in: specs/001-dual-sink-quick-post/validation/t091-quickstart.md
+    pull_request: 139
+    pull_request_url: https://github.com/sgykfjsm/miko-post/pull/139
+    pull_request_note: "opened as a draft on 2026-09-29 from 1fd507c; closingIssuesReferences read back empty"
+    open_after_batch:
+      - "internal/gui/entry.go:46 comment: a button gains focus neither by click nor by Tab from the message field (window_checks.finding)"
+      - "#137 / DEC-I2: implement after Batch 12 merges, before close-feature"
+      - "#138: a release workflow publishing stamped macOS binaries (DEC-I1's relaxation); future work, to be considered later"
 blockers: []
 
 time_sensitive:
@@ -1647,15 +1870,31 @@ time_sensitive:
       T040. Target() must return what Send actually resolved and wrote, never re-resolve on call.
     deadline: before batch-6 (T030, T040)
   - issue: 94
-    note: git_commit reads "unknown" on tagged installs; open maintainer decision
+    note: >-
+      Decided 2026-09-24 (stamp through linker flags), narrowed 2026-09-28 by DEC-I1. #94 closes
+      under DEC-I1 with Batch 12: the documented stamped build (make install) records a real
+      commit, verified by T090 (under a local v0.1.0 tag it records v0.1.0 / e0ef849); go-install
+      users of a tag get git_commit = unknown by accepted decision.
     deadline: before tagging v0.1.0
 
 next_best_action: >-
-  Finish Batch 11's review loop (cycle 2 re-review of the full diff after fix pass 2 and the
-  cycle-2 record fixes), commit the uncommitted fix passes, then with the maintainer's go-ahead push sgykfjsm/record-pr134-run-batch11 and open the PR
-  from .agents/batch-11-pr-body.md. Verify closingIssuesReferences is empty after opening. After
-  merge, in the same session: close #76-#84, #119 and #130 with the merge commit, and move batch 11
-  from in_progress to completed. Then Batch 12 (T084-T091).
+  Batch 12's review converged (cycle 3 passed-with-notes). PR #139 is open as a draft from
+  sgykfjsm/batch-12-cycle, and its closingIssuesReferences read back empty. The window checks of
+  2026-09-29 completed T091; they are added to the PR as a records-only commit. Mark the PR ready
+  and merge with the maintainer's go-ahead. After merge, in the same session:
+  explicitly close #85, #86, #87, #88, #90, #91, #92, #94 and #95, each with a comment naming the
+  merge commit, and move batch 12 to completed. GitHub #94 records only the 2026-09-24 option (b), so its
+  closing comment must also say four things: DEC-I1 (2026-09-28) narrowed option (b); make install,
+  the documented stamped build, records a real commit, as verified by T090 (v0.1.0 / e0ef849 under
+  a local-only tag); a tagged go install records git_commit = unknown, which is accepted and
+  documented in design §14 and README; and FR-066 and A-008 are not yet annotated, handed to
+  spec-reconciler (#105). That last precondition is already met: the item was posted on #105 on
+  2026-09-28 (issuecomment-5865686841). #92's closing comment (CON-017) must give the 2026-09-28
+  live results, the DEC-D4 rider outcome (HTTP 400 "strings must be encoded in UTF-8", so the
+  premise holds and #104 stays closed), the 2026-09-29 window checks, and that Scenario 1 with
+  thread_id is not applicable (the test chat is a DM). Then implement DEC-I2 (#137) before close-feature, and
+  decide the remaining open non-task issues (#96, #101, #102, #103, #105 (spec-reconciler), #115,
+  #118, #136, #137, #138) before close-feature. #138 is future work, to be considered later.
 
 decisions_resolved:
   - resolved_at: 2026-09-24
@@ -1817,8 +2056,12 @@ batch_6_split:
     small wiring package, which also preserves the property that internal/post imports no other
     internal package.
 
-remaining_batches:
-  - {id: 12, name: "Polish and gates", tasks: "T084-T091"}
+remaining_batches: []
+remaining_batches_note: >-
+  Batch 12 is the last task-backed batch. Open non-task issues remain: #96, #101, #102, #103,
+  #105 (spec-reconciler), #115, #118, #136, #137, #138. Whether any becomes a batch before
+  close-feature is a maintainer decision. #105 is spec-reconciler's checklist. #137 is decided
+  (DEC-I2) and scheduled after Batch 12 merges; #138 is future work, to be considered later.
 
 touched_files:
   - .agents/archive/project-status-before-batch-9.md
@@ -1881,13 +2124,19 @@ assumptions:
     The batch decomposition above is re-derived by run-batch-cycle's triage step each run; it is
     recorded here for orientation, not as a binding plan.
 
-last_updated: 2026-09-24
+last_updated: 2026-09-29
 
 backlog_additions:
   - issue: 122
     title: GUI random subtle background image from a configured directory
-    state: open
+    state: closed
+    closed_at: 2026-09-28
     implementation: merged
+    closure: >-
+      Delivered by PR #125 (1707382); still open on 2026-09-25 because the PR body deliberately
+      left it "open pending acceptance and merge" and nobody owned the post-merge close. Proposed
+      for closure with a comment in Batch 12's pre-implementation sweep. Closed 2026-09-28 as
+      completed, with a comment naming PR #125, on the maintainer's go-ahead.
     scope: Explicitly requested separately from Batch 9; original Batch 7 deferral preserved as history
 
 next_batch_preparation:

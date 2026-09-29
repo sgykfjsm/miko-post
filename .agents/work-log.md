@@ -1159,3 +1159,53 @@ confirmed. Valid git-generated publication patches now reverse-check successfull
 - Cycle-2 contract review: valid, with record and doc findings only. Native checks were re-run on the final tree: help, FR-006, the error window staying open with no log, and no-HOME writing nothing (DEC-H2). Records, the PR body and the contract were brought in line. The mutant list is recorded as `mutants_fix_pass_2`: 37 distinct mutants, all killed. #92 / T091 is named as the owner of the native-dismissal check. A #126 comment correction is planned as a follow-up.
 - Own slip, recorded so it is not repeated: an unquoted heredoc (`<<EOF`) ran every backtick span in the Python source as a zsh command substitution. The commands only failed, so there were no side effects, but the text I inserted lost every backticked word and several replacements silently did nothing. Found by reading the output, repaired from a script file, and re-scanned. Use `<<'EOF'` or a script file whenever the payload contains backticks.
 - Cycle-2 correctness passed; its one non-blocking finding was a stale test comment, now fixed. Cycle-2 adversarial found the DEC-H2 records overstated as "no HOME": the guard only covers HOME and XDG_CONFIG_HOME both unset. With HOME unset but XDG set, Fyne still writes into the cwd. That case is shared with the posting window, where it predates this batch, so it is recorded as a follow-up candidate (DEC-ADV-1) rather than patched on one path only. The wording is corrected in the PR body and state.yaml.
+
+### 2026-09-25 — Record Batch 11's merge
+- **PR #135 squash-merged as `e0ef849024a97db44584ae808c0fecc89c36c71a`** at 06:46 UTC on 2026-09-24. Head `5005ea8` and the squash share tree `776bbbb52b7c20776474f0692b7c2ba63dbd8a6f`, checked on 2026-09-25. #76–#84, #119 and #130 were closed between 06:47:36 and 06:47:57 UTC, about a minute after the merge, with a comment each. #136 (DEC-ADV-1) and the #126 correction comment were published an hour later.
+- None of that had reached the records. This session opened to a status page saying "not pushed, no PR" while `main` already carried the batch. Found by comparing the page against `git log` before triage rather than trusting it. Recorded here, following the usual batch-N-record-in-batch-N+1 pattern.
+
+### 2026-09-25 — Batch 12: triage, sweep, implement
+- **Triage**: Batch 12 = T084–T087, T089–T091 (#85–#88, #90–#92) + #95, and it discharges #94. #96 (commit shape) needs a decision; #101–#103, #115, #118 and #136 are defects or test gaps, not polish; #105 belongs to spec-reconciler.
+- **Sweep**: #122 was delivered by PR #125 and is still open, because that PR body said "open pending acceptance and merge" and nobody owned the close. It is classified close-now, pending the maintainer's go-ahead.
+- **T084**: the Telegram client sets no `Transport`, so the gate replaces `http.DefaultTransport` with an in-process fake. Nothing can dial whatever the code does. The first run failed on my own assumption: I expected transport errors to carry `[redacted]`, but `withoutRequestURL` strips the URL before `safe` ever sees it. The witness became "the failure's own text reached the log". I predicted, then ran, the mutants. The two overlapping sink-side layers mask each other, and the gate says so rather than claiming them.
+- **T087**: my first draft of the example said `0` keeps the window open. `closeDelay(0)` closes it immediately. Caught by reading `window.go` before writing the test.
+- **T090**: `@latest` → `v0.0.0-20260924064643-e0ef849024a9`, with no `vcs.*` settings. Records carry the version and `e0ef849024a9`. `make install` in a clean clone (remote removed, local `v0.1.0` tag) records `v0.1.0` / `e0ef849`. The real repository still has no tags.
+- **T091**: run with Telegram disabled in every file, because the binary has no base-URL setting, so an enabled chat sink always reaches the live API. Every locally observable check passed. The live and native remainder is listed in `validation/t091-quickstart.md`.
+
+### 2026-09-28 — Batch 12: review cycle 0, decisions, fix pass 1
+- **Cycle 0** (review-only) ended `needs-human-decision`. Contract valid. Six required findings: COR-001, ADV-001, ADV-002, CON-001, CON-002 and ADV-003. Five non-blocking. The reviewers kept to the network rules, and the diff bytes were unchanged after every stage.
+- **Maintainer, 2026-09-28**: DEC-I1 keeps `go install …@latest` as the install path and accepts `git_commit = unknown` on tagged builds. The maintainer said "fix all findings", and authorised closing #122 (done, with a comment) and filing ADV-005 (#137).
+- **Fix pass 1**: one fixer agent; all 11 findings fixed. Production code is unchanged, and the new tests live in `internal/post` and `internal/sink/telegram`. Every required mutant is killed, including the rescue-never-runs and GUI-only-redaction mutants that had survived. The fixer also found that the timeout witness `Client.Timeout exceeded` was flaky, failing about one run in eight on a net/http race. That predates the pass, and it now keys on `"error_type":"timeout"`.
+- My own misses, which the review caught: the #92 comment rider, because I never read the issue's comments (saved as a memory), and a validation script that passed an empty argument where it meant to pass line breaks.
+
+### 2026-09-28 — Batch 12: review cycles 1 and 2, fix passes 2 and 3, the live T091 run
+- **Cycle 1** reviewed the fix-pass-1 diff (`1d806870…`). Contract valid (CON-005 to CON-011), correctness pass-with-notes (COR-004, COR-005), adversarial ADV-006 to ADV-009. Required: CON-005/ADV-006 (branch name) and CON-006 (the #94 comment plan). Verdict `request-changes`. **Fix pass 2** fixed all 13; the diff then hashed to `e95d86d2…`.
+- **Cycle 2** reviewed `e95d86d2…`. Contract valid (CON-012 to CON-016), correctness pass-with-notes (COR-006 duplicates CON-016; COR-007 relates to CON-013), adversarial ADV-010 (duplicates CON-016) and ADV-011 (duplicates CON-015). The code converged; the required findings were CON-012 to CON-016, all records or docs. Verdict `request-changes`. On those bytes `make check` and `go build ./...` exited 0, and the T084 mutants were re-run: all killed except `safe` alone and the `decodeResponse` scrub alone, which survived as expected.
+- **Live T091 run**, by the coordinator against the maintainer's test bot, token read from a private file and never printed: Scenarios 1, 3 (one and both broken), 4 with its bad-token negative case, and 6's last clause all passed. #92's rider got HTTP 400 `strings must be encoded in UTF-8`, so DEC-D4's premise holds and #104 stays closed. A token scan found 0 occurrences. Still owed: `thread_id`, Scenario 7, and Scenario 8's window halves.
+- **Decisions and GitHub**: DEC-I2 (#137): trim `bot_token` at load and reject interior whitespace, scheduled after Batch 12 merges. Posted the FR-066/A-008 item on #105 and the ADV-007 evidence and DEC-I2 on #137. Filed #138 (stamped macOS binaries, DEC-I1's relaxation), future work.
+- **Fix pass 3**, the last the loop allows: records and docs only, for CON-012 to CON-016 and their duplicates. Review cycle 3, a full re-review, follows; the coordinator re-runs `make check` on the final bytes at commit.
+
+### 2026-09-28 — Batch 12: review cycle 3 and close-out
+- **Cycle 3** reviewed the full diff `7668d973` and ended **passed-with-notes**, with no required findings. Contract valid, one note (CON-017). Correctness passed with notes: `make check`, `go test -race ./...` and `go build` were clean, all 104 matrix names exist, and the PR body's mutant table reproduced row for row. Adversarial passed with notes: an offline tagged `v0.1.0` module-cache build recorded `app_version=v0.1.0` and `git_commit=unknown`, which is exactly what DEC-I1 documents.
+- The loop used all three fix passes. The review converged on the code at cycle 2; cycles 2 and 3 found only records and wording issues. Most of that churn came from records trying to describe the review they were part of. Record the review history once, at close-out, not inside each fix pass.
+- **Post-review edits**, all wording and records, not re-reviewed: COR-008 (`example.toml`: "end in .md"), COR-009 (the T089 note says "initial tree"), ADV-013 (README names the #137 exception), and CON-017 (a #92 comment added to the post-merge plan).
+- The maintainer's secret file carried a stray `\x01` after the `bot_token` line. It was found by inspecting the file's shape without printing any values. The live script dropped control characters before parsing and left the file unchanged.
+
+### 2026-09-29 — PR #139, and the T091 window checks
+- **PR #139** was opened as a draft from `1fd507c` on `sgykfjsm/batch-12-cycle`, with the maintainer's go-ahead. `closingIssuesReferences` read back empty. Before committing, the staged diff was checked for the maintainer's real token, its secret half and the chat id, and none was present.
+- **Window checks**: the maintainer ran them at the keyboard, one isolated settings folder per case, and every case passed:
+  - the idle auto-close after 15 s and 30 s, with exit 0 and 1;
+  - a keypress cancelling it;
+  - Enter and Cmd+Enter, with Send disabled while sending, and both outcomes shown;
+  - Esc before sending, and Cmd+Q;
+  - the window on the default settings after a `-c` post;
+  - the startup-error window dismissed by Quit, the close box, Esc and Cmd+Q, each exiting 1. That closes the native-Esc gap left since T082.
+
+  Scenario 1 with `thread_id` is not applicable, because the test chat is a DM. T091 is ticked, and all 91 tasks are done.
+- **My checklist had two wrong assumptions:**
+  - that Tab moves focus from the message field to a button: Fyne's multi-line entry consumes Tab;
+  - that a click leaves a button focused: `Button.Tapped` calls `Focus(nil)`.
+
+  I found both by reading Fyne v2.8.1 source before recording a result that I had not actually observed. Case 4c then showed that a button cannot gain keyboard focus in the posting window at all. `internal/gui/entry.go:46`'s comment says otherwise; it is left for the next code change.
+- One case-2 run stayed open for about 266 s. The maintainer did not state why; a rerun with no interaction closed at about 30 s, as designed.
+- Housekeeping: the maintainer revoked the test token. The temporary settings files that held it were deleted, and a scan of the scratch space, the review run state and the repository found no copy.

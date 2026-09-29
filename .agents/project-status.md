@@ -1,6 +1,6 @@
 # Project status — miko-post
 
-Updated 2026-09-24.
+Updated 2026-09-29.
 
 ## Objective
 Deliver v0.1 of `miko-post` (feature `001-dual-sink-quick-post`): one Go binary that posts a short
@@ -8,94 +8,84 @@ message to Telegram and today's Obsidian daily note concurrently and independent
 a GUI front door, through one shared posting core.
 
 ## Status
-In execution. **84 of 91 tasks are `[x]`; 7 remain (Batch 12, T084–T091).** `main` is at
-`dfdc69fb8c55065d6a2f470f801c0ddc1718ef13` (PR #134, records only, on top of Batch 10b's `d6fcb6b`).
-The T075–T083 ticks are on the Batch 11 branch, which is not merged.
+In execution, on the last batch. `main` is at `e0ef849024a97db44584ae808c0fecc89c36c71a`
+(PR #135, Batch 11). On the Batch 12 branch, **all 91 tasks are `[x]`**: the 84 from before plus
+T084–T087 and T089–T091. PR #139 is open as a draft.
 
 ## Completed
-Batches 1–10b, the GUI background (#122) and the records PR #134 are merged. Batch 10b's detail is
-in the archived status page and in `.agents/state.yaml` under `completed`.
+Batches 1–11, the GUI background (#122, via PR #125) and the records PR #134 are merged.
+
+**Batch 11 record, written late.** PR #135 was squash-merged on 2026-09-24 as `e0ef849`. Head
+`5005ea8` and the squash share tree `776bbbb5`. #76–#84, #119 and #130 were closed between
+06:47:36 and 06:47:57 UTC, about a minute after the merge, each with a comment. Both follow-ups were published: #136 (Fyne writes into the cwd
+when HOME is unset but XDG is set) and the #126 correction comment. None of that reached the
+records until Batch 12, and this page still said "not pushed, no PR". Detail is in
+`.agents/state.yaml` under `completed` 11.
 
 ## In progress
-**Batch 11 — US6 settings resolution (T075–T083 / #76–#84, plus #119 and #130).** It is implemented
-on `sgykfjsm/record-pr134-run-batch11`: `13379f8` is the PR #134 merge record, `25a4f1d` the batch,
-and fix passes 1 and 2 are uncommitted. It has **not been pushed and has no PR.** It delivers:
+**Batch 12 — polish and gates.** It covers T084–T087 and T089–T091 (#85–#88, #90–#92), plus #95,
+and #94 closes with it under DEC-I1. It is committed on `sgykfjsm/batch-12-cycle` (`1fd507c`) and open
+as draft PR #139. The staged review converged: cycle 3 ended `passed-with-notes` after fix
+passes 1–3. The window checks of 2026-09-29 completed T091, and are added to the PR as a
+records-only commit. The history is in `.agents/state.yaml` under the Batch 12 entry.
 
-- FR-006: `-c` without a message is refused with the contract's text, and no window opens.
-- FR-007: help prints the resolved default path and exits 0.
-- FR-018 and FR-058: settings with no destination, or invalid settings, are refused through the
-  shared `app.LoadSettings` before any logger or sink exists.
-- FR-030: a minimal startup-error window.
-- #130: load-time upper bounds on the rotation keys.
-- #119: a two-destinations-succeeding test inside `internal/cli`.
-
-The three-stage review has run three times (cycles 0, 1 and 2), with two fix passes. Cycle 0 had
-ten findings across the three stages: CON-001–004, COR-001–003 and ADV-001–003. The most serious
-was that **Esc could not dismiss the startup-error window** in the real driver while its test
-passed. After fix pass 2, all 37 distinct mutants are killed, and the cycle 2 re-review is
-finishing.
+- **T084**: `TestSecretLeakGate`. It drives the real wiring with a sentinel token, behind an
+  in-process transport that never dials. Every redaction layer was mutated with its result
+  predicted first, and the overlapping sink-side layers are documented as masking one another.
+  A token with trailing whitespace (#137) is the case where only `withoutRequestURL` holds.
+- **T085/T086**: `specs/001-dual-sink-quick-post/acceptance-matrix.md`.
+- **T087**: `README.md`, plus `testdata/config/example.toml`, which two tests pin to the real
+  defaults and the full schema.
+- **T089**: gofmt, vet, build and `-race` are clean. The latest run was on the fix-pass-2 bytes
+  (`e95d86d2…`); the coordinator re-runs `make check` on the final bytes at commit.
+- **T090**: `go install …@latest` records the pseudo-version and a recovered commit. `make install`
+  stamps both, and records `v0.1.0` under a local-only tag. #94 closes under DEC-I1: the
+  documented stamped build (`make install`) records a real commit, verified by T090, and
+  `go install` users of a tag get `unknown` by accepted decision.
+- **T091**: `validation/t091-quickstart.md`. The local part passed on 2026-09-25, the live
+  command-line part on 2026-09-28 against the maintainer's test bot, and the native-window part,
+  run by the maintainer, on 2026-09-29. #92's rider got HTTP 400 for `text=a%FFb`, so DEC-D4's
+  premise holds and #104 stays closed. Scenario 1 with `thread_id` is not applicable: the test
+  chat is a DM.
 
 ## Blockers
-None. Both maintainer calls are made (2026-09-24): **DEC-H1** accepts the `-c ""` refusal, and
-**DEC-H2** means no startup-error window opens when no settings path can be resolved.
+None. T091 is complete, including the native `Esc` dismissal owed since T082. The maintainer
+revoked the test bot token on 2026-09-29.
 
 ## Next best action
-Finish Batch 11's review loop, commit, then push and open the PR with the maintainer's go-ahead.
-After merge, in the same session, close #76–#84, #119 and #130. Then Batch 12 (polish and gates,
-T084–T091).
+Mark PR #139 ready for review and merge it, with the maintainer's go-ahead. The PR has no
+closing keywords, so
+`closingIssuesReferences` read back empty for PR #139. After merge, close #85–#88, #90–#92 and
+#95 explicitly, naming the merge commit. Close #94 the same way. GitHub #94 records
+only the 2026-09-24 option (b), so its comment must also say four things: DEC-I1 (2026-09-28)
+narrowed option (b); `make install`, the documented stamped build, records a real commit, as
+verified by T090 (`v0.1.0` / `e0ef849` under a local-only tag); a tagged `go install` records
+`git_commit = unknown`, which is accepted and documented in design §14 and README; and FR-066 and
+A-008 are not yet annotated, which is handed to spec-reconciler (#105). That last precondition is
+already met: the item was posted on #105 on 2026-09-28. #92's closing comment gives the
+2026-09-28 live results, the DEC-D4 outcome (#104 stays closed), the 2026-09-29 window checks, and
+the `thread_id` case as not applicable. Then implement DEC-I2 (#137) and decide
+the open non-task issues before `close-feature`: #96, #101, #102, #103, #105 (spec-reconciler),
+#115, #118, #136, #137, #138. #138 is future work, to be considered later.
+
+## Pending maintainer go-aheads
+#122 was closed on 2026-09-28 with a comment naming PR #125, and #137 (whitespace around
+`bot_token`) was filed. Both were done on the maintainer's go-ahead. Also on 2026-09-28: the
+FR-066/A-008 item was posted on #105, the ADV-007 evidence and the DEC-I2 decision were posted on
+#137, and #138 (a release workflow publishing stamped macOS binaries) was filed.
+
+- **#96**: pick one `git_commit` shape. T090 observed three: 7 characters from `make`,
+  12 from a pseudo-version, and 40 from a local build.
 
 ## Important decisions
-Batch 10b's decisions are recorded in full in `.agents/state.yaml` under `completed` 10b as
-DEC-G1, DEC-G1a and DEC-G2 through DEC-G8. The load-bearing ones:
-
-- **DEC-G1 / DEC-G1a** — the body goes on the records reporting a sink's own outcome, never on the
-  formatting-fallback records, which are emitted before the post's outcome exists.
-- **DEC-G3** — the stack is captured at the recovery point in `internal/post`, because `recover()`
-  returns the value alone and the frames are gone by any later layer.
-- **DEC-G4 / DEC-G8** — FR-071's ban on manufactured traces is discharged by construction, and
-  "unexpected errors" yielding no `stack` is the requirement met rather than deferred.
-- **DEC-G5 / DEC-G6** — the GUI warns once per session, and the warning replaces the log-path line
-  rather than joining it.
-
-## Decisions — cleared 2026-09-24
-The standing decision backlog was resolved in one pass. **Four are decided, documented and closed**:
-
-- **#132** — the body is captured **in full, with no bound**. SC-008's "re-sendable without
-  consulting any other source" taken literally. The accepted consequence is documented in
-  `contracts/config-schema.md`: `rotate_size_mib` bounds the file *between* records, not the size
-  of a record, and FR-074 forbids reclaiming the space.
-- **#127** — accept and document. Concurrent front doors scatter records across archives; a
-  symlinked `logging.path` is unsupported under rotation.
-- **#128** — accept the boundary. `rotate_after_days` is meaningful only on darwin with a recorded
-  birth time.
-- **#129** — accept and document. The repair newline can cross a rotation.
-
-**Three are decided but stay open, because the decision creates scoped work:**
-
-- **#94** — stamp version and commit through linker flags in the release path. Documented in
-  `docs/design.md` §14 and its Japanese counterpart; `make install` already does it. Closes when
-  **T090** asserts against the documented release path (Batch 12).
-- **#119** — an internal seam on `cli.Run`, no user-visible setting. **Delivered in Batch 11**
-  (not yet merged).
-- **#130** — the load-time upper bound for the rotation keys. **Delivered in Batch 11** (not yet
-  merged).
-
-## Housekeeping — swept 2026-09-24
-**#60–#65 closed** (T059–T064, delivered in Batch 9 / PR #125). Verified before closing: each task
-is `[x]`, #125 reads back as merged, and the implementation is present.
-
-**#115, #118 and #119 deliberately kept open** — they are real unfinished work, not stale
-bookkeeping, and each now carries a comment recording the check so the next sweep does not
-bulk-close them. #115's credential-free-error invariant is still unenforced, #118's `Error()` scan
-is still neither pinned nor documented as intentionally unpinned, and #119's
-two-destinations-both-succeeding path is still unreachable from argv.
-
-**#4 and #42–#52 closed** on 2026-09-24 (T003 and T041–T051, delivered by Batch 7 / PR #123,
-`6f40dad`), each with a comment naming the PR and merge commit.
-
-28 issues open overall.
+Batch 11's DEC-H1 and DEC-H2, and Batch 10b's DEC-G series, are in `.agents/state.yaml`. Batch 12
+coined DEC-I1 (2026-09-28): `go install …@latest` stays the primary install path, and a tagged
+build's `git_commit = unknown` is an accepted, documented v0.1 limitation. It is recorded under
+the Batch 12 entry's `review_cycle_0.decisions`, with DEC-I2 (2026-09-28, #137): `bot_token` and
+`MIKO_POST_TELEGRAM_BOT_TOKEN` are trimmed at load, and a value with whitespace left inside is
+rejected by `config.Validate`. DEC-I2 is scheduled after Batch 12 merges, not implemented in it.
+DEC-I1's relaxation, published stamped binaries, is tracked as #138.
 
 ## Touched files
-Batch 11's files are commit `25a4f1d` plus the uncommitted fix passes. `git diff --stat dfdc69f`
-on the branch is the authoritative list. The outgoing copy of this page is archived as
-`.agents/archive/project-status-before-batch-11-review.md`.
+`git diff --stat e0ef849` on the branch is the authoritative list. The outgoing copy of this page
+is archived as `.agents/archive/project-status-before-batch-12.md`.

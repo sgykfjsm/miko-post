@@ -1,0 +1,122 @@
+# miko-post example settings.
+#
+# Copy this file to the default location, unless a config.toml is already
+# there, and edit it:
+#
+#   dir="${XDG_CONFIG_HOME:-$HOME/.config}/miko-post"
+#   mkdir -p "$dir"
+#   [ -e "$dir/config.toml" ] || curl -fsSL -o "$dir/config.toml" \
+#     https://raw.githubusercontent.com/sgykfjsm/miko-post/main/testdata/config/example.toml
+#   chmod 600 "$dir/config.toml"
+#
+# From a checkout, this does the same without the network:
+#
+#   dir="${XDG_CONFIG_HOME:-$HOME/.config}/miko-post"
+#   mkdir -p "$dir"
+#   cp -n testdata/config/example.toml "$dir/config.toml"
+#   chmod 600 "$dir/config.toml"
+#
+# Neither overwrites an existing file. Keep the `chmod 600` line either way:
+# the file will hold your token.
+#
+# `mp --help` prints the path it will read. The window always reads that path;
+# `mp -c PATH message` makes a command-line post read another file instead.
+#
+# Every value below that you are not told to replace is the built-in default,
+# so deleting its line changes nothing, with two exceptions: the two
+# `enabled = true` lines. A destination is disabled by default, and this file
+# enables both, so deleting one of those lines turns that destination off.
+# Unknown keys are an error, not ignored.
+# The full schema is specs/001-dual-sink-quick-post/contracts/config-schema.md.
+
+# ---------------------------------------------------------------------------
+# Telegram: posts the message to one chat through a bot.
+# ---------------------------------------------------------------------------
+[sink.telegram]
+enabled = true
+
+# REPLACE: your bot's token from @BotFather. It must be at least 16
+# characters. The environment variable MIKO_POST_TELEGRAM_BOT_TOKEN, when set
+# and non-empty, is used instead, so you can leave this line out and keep the
+# credential out of the file. The token is never logged or printed.
+bot_token = "replace-with-your-bot-token"
+
+# REPLACE: the chat to post to. Group and channel ids are negative.
+chat_id = "-1001234567890"
+
+# Optional: a forum topic to post into. Leave it out to post to the chat
+# itself. There is no "no topic" value; absence is the only way to say it.
+# thread_id = 42
+
+# Accepted and validated, but they do not change behaviour in v0.1. Delivery
+# is always MarkdownV2 first, with exactly one plain-text retry when Telegram
+# cannot parse the formatting.
+parse_mode = "MarkdownV2"
+fallback_to_plain_text = true
+
+# How long one request to the Bot API may take, in seconds.
+http_timeout_seconds = 30
+
+# ---------------------------------------------------------------------------
+# Obsidian: appends one line to today's daily note.
+# ---------------------------------------------------------------------------
+[sink.obsidian]
+enabled = true
+
+# REPLACE: the folder holding your daily notes. It must be an absolute path.
+daily_note_dir = "/Users/you/Obsidian/Vault/Daily"
+
+# Go time layouts (the reference time is 2006-01-02 15:04:05). The file name
+# must end in .md and render a plain file name, and neither may use the MST
+# zone-name element; use a numeric offset such as -0700 instead.
+filename_format = "2006-01-02.md"
+time_format = "15:04"
+
+# Create today's note when it does not exist yet. When false, a missing note
+# is a failed post for this destination only.
+create_if_missing = true
+
+# ---------------------------------------------------------------------------
+# Posting
+# ---------------------------------------------------------------------------
+[posting]
+# The overall deadline for each destination, in seconds, applied to each one
+# separately: a slow destination never shortens the other's time.
+sink_timeout_seconds = 60
+
+# ---------------------------------------------------------------------------
+# The window (`mp` with no arguments)
+# ---------------------------------------------------------------------------
+[gui]
+# An absolute folder of JPEG or PNG images. One is picked at random when the
+# window opens and shown faintly behind it. Empty means a plain background.
+background_image_dir = ""
+
+# Seconds before the window closes itself after a post, and the process exits
+# with the post's status. 0 closes it as soon as the result is shown. Any
+# interaction with the window before then cancels that post's automatic close.
+success_close_seconds = 15
+error_close_seconds = 30
+
+# ---------------------------------------------------------------------------
+# Diagnostic log (JSON Lines)
+# ---------------------------------------------------------------------------
+[logging]
+format = "jsonl"
+
+# Empty means the default: $XDG_STATE_HOME/miko-post/app.jsonl, or
+# ~/.local/state/miko-post/app.jsonl when XDG_STATE_HOME is unset or empty.
+path = ""
+
+# Rotate when the file reaches this size or this age, whichever comes first.
+# Rotated files are renamed with a local timestamp suffix and never deleted.
+rotate_size_mib = 10
+rotate_after_days = 7
+
+# true records the message body only for posts where a destination failed,
+# so a lost message can be re-sent from the log. false records it every time.
+message_on_error_only = true
+
+stack_trace = true
+include_version = true
+include_git_commit = true
