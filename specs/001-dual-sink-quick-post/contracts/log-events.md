@@ -34,8 +34,8 @@ The formatting-fallback path is observable as a distinct sequence (FR-039):
 | `ts` | RFC 3339 with time zone | always |
 | `level` | `"info"` \| `"error"` — lowercase; slog's own `INFO`/`ERROR` is renamed | always |
 | `event` | stable name above | always |
-| `source` | `"cli"` \| `"gui"` | always |
-| `message_id` | ULID | always (per-post correlation, R-007) |
+| `source` | `"cli"` \| `"gui"`; or the sentinel `"unknown"`, meaning the front door did not identify itself (`sourceUnknown` in `internal/logging/logger.go`) | always |
+| `message_id` | ULID; or the sentinel `"unknown"`, meaning no correlation identifier was supplied (`missingMessageID`, substituted by `Logger.Post("")`) | always (per-post correlation, R-007) |
 | `sink` | `"telegram"` \| `"obsidian"` | sink events |
 | `duration_ms` | int | completion events |
 | `error_type` | classified string | sink failure events |
@@ -46,6 +46,12 @@ The formatting-fallback path is observable as a distinct sequence (FR-039):
 | `message_len` / `message_bytes` | int | rune count / byte count (R-010) |
 | `app_version`, `git_commit` | string | when enabled (FR-066). `git_commit` is the 12-character lowercase hex commit prefix on every build path that identifies one, unless an operator stamps a shorter value, which passes through unchanged; or `unknown` for a tagged `go install` (DEC-J2, #96; DEC-I1) |
 | `stack` | string | when a trace is available and useful (FR-071) |
+
+The `"unknown"` sentinel in `source` or `message_id` is a documented degenerate value, not a
+supported configuration: its presence in a real log indicates a defect in the calling code. The
+logger substitutes it rather than panicking or refusing to log (T023, FR-076), so a consumer written
+against this contract must handle it instead of dropping those records, which are exactly the ones
+that signal the defect.
 
 The terminal event reports the aggregate outcome and elapsed time. It does not repeat
 sink errors or carry an aggregate `error_type`; consumers join the sink failure records

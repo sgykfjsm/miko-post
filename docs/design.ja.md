@@ -361,7 +361,7 @@ $XDG_STATE_HOME/miko-post/app.jsonl
 
 - timezone付きtimestamp
 - level、安定したevent名
-- 起動元（`cli`／`gui`）
+- 起動元（`cli`／`gui`。呼び出し側のコードが起動元を示さなかった場合に限り `unknown` となり、これは不具合を示す）
 - 並行イベントを対応付ける投稿単位の `message_id`
 - sink名と成否
 - 処理時間（ms）

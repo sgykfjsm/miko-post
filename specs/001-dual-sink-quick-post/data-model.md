@@ -124,6 +124,34 @@ short classified phrase — `"request timed out"`, `"permission denied"`, `"chat
 is never rendered to the user. Enforced by a test that asserts `Reason` for every error class is
 drawn from a fixed set.
 
+**Render guards** (FR-017, FR-043; amended at feature close to match `internal/post/result.go`).
+Keeping `Err` out of a display string cannot be left to a field comment: a Telegram transport
+failure is a `*url.Error` whose exported `URL` carries the token, and Go's default renders reach it
+unasked. `SinkResult` therefore implements five guards, all with value receivers so both a value
+and a pointer are covered: `Format` (`fmt.Formatter`, consulted for every verb and so the one that
+closes the `fmt` surface), `String`, `GoString`, `MarshalJSON` and `LogValue`. Every one routes
+`Err` through the single `errMarker`, which yields `"[redacted]"` when an error is present and
+`"[none]"` when it is not, so there is one redaction decision rather than five. `Err` stays exported
+so the diagnostic logger can reach it deliberately as `r.Err`; the guards stop accidental renders,
+not intentional ones. The JSON form is write-only (no `UnmarshalJSON`) and is not the diagnostic
+record's shape, so a log record is assembled field by field.
+
+- **Hold as a named field, never embedded.** The guards are promoted with the fields, so an
+  embedding struct would render and marshal as a bare `SinkResult` and lose every field of its own.
+- **`encoding/xml` boundary** (#103). The five are the mechanisms this program uses, not every one
+  Go has. `encoding/xml` consults none of them and walks exported fields, so `xml.Marshal` of a
+  result would reach `Err`. Nothing in the repository imports `encoding/xml`; adding it for a
+  `SinkResult` means first adding a sixth guard (a redacting `MarshalText`). The
+  method-enumeration test (`TestSinkResultExposesNoAccessorThatEmitsTheDiagnosticError`) fails on a
+  new render method it cannot evaluate.
+
+**Aggregate, empty slice** (FR-059, FR-060): `AllSucceeded(results []SinkResult) bool` returns
+`false` for an empty or nil slice rather than an "all" predicate's vacuous `true`. Nothing was
+delivered, so nothing succeeded, and exiting 0 for a post that reached no destination is the outcome
+the exit status exists to make visible. FR-018 makes all-sinks-disabled a startup error, so this is
+the fail-closed behaviour for a path that should not occur; it drives the process exit status
+(`0` on `true`, `1` on `false`).
+
 ---
 
 ## Settings
@@ -148,16 +176,26 @@ cannot apply it differently. T083 covers only routing a load or validation failu
 front door that was used, not applying this rule. Sink construction (T036) and main wiring (T039)
 therefore cannot assume `Load` already enforced it.
 
-**Credential** (FR-042, FR-043, FR-069): held in a dedicated `Secret` type whose `String()`,
-`GoString()`, `MarshalJSON()`, and `slog.LogValue()` all return a redaction marker. The real value
-is reachable only through an explicit `Reveal()` method, called at **two** places as of Batch 6b —
-building the Telegram request URL, and the Telegram sink's credential net, which cannot scan an
-error for a string it has not been given (DEC-C2). What the type guarantees is that every route to
-the value is explicit and greppable; the *count* of those routes is a **review obligation, not a
-type invariant**, and a third caller may one day be as honest as the second.
-`internal/config/secret.go` still says "exactly one place" and is owed the same correction —
-deliberately not made in Batch 6b, whose boundary claim rests on `internal/config` being
-byte-unchanged.
+**Credential** (FR-042, FR-043, FR-069): held in a dedicated `Secret` type
+(`internal/config/secret.go`) with **five** guards — `Format`, `String()`, `GoString()`,
+`MarshalJSON()` and `LogValue()` — all returning the redaction marker `"[redacted]"`, and with the
+value held as an unexported **pointer** (`value *string`), not a string. Four methods are not enough:
+`fmt` reaches unexported fields by reflection when it dumps a struct, so without `Format` a verb
+such as `%d` printed the token, and `%p` and `%w` bypass `Formatter` altogether, so only the pointer
+field — which `fmt` prints as an address — keeps those two dumps from reaching the value. Any future
+secret-bearing type needs both. There is deliberately no `MarshalText`, `MarshalTOML` or
+`UnmarshalJSON`.
+
+The real value is reachable only through an explicit `Reveal()` method, called at **three** places
+as of Batch 13 — building the Telegram request URL (`internal/sink/telegram/request.go`), the
+Telegram sink's credential net, which cannot scan an error for a string it has not been given
+(`(*Sink).botToken`, DEC-C2), and the diagnostic logger's redaction pattern
+(`internal/logging/logger.go`). What the type guarantees is that every route to the value is
+explicit and greppable; the *count* of those routes is a **review obligation, not a type
+invariant**. Questions about the credential's shape are answered without a new route: `Len`,
+`IsEmpty`, `Trimmed` (DEC-I2) and `IsPrintableASCII` (DEC-J9), and validation uses these rather than
+`Reveal()`. `Reveal`'s own doc comment in `secret.go` still says "exactly one place"; that is a
+stale code comment, not a rule.
 
 ---
 

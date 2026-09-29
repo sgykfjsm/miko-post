@@ -139,6 +139,8 @@ that branch, and dismissal through the **native** driver — a real Esc, click, 
 and the exit status that follows. The headless tests follow the driver's routing as read from Fyne
 v2.8.1's source, which is exactly where cycle 0's Esc defect hid, so a native check is the
 remaining evidence owed, by T091 / #92 (the quickstart FR-030 scenario); Batch 11 could not run one (macOS Accessibility permission).
+That native check was run on 2026-09-29 in Batch 12 (T091 cases 7a–7d): the maintainer dismissed the
+real window by Quit, the close box, Esc and Cmd+Q, each exiting `1`.
 
 With no resolvable settings path (`$HOME` unset and `XDG_CONFIG_HOME` unset), the window front
 door reports on stderr and exits `1` **without** opening the window: constructing the Fyne

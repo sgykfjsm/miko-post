@@ -365,7 +365,7 @@ Every line is an independently valid JSON object. Depending on the event, record
 
 - Timestamp with timezone
 - Level and stable event name
-- Source (`cli` or `gui`)
+- Source (`cli` or `gui`; `unknown` only when the calling code failed to identify itself, which indicates a defect)
 - Per-post `message_id` for correlating concurrent events
 - Sink name and outcome
 - Duration in milliseconds
