@@ -6,8 +6,9 @@ than automatically (T086). Together these satisfy SC-014 and the constitution qu
 acceptance criterion MUST have a corresponding automated test or an explicitly recorded
 justification for why it is verified manually".
 
-**Date**: 2026-09-25. **Status of manual rows**: M1 was run live on 2026-09-28 and passed, except
-`thread_id` topic routing. M2, M3 and M4 are pending T091. See the Result log.
+**Date**: 2026-09-25. **Status of manual rows**: all four are done. M1 was run live on 2026-09-28 and
+passed, except `thread_id` topic routing, which is not applicable to the test chat (a DM). M2, M3
+and M4 were run on the native window on 2026-09-29 and passed. See the Result log.
 
 **Authority**: Where §13 and the spec disagree, `spec.md` (FR-/SC- ids) and its recorded
 decisions govern. The Notes column flags each disagreement, and the last section lists them
@@ -134,10 +135,10 @@ end of this section.
 
 | Item | Criteria | Quickstart | Result | Recorded by |
 |---|---|---|---|---|
-| M1 | 2, 5, 6 | 1, 3, 4 | done 2026-09-28, except `thread_id` topic routing (criterion 5), still pending | T091 |
-| M2 | 1, 12 | 7, 8 | pending — T091 | T091 |
-| M3 | 16 | 7 | pending — T091 | T091 |
-| M4 | 20 | 8 | pending — T091 | T091 / #92 |
+| M1 | 2, 5, 6 | 1, 3, 4 | done 2026-09-28. `thread_id` topic routing (criterion 5) is not applicable: the test chat is a DM, not a forum with topics; the wire field is covered by the automated tests in row 5 | T091 |
+| M2 | 1, 12 | 7, 8 | done 2026-09-29: the window opened on the default settings, Send was disabled in flight, the 15 s and 30 s idle auto-closes exited 0 and 1, and a keypress cancelled the countdown | T091 |
+| M3 | 16 | 7 | done 2026-09-29: Enter, Cmd+Enter, Esc (field focused, and nothing focused) and Cmd+Q on the native window. A focused button is not reachable by user input in the posting window (case 4c), so that headless case is defensive only | T091 |
+| M4 | 20 | 8 | done 2026-09-29: the startup-error window showed the message and path with no field; Quit, the close box, Esc and Cmd+Q each exited 1 | T091 / #92 |
 
 The parts of Scenarios 1, 2, 5, 6, 8 and 9 that need neither the live Bot API nor a person at the
 window were run on 2026-09-25 and passed. They are the automatable remainder, not these manual
@@ -146,8 +147,9 @@ items, and none of M1–M4 is discharged by them.
 M1's live checks were run on 2026-09-28 against the maintainer's test bot and passed: Scenario 1,
 Scenario 3 with one and with both destinations broken, and Scenario 4 with its bad-token negative
 case (see *Live run, 2026-09-28* in [validation/t091-quickstart.md](validation/t091-quickstart.md)).
-Scenario 1 with `thread_id` set was not run. M2, M3 and M4 need a person at the native window and
-are pending.
+Scenario 1 with `thread_id` set was not run: it needs a forum chat with topics, and the test chat
+is a DM with the bot. M2, M3 and M4 were run by the maintainer on the native window on 2026-09-29
+and passed (see *Window checks, 2026-09-29* in the same file).
 
 The #92 rider was run on the same day. A raw `sendMessage` with `text=a%FFb` got HTTP 400,
 `Bad Request: strings must be encoded in UTF-8`, so DEC-D4's premise holds and #104 stays

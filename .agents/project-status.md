@@ -1,6 +1,6 @@
 # Project status — miko-post
 
-Updated 2026-09-28.
+Updated 2026-09-29.
 
 ## Objective
 Deliver v0.1 of `miko-post` (feature `001-dual-sink-quick-post`): one Go binary that posts a short
@@ -9,9 +9,8 @@ a GUI front door, through one shared posting core.
 
 ## Status
 In execution, on the last batch. `main` is at `e0ef849024a97db44584ae808c0fecc89c36c71a`
-(PR #135, Batch 11). On the Batch 12 branch, **90 of 91 tasks are `[x]`**: the 84 from before plus
-T084–T087, T089 and T090. **T091 stays open**: its native-window scenarios and the `thread_id`
-case need the maintainer.
+(PR #135, Batch 11). On the Batch 12 branch, **all 91 tasks are `[x]`**: the 84 from before plus
+T084–T087 and T089–T091. PR #139 is open as a draft.
 
 ## Completed
 Batches 1–11, the GUI background (#122, via PR #125) and the records PR #134 are merged.
@@ -25,10 +24,10 @@ records until Batch 12, and this page still said "not pushed, no PR". Detail is 
 
 ## In progress
 **Batch 12 — polish and gates.** It covers T084–T087 and T089–T091 (#85–#88, #90–#92), plus #95,
-and #94 closes with it under DEC-I1. It is implemented on `sgykfjsm/batch-12-cycle` and uncommitted.
-Review cycles 0–2 and fix passes 1–3 are done; review cycle 3, a full re-review, is next. Cycle 2
-found the code converged and asked only for records and docs, which fix pass 3 (the last the loop
-allows) applied. The history is in `.agents/state.yaml` under the Batch 12 entry.
+and #94 closes with it under DEC-I1. It is committed on `sgykfjsm/batch-12-cycle` (`1fd507c`) and open
+as draft PR #139. The staged review converged: cycle 3 ended `passed-with-notes` after fix
+passes 1–3. The window checks of 2026-09-29 completed T091, and are added to the PR as a
+records-only commit. The history is in `.agents/state.yaml` under the Batch 12 entry.
 
 - **T084**: `TestSecretLeakGate`. It drives the real wiring with a sentinel token, behind an
   in-process transport that never dials. Every redaction layer was mutated with its result
@@ -43,30 +42,29 @@ allows) applied. The history is in `.agents/state.yaml` under the Batch 12 entry
   stamps both, and records `v0.1.0` under a local-only tag. #94 closes under DEC-I1: the
   documented stamped build (`make install`) records a real commit, verified by T090, and
   `go install` users of a tag get `unknown` by accepted decision.
-- **T091, partial**: `validation/t091-quickstart.md`. The local part passed on 2026-09-25, and
-  the live command-line part on 2026-09-28 against the maintainer's test bot. #92's rider got
-  HTTP 400 for `text=a%FFb`, so DEC-D4's premise holds and #104 stays closed.
+- **T091**: `validation/t091-quickstart.md`. The local part passed on 2026-09-25, the live
+  command-line part on 2026-09-28 against the maintainer's test bot, and the native-window part,
+  run by the maintainer, on 2026-09-29. #92's rider got HTTP 400 for `text=a%FFb`, so DEC-D4's
+  premise holds and #104 stays closed. Scenario 1 with `thread_id` is not applicable: the test
+  chat is a DM.
 
 ## Blockers
-None for the PR. **T091 / #92 stays open for the maintainer.** The live command-line checks were
-run on 2026-09-28 with the test bot the maintainer provided, and passed. Still owed: Scenario 1
-with `thread_id` set, if the chat is a forum; Scenario 7 in full on the native window; and
-Scenario 8's window halves, with each of the four startup-error-window dismissal routes recorded,
-including the native `Esc` owed since T082.
+None. T091 is complete, including the native `Esc` dismissal owed since T082. The maintainer
+revoked the test bot token on 2026-09-29.
 
 ## Next best action
-The review converged: cycle 3 ended `passed-with-notes`, and four post-review wording and record
-edits followed (see `state.yaml` `post_review_edits`). Re-run `make check` on the final bytes,
-commit, and with the maintainer's go-ahead push and open the PR. The PR has no closing keywords, so
-`closingIssuesReferences` must read back empty. After merge, close #85–#88, #90, #91 and #95
-explicitly, naming the merge commit; #92 stays open. Close #94 the same way. GitHub #94 records
+Mark PR #139 ready for review and merge it, with the maintainer's go-ahead. The PR has no
+closing keywords, so
+`closingIssuesReferences` read back empty for PR #139. After merge, close #85–#88, #90–#92 and
+#95 explicitly, naming the merge commit. Close #94 the same way. GitHub #94 records
 only the 2026-09-24 option (b), so its comment must also say four things: DEC-I1 (2026-09-28)
 narrowed option (b); `make install`, the documented stamped build, records a real commit, as
 verified by T090 (`v0.1.0` / `e0ef849` under a local-only tag); a tagged `go install` records
 `git_commit = unknown`, which is accepted and documented in design §14 and README; and FR-066 and
 A-008 are not yet annotated, which is handed to spec-reconciler (#105). That last precondition is
-already met: the item was posted on #105 on 2026-09-28. Also comment on #92 with the 2026-09-28 live
-results, the DEC-D4 outcome (#104 stays closed), and what is still owed. Then implement DEC-I2 (#137) and decide
+already met: the item was posted on #105 on 2026-09-28. #92's closing comment gives the
+2026-09-28 live results, the DEC-D4 outcome (#104 stays closed), the 2026-09-29 window checks, and
+the `thread_id` case as not applicable. Then implement DEC-I2 (#137) and decide
 the open non-task issues before `close-feature`: #96, #101, #102, #103, #105 (spec-reconciler),
 #115, #118, #136, #137, #138. #138 is future work, to be considered later.
 

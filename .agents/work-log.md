@@ -1190,3 +1190,22 @@ confirmed. Valid git-generated publication patches now reverse-check successfull
 - The loop used all three fix passes. The review converged on the code at cycle 2; cycles 2 and 3 found only records and wording issues. Most of that churn came from records trying to describe the review they were part of. Record the review history once, at close-out, not inside each fix pass.
 - **Post-review edits**, all wording and records, not re-reviewed: COR-008 (`example.toml`: "end in .md"), COR-009 (the T089 note says "initial tree"), ADV-013 (README names the #137 exception), and CON-017 (a #92 comment added to the post-merge plan).
 - The maintainer's secret file carried a stray `\x01` after the `bot_token` line. It was found by inspecting the file's shape without printing any values. The live script dropped control characters before parsing and left the file unchanged.
+
+### 2026-09-29 — PR #139, and the T091 window checks
+- **PR #139** was opened as a draft from `1fd507c` on `sgykfjsm/batch-12-cycle`, with the maintainer's go-ahead. `closingIssuesReferences` read back empty. Before committing, the staged diff was checked for the maintainer's real token, its secret half and the chat id, and none was present.
+- **Window checks**: the maintainer ran them at the keyboard, one isolated settings folder per case, and every case passed:
+  - the idle auto-close after 15 s and 30 s, with exit 0 and 1;
+  - a keypress cancelling it;
+  - Enter and Cmd+Enter, with Send disabled while sending, and both outcomes shown;
+  - Esc before sending, and Cmd+Q;
+  - the window on the default settings after a `-c` post;
+  - the startup-error window dismissed by Quit, the close box, Esc and Cmd+Q, each exiting 1. That closes the native-Esc gap left since T082.
+
+  Scenario 1 with `thread_id` is not applicable, because the test chat is a DM. T091 is ticked, and all 91 tasks are done.
+- **My checklist had two wrong assumptions:**
+  - that Tab moves focus from the message field to a button: Fyne's multi-line entry consumes Tab;
+  - that a click leaves a button focused: `Button.Tapped` calls `Focus(nil)`.
+
+  I found both by reading Fyne v2.8.1 source before recording a result that I had not actually observed. Case 4c then showed that a button cannot gain keyboard focus in the posting window at all. `internal/gui/entry.go:46`'s comment says otherwise; it is left for the next code change.
+- One case-2 run stayed open for about 266 s. The maintainer did not state why; a rerun with no interaction closed at about 30 s, as designed.
+- Housekeeping: the maintainer revoked the test token. The temporary settings files that held it were deleted, and a scan of the scratch space, the review run state and the repository found no copy.

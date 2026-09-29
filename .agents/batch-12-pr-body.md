@@ -3,8 +3,9 @@
 Batch 12 is **polish and gates**, the last task-backed batch of v0.1. It adds the constitution's
 secret-leak gate and the SC-014 acceptance matrix with its manual justifications. It also adds a
 README and a commented example settings file that tests keep honest. It verifies vet, build and
-`-race`, and the real `go install …@latest` and `make install` paths. The locally observable part
-of the quickstart and its live command-line part are recorded; the native-window checks remain.
+`-race`, and the real `go install …@latest` and `make install` paths. All nine quickstart
+scenarios are recorded: the locally observable part, the live command-line part, and the
+native-window part, which the maintainer ran on 2026-09-29.
 
 **No production code changes.** The Go changes are two new test files, plus one new test and its
 accessor in `internal/sink/telegram`'s test files.
@@ -35,7 +36,7 @@ comment naming the merge commit.
   `spec.md` FR-066 and A-008 are not yet annotated for DEC-I1; that is handed to spec-reconciler
   on #105, where the item was posted on 2026-09-28.
 - #95: delivered here
-- T091 → #92: **partial; stays open.** See *Out of scope*.
+- T091 → #92: delivered here. The window checks were added on 2026-09-29; see *Validation*.
 
 ## Changes
 
@@ -80,8 +81,7 @@ comment naming the merge commit.
   that is handed to spec-reconciler on #105, where the item was posted on 2026-09-28.
 - **Records**: Batch 11 moved to `completed`, with its merge verified (head `5005ea8` and the squash
   share tree `776bbbb5`). The closures and the published follow-ups (#136, the #126 comment) are
-  recorded. `tasks.md` T084–T087, T089 and T090 are ticked with delivery notes, and T091 carries a
-  partial note. `project-status.md` has been rewritten; its previous copy is archived.
+  recorded. `tasks.md` T084–T087 and T089–T091 are ticked with delivery notes: all 91 tasks are done. `project-status.md` has been rewritten; its previous copy is archived.
   `.agents/state.yaml` records review cycles 0–3, fix passes 1–3, the post-review edits, DEC-I1,
   DEC-I2 and the live DEC-D4 check.
 
@@ -140,17 +140,31 @@ comment naming the merge commit.
   HTTP 400 `Bad Request: strings must be encoded in UTF-8`: DEC-D4's premise holds, and #104
   stays closed. A token scan over every output, log, note and the rider reply found 0
   occurrences.
-- [ ] T091, window part and `thread_id`: not run (below).
+- [x] **T091, native-window part**, 2026-09-29, run by the maintainer at the keyboard
+  (`validation/t091-quickstart.md`, *Window checks*). Every case passed:
+  - the idle auto-close after 15 s and 30 s, with exit 0 and exit 1;
+  - a keypress cancelling the countdown;
+  - Enter and Cmd+Enter, with Send disabled while sending, and both outcomes shown;
+  - Esc before sending, and Cmd+Q;
+  - the window keeping the default settings after a `-c` post;
+  - the startup-error window dismissed by Quit, the close box, Esc and Cmd+Q, each exiting 1.
+    That includes the native `Esc` owed since T082.
 
-Apart from the 2026-09-28 live run, every run in this batch kept Telegram disabled or used the
-in-process transport.
+  One finding: in the posting window no user input can put keyboard focus on a button. The
+  multi-line entry consumes Tab, and a click calls `Focus(nil)`. So
+  `gui.TestEscapeWithButtonFocused` covers a defensive path, and the comment at
+  `internal/gui/entry.go:46` is inaccurate; it is left for the next code change. Scenario 1 with
+  `thread_id` is not applicable, because the test chat is a DM; the wire field is covered by
+  automated tests. The maintainer revoked the test token afterwards.
+
+Apart from the 2026-09-28 live run and the 2026-09-29 window checks, both against the
+maintainer's test bot, every run in this batch kept Telegram disabled or used the in-process
+transport.
 
 ## Out of scope
 
-- **T091 / #92, the window remainder.** Owed to the maintainer: Scenario 1 with `thread_id` set,
-  if the chat is a forum; Scenario 7 in full on the native window; and Scenario 8's window halves,
-  with each of the four dismissal routes of the startup-error window recorded, including the
-  native `Esc` owed since T082. The list is in `validation/t091-quickstart.md`. #92 stays open.
+- The `internal/gui/entry.go:46` comment correction. It is a code file, and it is left for the
+  next code change (see *Validation*, T091).
 - **`spec.md` FR-066 and A-008**: not yet annotated for DEC-I1. That is handed to spec-reconciler
   on #105, where the item was posted on 2026-09-28.
 - **#137 / DEC-I2**, a `bot_token` with surrounding whitespace. For the URL / error path, the gate
@@ -187,13 +201,14 @@ all three passes. They are wording and records only, and they were not re-review
 - `testdata/config/example.toml`: `filename_format` "must end in .md", which is what `validate.go` checks (COR-008).
 - `tasks.md` T089: the 2026-09-25 run was on the *initial* tree (COR-009).
 - `README.md`: the "never logged or printed" sentence names the #137 exception until DEC-I2 lands (ADV-013).
-- `.agents/*`: the cycle-3 record, and a #92 progress comment added to the post-merge plan (CON-017).
+- `.agents/*`: the cycle-3 record, and a #92 comment added to the post-merge plan (CON-017).
+- 2026-09-29, a separate records-only commit: the window-check results, T091 ticked, the acceptance matrix Result log, and #92 added to the post-merge closures.
 
 ## Notes for reviewers
 
 - The leak gate is not parallel, because it swaps a process-global transport. Nothing else in
   `internal/post` touches `http.DefaultTransport`.
-- In the acceptance matrix's Result log, M1 is done except `thread_id` topic routing, and M2–M4
-  read "pending — T091" on purpose. None of the window checks is claimed.
+- In the acceptance matrix's Result log, M1–M4 are done. `thread_id` topic routing is recorded as
+  not applicable (the test chat is a DM), not as a pass.
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)

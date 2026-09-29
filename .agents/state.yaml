@@ -1614,7 +1614,7 @@ completed:
       and exited 1; an all-disabled default config kept the error window open until the 5s kill and
       created no log; with HOME and XDG_CONFIG_HOME both unset, exit 1 and nothing written to the cwd (DEC-H2).
     validation_gaps:
-      - "Owned by T091 / #92 (quickstart.md FR-030 scenario). Native dismissal of the startup-error window by a real keypress or click: osascript blocked on Accessibility permission. Covered headlessly for Quit, close box, Esc (focused and unfocused) and Cmd+Q"
+      - "Owned by T091 / #92 (quickstart.md FR-030 scenario). Native dismissal of the startup-error window by a real keypress or click: osascript blocked on Accessibility permission. Covered headlessly for Quit, close box, Esc (focused and unfocused) and Cmd+Q. RESOLVED 2026-09-29: the maintainer dismissed the real window by Quit, the close box, Esc and Cmd+Q, each exit 1 (Batch 12, T091 case 7a-7d)"
     process_incidents:
       - "Three test-time requests reached api.telegram.org with fake tokens and nothing was posted: the cycle-0 adversarial reviewer's probe (an env token overrode the file token), the coordinator's run-ignore-seam mutant, and the same mutant re-run by the cycle-1 correctness reviewer. Both run-ignore-seam runs bypass the substitute sink by construction"
 in_progress:
@@ -1633,7 +1633,7 @@ in_progress:
       - "T087: README.md; testdata/config/example.toml pinned by TestExampleSettingsAreTheDefaults and TestExampleSettingsNameEveryKey"
       - "T089: gofmt, go vet ./..., go build ./..., go test -race ./... clean on go1.27.1 darwin/arm64"
       - "T090: go install ...@latest -> v0.0.0-20260924064643-e0ef849024a9, no vcs.* settings, records carry that version and commit e0ef849024a9; make install stamps e0ef849/e0ef849 untagged and v0.1.0/e0ef849 under a local-only tag"
-      - "T091 partial: specs/001-dual-sink-quick-post/validation/t091-quickstart.md; local part 2026-09-25, live command-line part 2026-09-28 against the maintainer's test bot, all pass"
+      - "T091: specs/001-dual-sink-quick-post/validation/t091-quickstart.md; local part 2026-09-25, live command-line part 2026-09-28 against the maintainer's test bot, native-window part by the maintainer 2026-09-29, all pass; Scenario 1 with thread_id not applicable (the test chat is a DM)"
       - "#95: docs/design.ja.md section 14 uses the real module path; grep -rn module-path docs is empty"
     mutation_t084: >-
       Predicted, then run. Killed: logger Redact removed (by the message-contains-credential case),
@@ -1802,8 +1802,23 @@ in_progress:
       recorded_in: specs/001-dual-sink-quick-post/validation/t091-quickstart.md
     spec_reconciler_handoff:
       - {issue: 105, item: "annotate spec.md FR-066 and A-008 with DEC-I1: a tagged go install records app_version = the tag and git_commit = unknown, accepted for v0.1; make install is the stamped build. A-008's 'stamped into the binary at build time' holds only for make install", source: CON-007, published_as: "https://github.com/sgykfjsm/miko-post/issues/105#issuecomment-5865686841 (2026-09-28)"}
+    window_checks:
+      date: 2026-09-29
+      by: maintainer, at the keyboard, native macOS window, binary from 1fd507c
+      result: "all cases pass: auto-close 15 s / 30 s with exit 0 / 1, keypress cancel, Esc (field focused and nothing focused), Cmd+Q, -c then the window on the default path, startup-error window dismissed by Quit, close box, Esc and Cmd+Q, each exit 1"
+      finding: >-
+        In the posting window a button cannot gain keyboard focus through user input: the
+        multi-line entry consumes Tab (fyne v2.8.1 Entry.AcceptsTab == MultiLine), and
+        Button.Tapped calls Focus(nil). gui.TestEscapeWithButtonFocused therefore covers a
+        defensive path only. internal/gui/entry.go:46's comment ("after a click or Tab") is
+        inaccurate for the posting window; fix it with the next code change.
+      token: "the maintainer revoked the test bot token on 2026-09-29; the temporary settings files that held it were deleted"
+      recorded_in: specs/001-dual-sink-quick-post/validation/t091-quickstart.md
+    pull_request: 139
+    pull_request_url: https://github.com/sgykfjsm/miko-post/pull/139
+    pull_request_note: "opened as a draft on 2026-09-29 from 1fd507c; closingIssuesReferences read back empty"
     open_after_batch:
-      - "T091 / #92, owed to the maintainer: (a) Scenario 1 with thread_id set, if the chat is a forum with topics (criterion 5, M1); (b) Scenario 7 in full on the native window (M2, M3); (c) Scenario 8's window halves, each of the four startup-error-window dismissal routes recorded, including the native Esc owed since T082 (M4). The live command-line part was done 2026-09-28"
+      - "internal/gui/entry.go:46 comment: a button gains focus neither by click nor by Tab from the message field (window_checks.finding)"
       - "#137 / DEC-I2: implement after Batch 12 merges, before close-feature"
       - "#138: a release workflow publishing stamped macOS binaries (DEC-I1's relaxation); future work, to be considered later"
 blockers: []
@@ -1863,24 +1878,21 @@ time_sensitive:
     deadline: before tagging v0.1.0
 
 next_best_action: >-
-  Batch 12's review converged: cycle 3 ended passed-with-notes after fix passes 1-3, and the
-  coordinator applied the post-review wording edits recorded under post_review_edits. Re-run
-  make check on the final bytes and commit, and with the maintainer's go-ahead push
-  sgykfjsm/batch-12-cycle and opens the PR. The PR carries no closing keywords, so
-  closingIssuesReferences must read back empty after opening. After merge, in the same session:
-  explicitly close #85, #86, #87, #88, #90, #91, #94 and #95, each with a comment naming the merge
-  commit, and move batch 12 to completed. GitHub #94 records only the 2026-09-24 option (b), so its
+  Batch 12's review converged (cycle 3 passed-with-notes). PR #139 is open as a draft from
+  sgykfjsm/batch-12-cycle, and its closingIssuesReferences read back empty. The window checks of
+  2026-09-29 completed T091; they are added to the PR as a records-only commit. Mark the PR ready
+  and merge with the maintainer's go-ahead. After merge, in the same session:
+  explicitly close #85, #86, #87, #88, #90, #91, #92, #94 and #95, each with a comment naming the
+  merge commit, and move batch 12 to completed. GitHub #94 records only the 2026-09-24 option (b), so its
   closing comment must also say four things: DEC-I1 (2026-09-28) narrowed option (b); make install,
   the documented stamped build, records a real commit, as verified by T090 (v0.1.0 / e0ef849 under
   a local-only tag); a tagged go install records git_commit = unknown, which is accepted and
   documented in design §14 and README; and FR-066 and A-008 are not yet annotated, handed to
   spec-reconciler (#105). That last precondition is already met: the item was posted on #105 on
-  2026-09-28 (issuecomment-5865686841). #92 (T091) stays open until the maintainer runs the
-  window checks and the thread_id case listed in
-  specs/001-dual-sink-quick-post/validation/t091-quickstart.md; the live command-line part and
-  the DEC-D4 rider were done on 2026-09-28. Also after merge, comment on #92 (CON-017) with the
-  2026-09-28 live results, the DEC-D4 rider outcome (HTTP 400 "strings must be encoded in UTF-8",
-  so the premise holds and #104 stays closed), and the items still owed. Then implement DEC-I2 (#137) before close-feature, and
+  2026-09-28 (issuecomment-5865686841). #92's closing comment (CON-017) must give the 2026-09-28
+  live results, the DEC-D4 rider outcome (HTTP 400 "strings must be encoded in UTF-8", so the
+  premise holds and #104 stays closed), the 2026-09-29 window checks, and that Scenario 1 with
+  thread_id is not applicable (the test chat is a DM). Then implement DEC-I2 (#137) before close-feature, and
   decide the remaining open non-task issues (#96, #101, #102, #103, #105 (spec-reconciler), #115,
   #118, #136, #137, #138) before close-feature. #138 is future work, to be considered later.
 
@@ -2112,7 +2124,7 @@ assumptions:
     The batch decomposition above is re-derived by run-batch-cycle's triage step each run; it is
     recorded here for orientation, not as a binding plan.
 
-last_updated: 2026-09-28
+last_updated: 2026-09-29
 
 backlog_additions:
   - issue: 122
