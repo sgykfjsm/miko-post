@@ -100,7 +100,7 @@ destination's result is printed, with a short reason for any that failed.
 | Key | Action |
 |---|---|
 | `Cmd+Enter` | send |
-| `Enter` | new line |
+| `Shift+Enter` | new line (a plain `Enter` does nothing, so it cannot disturb IME conversion) |
 | `Esc` | close without posting |
 | `Cmd+Q` | quit |
 

@@ -22,10 +22,17 @@ func TestCommandsWhileEntryHasFocus(t *testing.T) {
 		t.Fatal("entry does not hold focus")
 	}
 	test.Type(focused, "日本語")
+	// A plain Return, such as the one that confirms an IME conversion, adds nothing.
+	focused.TypedKey(&fyne.KeyEvent{Name: fyne.KeyReturn})
+	focused.TypedKey(&fyne.KeyEvent{Name: fyne.KeyEnter})
+	if e.Text != "日本語" || sent != 0 {
+		t.Fatalf("plain Return: %q, sent=%d", e.Text, sent)
+	}
+	e.shiftHeld = func() bool { return true }
 	focused.TypedKey(&fyne.KeyEvent{Name: fyne.KeyReturn})
 	test.Type(focused, "second")
 	if e.Text != "日本語\nsecond" || sent != 0 {
-		t.Fatalf("Enter: %q, sent=%d", e.Text, sent)
+		t.Fatalf("Shift+Return: %q, sent=%d", e.Text, sent)
 	}
 	shortcut := focused.(fyne.Shortcutable)
 	shortcut.TypedShortcut(&desktop.CustomShortcut{KeyName: fyne.KeyReturn, Modifier: fyne.KeyModifierSuper})

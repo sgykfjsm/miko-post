@@ -75,7 +75,7 @@ that the application exits on its own afterwards with a status matching the outc
    activates the Send control, **Then** the same validation and submission path runs for both,
    sending is disabled for the duration so the message cannot be submitted twice, and a compact
    per-destination result is shown when every enabled destination has finished.
-3. **Given** the user is typing, **When** they press `Enter`, **Then** a line break is inserted and
+3. **Given** the user is typing, **When** they press `Shift+Enter`, **Then** a line break is inserted and
    nothing is sent.
 4. **Given** the window is open, **When** the user presses `Esc` or activates Cancel, **Then** the
    window closes without contacting any destination.
@@ -392,7 +392,7 @@ it, while a subsequently launched window still used the default.
   [the background contract](../../docs/gui-background.md). This decorative extension
   adds no control or image-posting capability.
 - **FR-021**: The message field MUST hold keyboard focus when the window appears.
-- **FR-022**: `Esc` MUST cancel and close without posting; `Enter` MUST insert a line break;
+- **FR-022**: `Esc` MUST cancel and close without posting; `Shift+Enter` MUST insert a line break and a plain `Enter` MUST do nothing (an IME-confirming Enter must not add one);
   `Cmd+Enter` MUST send; `Cmd+Q` MUST quit the application.
 - **FR-023**: Controls and keyboard shortcuts MUST share the same validation and submission paths.
 - **FR-024**: The Send control MUST be disabled for the duration of a submission so a post cannot
