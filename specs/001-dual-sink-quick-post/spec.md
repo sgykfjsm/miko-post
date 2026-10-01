@@ -394,6 +394,14 @@ it, while a subsequently launched window still used the default.
 - **FR-021**: The message field MUST hold keyboard focus when the window appears.
 - **FR-022**: `Esc` MUST cancel and close without posting; `Shift+Enter` MUST insert a line break and a plain `Enter` MUST do nothing (an IME-confirming Enter must not add one);
   `Cmd+Enter` MUST send; `Cmd+Q` MUST quit the application.
+- **FR-022a** (accepted extension, input methods on macOS): While an input method is composing
+  text, the window MUST (a) open the candidate window beside the caret rather than at the
+  window's corner, (b) draw the uncommitted text with an underline at the caret, with a caret
+  inside it where the input method puts one, and (c) ignore the keys that steer the conversion
+  (Backspace, Delete, the arrows, Return, Esc) instead of acting on them. The uncommitted text
+  MUST NOT enter the message, so a post sent mid-conversion carries only committed text. If the
+  platform hook cannot be installed, the window MUST still work, with the candidate window at the
+  window's corner and the composing text hidden until it is confirmed.
 - **FR-023**: Controls and keyboard shortcuts MUST share the same validation and submission paths.
 - **FR-024**: The Send control MUST be disabled for the duration of a submission so a post cannot
   be submitted twice.

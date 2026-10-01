@@ -1,8 +1,11 @@
 package gui
 
 import (
+	"sync/atomic"
+
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/driver/desktop"
+	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 )
 
@@ -12,6 +15,18 @@ type messageEntry struct {
 	widget.Entry
 	submit, cancel func()
 	shiftHeld      func() bool
+
+	// caretMoved, once set, receives the caret's rectangle in window-content
+	// points so the platform can place an input method's candidate window
+	// beside it.
+	caretMoved func(pos fyne.Position, size fyne.Size)
+
+	// composing is true while an input method holds uncommitted text. The
+	// driver delivers the keys that steer the conversion (Backspace, arrows,
+	// Return, Esc) to the entry as well as to the input method, so while this
+	// is set the entry must not act on them. Atomic because the platform sets
+	// it from inside the same key event that then reads it.
+	composing atomic.Bool
 }
 
 func newMessageEntry(submit, cancel func()) *messageEntry {
@@ -19,7 +34,42 @@ func newMessageEntry(submit, cancel func()) *messageEntry {
 	e.MultiLine = true
 	e.Wrapping = fyne.TextWrapWord
 	e.ExtendBaseWidget(e)
+	e.OnCursorChanged = e.reportCaret
 	return e
+}
+
+// reportCaret hands the caret's line to caretMoved. The vertical position is
+// clamped to the visible entry because Entry.CursorPosition ignores scrolling.
+func (e *messageEntry) reportCaret() {
+	if e.caretMoved == nil {
+		return
+	}
+	e.caretMoved(e.caretRect())
+}
+
+// caretRect is the caret's line in window-content points.
+func (e *messageEntry) caretRect() (fyne.Position, fyne.Size) {
+	origin := fyne.CurrentApp().Driver().AbsolutePositionForObject(e)
+	line := fyne.MeasureText("あ", e.Theme().Size(theme.SizeNameText), fyne.TextStyle{}).Height
+	at := e.CursorPosition()
+	y := min(max(at.Y, 0), max(e.Size().Height-line, 0))
+	return origin.Add(fyne.NewPos(at.X, y)), fyne.NewSize(1, line)
+}
+
+// Resize and Move keep the reported caret right when the layout changes.
+func (e *messageEntry) Resize(size fyne.Size) {
+	e.Entry.Resize(size)
+	e.reportCaret()
+}
+
+func (e *messageEntry) Move(pos fyne.Position) {
+	e.Entry.Move(pos)
+	e.reportCaret()
+}
+
+func (e *messageEntry) FocusGained() {
+	e.Entry.FocusGained()
+	e.reportCaret()
 }
 
 func (e *messageEntry) TypedShortcut(s fyne.Shortcut) {
@@ -37,6 +87,9 @@ func (e *messageEntry) TypedShortcut(s fyne.Shortcut) {
 }
 
 func (e *messageEntry) TypedKey(k *fyne.KeyEvent) {
+	if e.composing.Load() {
+		return
+	}
 	if k.Name == fyne.KeyEscape {
 		e.cancel()
 		return
