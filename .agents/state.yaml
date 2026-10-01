@@ -2137,7 +2137,9 @@ next_best_action: >-
   None for feature 001; it is closed. Open work outside it: #101 (DEC-J3, deferred beyond v0.1) and
   #138 (a release workflow publishing stamped macOS binaries, DEC-I1's relaxation). Two stale code
   comments await the next code change: Reveal's "exactly one place" in internal/config/secret.go
-  and "four-method" in internal/post/result.go. Tagging v0.1.0 is the maintainer's call.
+  and "four-method" in internal/post/result.go. Tagging v0.1.0 is the maintainer's call. Known
+  limitation, unfiled: the macOS IME candidate window opens at the window's top-left (see
+  post_closure_changes); the maintainer chose to accept it for now.
 
 feature_closeout:
   date: 2026-09-29
@@ -2394,7 +2396,27 @@ assumptions:
     The batch decomposition above is re-derived by run-batch-cycle's triage step each run; it is
     recorded here for orientation, not as a binding plan.
 
-last_updated: 2026-09-29
+last_updated: 2026-10-01
+
+post_closure_changes:
+  - date: 2026-10-01
+    pull_request: 143
+    merge_commit: 3c6e82787c0fd57673e3756a02f97023906a144f
+    summary: >-
+      A plain Enter is ignored in the message entry and Shift+Enter inserts the line break, so the
+      Return that confirms a macOS IME conversion no longer adds a stray line break. FR-022, the
+      acceptance scenario, design.md, design.ja.md and the README were changed to match.
+    files: [internal/gui/entry.go, internal/gui/entry_test.go, README.md, docs/design.md, docs/design.ja.md, specs/001-dual-sink-quick-post/spec.md]
+    verified: >-
+      go test ./internal/gui/ passes; removing the guard fails TestCommandsWhileEntryHasFocus.
+      By hand on a Mac with the Japanese IME: confirming with Return adds no line break. Not
+      verified by hand: Shift+Enter inserting a line break; Cmd+Enter submitting.
+    known_limitation: >-
+      The IME candidate window opens at the top-left of the window. GLFW's
+      firstRectForCharacterRange returns the view origin, and its keyDown forwards keys before
+      interpretKeyEvents. Upstream is open: fyne-io/fyne#618 and glfw/glfw#2130 (milestone 3.6).
+      Option not taken: patch GLFW via a go.mod replace and wire glfwSetPreeditCursorRectangle
+      to Entry. No issue is filed.
 
 backlog_additions:
   - issue: 122
