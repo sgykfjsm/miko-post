@@ -31,6 +31,23 @@ PR #145 (`a5976d3`, 2026-10-01) added `[gui].background_opacity` (0 to 1, defaul
 value), because the background image was hard to see. Out-of-range values, `nan` and `inf` are
 refused at load. Confirmed by hand on a Mac: raising it works and looks fine.
 
+PR #147 (`f8f6f4b`, 2026-10-01) fixed Japanese input on macOS beyond the line break. GLFW reports the
+view origin as the caret and keeps the text being composed to itself, so the candidate window
+opened at the window's corner and the conversion was invisible until confirmed. The GUI now
+replaces four `GLFWContentView` text-input methods at run time (`internal/gui/ime_darwin.m`): the
+candidate window follows the entry's caret, the composing text is drawn as an underlined overlay
+with its own caret (`internal/gui/preedit.go`) and never enters the message, and the entry ignores
+Backspace, the arrows, Return and Esc while a conversion is open. Spec FR-022a records it. Confirmed
+by hand on a Mac. Cause of one unexplained reappearance of the top-left candidate window: unknown;
+it did not reproduce and the logged rectangle was valid, so another build of the binary is the
+likely reason.
+
+PR #148 (`cd99768`, 2026-10-01) stopped the window posting the same message repeatedly. After every
+enabled destination succeeds, Send and Cancel give way to a single Quit button and `Cmd+Enter` is
+refused; a failed post keeps Send for a retry (a partial failure too, and a retry then posts to
+every enabled destination again). FR-020, FR-024, scenarios 5 and 6 and the docs follow. Confirmed
+by hand on a Mac.
+
 ## In progress
 Nothing for feature 001.
 
@@ -41,10 +58,12 @@ None.
 None for feature 001. Open work outside it: #101 (deferred, DEC-J3) and #138 (stamped release
 binaries, DEC-I1's relaxation). Two stale code comments wait for the next code change: `Reveal`'s
 "exactly one place" and `result.go`'s "four-method". Tagging `v0.1.0` is the maintainer's call.
-Known limitation, unfiled: the IME candidate window opens at the top-left of the window instead of
-under the cursor. GLFW's `firstRectForCharacterRange` returns the view origin. Upstream is open
-(fyne-io/fyne#618, glfw/glfw#2130). The fix is a patched GLFW through a `replace` directive,
-wired to `Entry`; the maintainer chose to live with it for now.
+Known limitations of the input-method hook (FR-022a), unfiled: the composing text is drawn over any
+text to the right of the caret; it depends on the class name `GLFWContentView` and fails safe
+(stderr note, old behaviour) if that changes; and it can go once the driver supports it
+(fyne-io/fyne#618, glfw/glfw#2130, both open). Since the window now knows when a conversion is open,
+a plain `Enter` could insert a line break again outside one instead of being ignored; that would
+change FR-022 and is the maintainer's call.
 
 ## Important decisions
 DEC-I1 and DEC-I2 (Batch 12), and DEC-J1 to DEC-J9 (Batch 13), are in `.agents/state.yaml`.

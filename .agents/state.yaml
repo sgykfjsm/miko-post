@@ -2137,9 +2137,8 @@ next_best_action: >-
   None for feature 001; it is closed. Open work outside it: #101 (DEC-J3, deferred beyond v0.1) and
   #138 (a release workflow publishing stamped macOS binaries, DEC-I1's relaxation). Two stale code
   comments await the next code change: Reveal's "exactly one place" in internal/config/secret.go
-  and "four-method" in internal/post/result.go. Tagging v0.1.0 is the maintainer's call. Known
-  limitation, unfiled: the macOS IME candidate window opens at the window's top-left (see
-  post_closure_changes); the maintainer chose to accept it for now.
+  and "four-method" in internal/post/result.go. Tagging v0.1.0 is the maintainer's call. The macOS
+  input-method hook (FR-022a, PR 147) has unfiled limits, listed in project-status.md.
 
 feature_closeout:
   date: 2026-09-29
@@ -2400,6 +2399,44 @@ last_updated: 2026-10-01
 
 post_closure_changes:
   - date: 2026-10-01
+    pull_request: 148
+    merge_commit: cd99768e103a1b2ece6140c1dbf888e39dbe8976
+    summary: >-
+      After every enabled destination succeeds, Send and Cancel are hidden in favour of a Quit
+      button and further submission (Cmd+Enter included) is refused, so one message cannot be posted
+      repeatedly. A failed post, including a partial failure, keeps Send for a retry, which posts to
+      every enabled destination again. FR-020, FR-024, acceptance scenarios 5 and 6,
+      contracts/gui-interface.md, design.md, design.ja.md and the README were changed to match.
+    files: [internal/gui/window.go, internal/gui/window_test.go, internal/gui/degraded_test.go, specs/001-dual-sink-quick-post/spec.md, specs/001-dual-sink-quick-post/contracts/gui-interface.md, docs/design.md, docs/design.ja.md, README.md]
+    verified: >-
+      go vet, go test ./... and go test -race ./internal/gui/ pass; removing the done guard, not
+      showing Quit, and ending sending on failure too each fail the new tests. By hand on a Mac:
+      only Quit remains after a successful post. Four older tests assumed a second post after a
+      success and were rewritten (three repeat with a failing destination; the spent-warning test
+      asks the warning directly).
+    decision: >-
+      Failure keeps Send (the maintainer's request was about duplicate posts after success; a
+      retry after failure is still wanted).
+  - date: 2026-10-01
+    pull_request: 147
+    merge_commit: f8f6f4b980b75798231f56169516ec093bf1ee0f
+    summary: >-
+      The macOS IME candidate window opens at the entry's caret and the text being composed is
+      drawn as an underlined overlay with its own caret, never entering the message. Done by
+      replacing GLFWContentView's firstRectForCharacterRange, setMarkedText, unmarkText and
+      insertText at run time (internal/gui/ime_darwin.m), without forking GLFW or Fyne. The entry
+      ignores Backspace, the arrows, Return and Esc while a conversion is open. New spec FR-022a.
+    files: [internal/gui/ime_darwin.m, internal/gui/ime_darwin.go, internal/gui/ime_other.go, internal/gui/ime_darwin_test.go, internal/gui/preedit.go, internal/gui/entry.go, internal/gui/window.go, internal/gui/run.go, specs/001-dual-sink-quick-post/spec.md, docs/design.md, docs/design.ja.md]
+    verified: >-
+      go vet, go test ./... and go test -race ./internal/gui/ pass; four mutants fail the new tests.
+      By hand on a Mac with the Japanese IME: composing text visible with an underline, caret inside
+      it, Backspace/arrows/Esc leave committed text alone, candidate window at the caret. The AppKit
+      replacement itself is not testable without a display.
+    open: >-
+      The top-left candidate window reappeared once and could not be explained (the logged rectangle
+      was valid; later runs were fine; another build of the binary is the likely cause).
+    resolves: the known_limitation of PR 143 below
+  - date: 2026-10-01
     pull_request: 145
     merge_commit: a5976d3dc7eb70d9fc58b7663862804b5485f18c
     summary: >-
@@ -2423,7 +2460,7 @@ post_closure_changes:
       By hand on a Mac with the Japanese IME: confirming with Return adds no line break. Not
       verified by hand: Shift+Enter inserting a line break; Cmd+Enter submitting.
     known_limitation: >-
-      The IME candidate window opens at the top-left of the window. GLFW's
+      (Resolved by PR 147.) The IME candidate window opens at the top-left of the window. GLFW's
       firstRectForCharacterRange returns the view origin, and its keyDown forwards keys before
       interpretKeyEvents. Upstream is open: fyne-io/fyne#618 and glfw/glfw#2130 (milestone 3.6).
       Option not taken: patch GLFW via a go.mod replace and wire glfwSetPreeditCursorRectangle
