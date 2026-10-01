@@ -1295,3 +1295,12 @@ confirmed. Valid git-generated publication patches now reverse-check successfull
 - Decision: named `opacity`, not `transparency`, so a higher number shows more of the image.
 - Open: none from this change.
 - Next best action: unchanged (see `project-status.md`).
+
+### 2026-10-01 — Japanese input on macOS, and one post per message (PR #147, PR #148)
+- Objective: after PR #143 the candidate window still opened at the window's corner and the conversion was invisible until confirmed; separately, Send stayed usable after a successful post, so a message could be posted repeatedly.
+- Choice: the maintainer first took the Enter workaround and accepted the corner, then asked for the real fix. A fork of GLFW or Fyne was not needed: the four `GLFWContentView` text-input methods are replaced at run time instead (`ime_darwin.m`). Cocoa never calls into Go from a block that outlives the event; the caret rectangle is stored by Go and read by AppKit, and the composition callback runs synchronously inside the key event.
+- #147 (`f8f6f4b`): candidate window at the entry's caret; the composing text drawn as an underlined overlay with its own caret at the offset the input method reports; the entry ignores Backspace, arrows, Return and Esc while composing (this also fixed Backspace deleting committed text and Esc closing the window mid-conversion). Spec FR-022a added. Found along the way: Fyne 2.7+ has a public `Entry.CursorPosition()`, and `t.Type` in a test window wraps CJK text one character per line, so column assertions compare before and after.
+- #148 (`cd99768`): after a fully successful post Send and Cancel give way to Quit and `Cmd+Enter` is refused; failure keeps Send. Four tests that posted twice after a success were rewritten.
+- Evidence: `go vet`, `go test ./...`, `go test -race ./internal/gui/` pass on both; each guard was mutated and failed a test. By hand on a Mac with the Japanese IME, both confirmed. The PRs had no CI checks.
+- Open: the top-left candidate window reappeared once and could not be explained; debug output (since removed) showed a valid rectangle and later runs were fine. Limits of the hook are listed in `project-status.md`.
+- Next best action: unchanged (see `project-status.md`).
