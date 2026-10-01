@@ -1278,3 +1278,12 @@ confirmed. Valid git-generated publication patches now reverse-check successfull
 - The closeout PR #141 (the spec-reconciler pass, with no code changes) squash-merged as `3fb79dd`. Head `ad23c91` and the squash share tree `3874df82`.
 - #105 was closed with a comment walking each checklist item: the body, plus the comments of 2026-09-07, 2026-09-28 and 2026-09-29.
 - `state.yaml` `status: closed`. Feature 001 is done. #101 (deferred) and #138 (future) remain open as work beyond v0.1.
+
+### 2026-10-01 — IME: plain Enter ignored in the message entry (PR #143)
+- Objective: running the GUI with the Japanese IME showed the candidate window at the window's top-left, and confirming a conversion inserted a line break before the committed text.
+- Cause, from the vendored GLFW (`cocoa_window.m`): `firstRectForCharacterRange` returns the view origin with zero size, and `keyDown` sends the key to GLFW before `interpretKeyEvents`, so the confirming Return reaches `Entry` as a key press. Fyne cannot see the composition state. Upstream is open: fyne-io/fyne#618 and glfw/glfw#2130.
+- Change: `messageEntry.TypedKey` ignores Return/Enter unless Shift is held; `Shift+Enter` inserts the line break. FR-022, its acceptance scenario, `design.md`, `design.ja.md` and the README were updated. Merged as PR #143 (`3c6e827`).
+- Evidence: `go test ./internal/gui/` passes; removing the guard fails `TestCommandsWhileEntryHasFocus` with `"日本語\n\n"`. By hand on a Mac: confirming with Return adds no line break. Not verified by hand: `Shift+Enter` and `Cmd+Enter`. The PR had no CI checks.
+- Decision: the maintainer chose the Enter workaround over patching GLFW, and accepts the candidate window position for now.
+- Open: the candidate window position. Fixing it needs a patched GLFW through a `replace` directive, wired to `Entry`. No issue is filed.
+- Next best action: unchanged (see `project-status.md`).
