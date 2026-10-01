@@ -2400,6 +2400,17 @@ last_updated: 2026-10-01
 
 post_closure_changes:
   - date: 2026-10-01
+    pull_request: 145
+    merge_commit: a5976d3dc7eb70d9fc58b7663862804b5485f18c
+    summary: >-
+      Added [gui].background_opacity (float, 0 to 1, default 0.12, the former fixed value) so the
+      background image can be made more visible. withBackground takes the opacity and sets the
+      image's Translucency to 1 - opacity. Values outside 0 to 1, nan and inf are refused at load.
+    files: [internal/config/settings.go, internal/config/validate.go, internal/gui/background.go, internal/gui/window.go, docs/gui-background.md, docs/USER_GUIDE.md, testdata/config/example.toml, specs/001-dual-sink-quick-post/contracts/config-schema.md]
+    verified: >-
+      go vet and go test ./... pass; removing the range check and reversing the mapping each fail
+      the new tests. By hand on a Mac: a raised opacity shows the image and looks fine.
+  - date: 2026-10-01
     pull_request: 143
     merge_commit: 3c6e82787c0fd57673e3756a02f97023906a144f
     summary: >-
