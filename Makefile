@@ -106,6 +106,15 @@ case "$$commit" in *[!$(STAMP_CHARS)]*) \
 ldflags="-X $(VERSION_PKG).version=$$version -X $(VERSION_PKG).commit=$$commit"
 endef
 
+# Go's cgo driver adds -lobjc once for every package that has Objective-C
+# sources, and fyne's dependencies (glfw, systray, ...) each have some, so Apple's
+# linker warns "ignoring duplicate libraries: '-lobjc'" on every darwin link. The
+# duplicates are harmless and not ours to remove, so the warning is silenced.
+override EXTLD :=
+ifeq ($(shell uname -s),Darwin)
+override EXTLD := -extldflags=-Wl,-no_warn_duplicate_libraries
+endif
+
 .PHONY: all build test race vet fmt check install clean stamp
 
 all: check build
@@ -114,8 +123,8 @@ all: check build
 build:
 	@mkdir -p $(BIN_DIR)
 	@$(STAMP); \
-	echo "go build -ldflags \"$$ldflags\" -o $(BIN_DIR)/$(BINARY) $(CMD)"; \
-	go build -ldflags "$$ldflags" -o $(BIN_DIR)/$(BINARY) $(CMD)
+	echo "go build -ldflags \"$$ldflags $(EXTLD)\" -o $(BIN_DIR)/$(BINARY) $(CMD)"; \
+	go build -ldflags "$$ldflags $(EXTLD)" -o $(BIN_DIR)/$(BINARY) $(CMD)
 
 ## stamp: print the version and commit that a build would embed
 stamp:
@@ -156,8 +165,8 @@ check: fmt vet race
 ## install: install mp onto the GOPATH bin directory
 install:
 	@$(STAMP); \
-	echo "go install -ldflags \"$$ldflags\" $(CMD)"; \
-	go install -ldflags "$$ldflags" $(CMD)
+	echo "go install -ldflags \"$$ldflags $(EXTLD)\" $(CMD)"; \
+	go install -ldflags "$$ldflags $(EXTLD)" $(CMD)
 
 ## clean: remove build output
 clean:
