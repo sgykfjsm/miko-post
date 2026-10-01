@@ -327,3 +327,73 @@ func TestSendRemainsAfterAFailedPost(t *testing.T) {
 		t.Fatalf("retry after failure did not post: %d", posted)
 	}
 }
+
+func TestComposedTextIsShownAboveTheEntryAndNeverPosted(t *testing.T) {
+	var sent post.Message
+	h := setup(t, func(m post.Message) post.Outcome { sent = m; return success(m) })
+	h.w.entry.SetText("確定")
+
+	h.w.setPreedit("にほんご", -1)
+	if !h.w.entry.composing.Load() {
+		t.Fatal("the entry was not told a conversion is open before the redraw ran")
+	}
+	h.drain(t)
+	if !h.w.preedit.text.Visible() || h.w.preedit.text.Text != "にほんご" {
+		t.Fatalf("composition not drawn: visible=%v %q", h.w.preedit.text.Visible(), h.w.preedit.text.Text)
+	}
+	if h.w.entry.Text != "確定" {
+		t.Fatalf("composed text leaked into the message: %q", h.w.entry.Text)
+	}
+	if h.w.preedit.text.Position().X < 0 || h.w.preedit.text.Position().X+h.w.preedit.text.Size().Width > h.w.native.Canvas().Size().Width {
+		t.Fatalf("composition falls outside the window: %v %v", h.w.preedit.text.Position(), h.w.preedit.text.Size())
+	}
+
+	h.w.setPreedit("", 0)
+	h.drain(t)
+	if h.w.preedit.text.Visible() || h.w.entry.composing.Load() {
+		t.Fatal("composition still shown after it ended")
+	}
+	_ = sent
+}
+
+func TestComposedTextCaretFollowsTheInputMethod(t *testing.T) {
+	h := setup(t, success)
+	caretAt := func(cursor int) float32 {
+		h.w.setPreedit("にほんご", cursor)
+		h.drain(t)
+		if !h.w.preedit.caret.Visible() {
+			t.Fatalf("no caret drawn for cursor %d", cursor)
+		}
+		return h.w.preedit.caret.Position1.X
+	}
+	start, middle, end := caretAt(0), caretAt(2), caretAt(4)
+	if !(start < middle && middle < end) {
+		t.Fatalf("caret does not move through the composition: %v %v %v", start, middle, end)
+	}
+	if caretAt(-1) != end || caretAt(99) != end {
+		t.Fatal("an unknown or out-of-range cursor is not treated as the end")
+	}
+	if start != h.w.preedit.text.Position().X {
+		t.Fatalf("caret at 0 is not at the start of the text: %v vs %v", start, h.w.preedit.text.Position().X)
+	}
+	h.w.setPreedit("", 0)
+	h.drain(t)
+	if h.w.preedit.caret.Visible() {
+		t.Fatal("caret still drawn after the composition ended")
+	}
+}
+
+func TestByteOffsetCountsUTF16Units(t *testing.T) {
+	for _, tc := range []struct {
+		s     string
+		units int
+		want  int
+	}{
+		{"にほん", 0, 0}, {"にほん", 2, 6}, {"にほん", 3, 9}, {"にほん", 99, 9}, {"にほん", -1, 9},
+		{"a😀b", 1, 1}, {"a😀b", 2, 5}, {"a😀b", 3, 5}, {"a😀b", 4, 6}, {"", 3, 0},
+	} {
+		if got := byteOffset(tc.s, tc.units); got != tc.want {
+			t.Errorf("byteOffset(%q, %d) = %d, want %d", tc.s, tc.units, got, tc.want)
+		}
+	}
+}

@@ -20,6 +20,7 @@ type timer interface{ Stop() bool }
 type window struct {
 	native                fyne.Window
 	entry                 *messageEntry
+	preedit               *preeditView
 	send, cancel, quit    *commandButton
 	result                *widget.Label
 	post                  func(post.Message) post.Outcome
@@ -50,7 +51,8 @@ func newWindow(native fyne.Window, settings config.GUISettings, postMessage func
 	w.result = widget.NewLabel("")
 	w.result.Wrapping = fyne.TextWrapWord
 	content := container.NewBorder(nil, container.NewVBox(w.result, container.NewHBox(w.send, w.cancel, w.quit)), nil, nil, w.entry)
-	native.SetContent(withBackground(content, settings.BackgroundImageDir, settings.BackgroundOpacity))
+	w.preedit = newPreeditView()
+	native.SetContent(container.NewStack(withBackground(content, settings.BackgroundImageDir, settings.BackgroundOpacity), w.preedit.layer))
 	native.Resize(fyne.NewSize(440, 260))
 	native.SetCloseIntercept(w.close)
 	native.Canvas().AddShortcut(&desktop.CustomShortcut{KeyName: fyne.KeyReturn, Modifier: fyne.KeyModifierSuper}, func(fyne.Shortcut) { w.submit() })
@@ -62,6 +64,17 @@ func newWindow(native fyne.Window, settings config.GUISettings, postMessage func
 	})
 	native.Canvas().Focus(w.entry)
 	return w
+}
+
+// setPreedit is told what an input method is composing, "" when it ends. The
+// flag the entry consults flips at once, because the next key may arrive before
+// a queued redraw runs; only the drawing is dispatched.
+func (w *window) setPreedit(text string, cursor int) {
+	w.entry.composing.Store(text != "")
+	w.dispatch(func() {
+		caret, size := w.entry.caretRect()
+		w.preedit.show(text, cursor, caret, size.Height, w.native.Canvas().Size().Width)
+	})
 }
 
 func (w *window) stopTimer() {

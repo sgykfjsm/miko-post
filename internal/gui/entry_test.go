@@ -55,3 +55,70 @@ func TestCommandsWhileEntryHasFocus(t *testing.T) {
 		t.Fatal("Cmd+Q was consumed by the entry")
 	}
 }
+
+func TestCaretIsReportedBesideTheTypedText(t *testing.T) {
+	a := test.NewApp()
+	defer a.Quit()
+	e := newMessageEntry(func() {}, func() {})
+	var pos fyne.Position
+	var size fyne.Size
+	reports := 0
+	e.caretMoved = func(p fyne.Position, s fyne.Size) { pos, size, reports = p, s, reports+1 }
+	w := a.NewWindow("caret")
+	defer w.Close()
+	w.SetContent(e)
+	w.Resize(fyne.NewSize(440, 260))
+	w.Canvas().Focus(e)
+
+	test.Type(e, "日本語")
+	first, firstReports := pos, reports
+	if firstReports == 0 || size.Height <= 0 {
+		t.Fatalf("no caret reported: reports=%d size=%v", firstReports, size)
+	}
+	if first.X <= 0 || first.Y < 0 || first.Y > e.Size().Height {
+		t.Fatalf("caret %v is outside the entry %v", first, e.Size())
+	}
+
+	test.Type(e, "かな")
+	if pos.X <= first.X || pos.Y != first.Y {
+		t.Fatalf("typing did not move the caret right on the same line: %v then %v", first, pos)
+	}
+
+	e.TypedKey(&fyne.KeyEvent{Name: fyne.KeyReturn}) // ignored, see TestCommandsWhileEntryHasFocus
+	e.shiftHeld = func() bool { return true }
+	e.TypedKey(&fyne.KeyEvent{Name: fyne.KeyReturn})
+	if pos.Y <= first.Y || pos.X >= first.X {
+		t.Fatalf("a new line did not move the caret down and back to the left: %v", pos)
+	}
+}
+
+func TestKeysThatSteerAConversionAreIgnoredWhileComposing(t *testing.T) {
+	a := test.NewApp()
+	defer a.Quit()
+	cancelled := 0
+	e := newMessageEntry(func() {}, func() { cancelled++ })
+	w := a.NewWindow("composing")
+	defer w.Close()
+	w.SetContent(e)
+	w.Canvas().Focus(e)
+	test.Type(e, "日本語")
+	row, column := e.CursorRow, e.CursorColumn
+
+	e.composing.Store(true)
+	for _, key := range []fyne.KeyName{fyne.KeyBackspace, fyne.KeyDelete, fyne.KeyLeft, fyne.KeyReturn, fyne.KeyEscape} {
+		e.TypedKey(&fyne.KeyEvent{Name: key})
+	}
+	if e.Text != "日本語" || e.CursorRow != row || e.CursorColumn != column || cancelled != 0 {
+		t.Fatalf("a key reached the entry mid-conversion: %q at %d,%d cancelled %d", e.Text, e.CursorRow, e.CursorColumn, cancelled)
+	}
+
+	e.composing.Store(false)
+	e.TypedKey(&fyne.KeyEvent{Name: fyne.KeyBackspace})
+	if e.Text != "日本" {
+		t.Fatalf("Backspace stopped working after the conversion ended: %q", e.Text)
+	}
+	e.TypedKey(&fyne.KeyEvent{Name: fyne.KeyEscape})
+	if cancelled != 1 {
+		t.Fatal("Esc stopped cancelling after the conversion ended")
+	}
+}

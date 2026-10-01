@@ -102,6 +102,15 @@ func runWith(errOut io.Writer, homeDir func() (string, error), newApp func() fyn
 		return 1
 	}
 	w.activity, w.release = activity, release
+	// Best effort: without it the candidate window opens at the window's corner
+	// and text being converted stays invisible until it is confirmed, which is
+	// awkward but does not stop anyone posting.
+	if moved, err := installInputMethod(w.native, w.setPreedit); err != nil {
+		fmt.Fprintln(errOut, "mp: note: "+err.Error())
+	} else {
+		w.entry.caretMoved = moved
+		w.entry.reportCaret()
+	}
 	a.Run()
 	return w.status
 }
