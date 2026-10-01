@@ -27,6 +27,10 @@ upstream (GLFW's Cocoa `keyDown` forwards keys before `interpretKeyEvents`; Fyne
 composition state). Confirmed by hand: confirming with Return adds no line break. Not confirmed by
 hand: `Shift+Enter` inserting a line break and `Cmd+Enter` submitting.
 
+PR #145 (`a5976d3`, 2026-10-01) added `[gui].background_opacity` (0 to 1, default 0.12, the old fixed
+value), because the background image was hard to see. Out-of-range values, `nan` and `inf` are
+refused at load. Confirmed by hand on a Mac: raising it works and looks fine.
+
 ## In progress
 Nothing for feature 001.
 

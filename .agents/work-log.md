@@ -1287,3 +1287,11 @@ confirmed. Valid git-generated publication patches now reverse-check successfull
 - Decision: the maintainer chose the Enter workaround over patching GLFW, and accepts the candidate window position for now.
 - Open: the candidate window position. Fixing it needs a patched GLFW through a `replace` directive, wired to `Entry`. No issue is filed.
 - Next best action: unchanged (see `project-status.md`).
+
+### 2026-10-01 — GUI background opacity setting (PR #145)
+- Objective: the background image was hard to see, because it was drawn at a fixed 12% opacity over black.
+- Change: `[gui].background_opacity`, a float from 0 to 1 that defaults to 0.12 so existing configs look the same. `withBackground` takes it and sets `Translucency` to `1 - opacity`. Values outside 0 to 1, `nan` and `inf` fail at load. `gui-background.md` no longer says there is no opacity setting; the user guide, the example config and the config schema describe it. Merged as PR #145 (`a5976d3`).
+- Evidence: `go vet ./...` and `go test ./...` pass. Removing the range check fails `TestBackgroundOpacityConfiguration`; reversing the mapping fails `TestBackgroundOpacityMapsToTranslucency` and `TestBackgroundLayerPreservesEditorInteraction`. By hand on a Mac the maintainer raised the value and judged the result fine. The PR had no CI checks.
+- Decision: named `opacity`, not `transparency`, so a higher number shows more of the image.
+- Open: none from this change.
+- Next best action: unchanged (see `project-status.md`).
