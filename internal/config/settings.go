@@ -104,6 +104,11 @@ type GUISettings struct {
 	// BackgroundImageDir optionally supplies a subtle startup background (#122).
 	BackgroundImageDir string `toml:"background_image_dir"`
 
+	// BackgroundOpacity is how strongly the background image shows over black:
+	// 0 hides it and 1 shows it unchanged. It has no effect without
+	// BackgroundImageDir.
+	BackgroundOpacity float64 `toml:"background_opacity"`
+
 	// SuccessCloseSeconds is the delay before the window closes itself after
 	// a fully successful post. Zero means close immediately, which is why the
 	// bound is >= 0 rather than > 0.
@@ -180,6 +185,7 @@ func Defaults() Settings {
 			SinkTimeoutSeconds: 60,
 		},
 		GUI: GUISettings{
+			BackgroundOpacity:   0.12,
 			SuccessCloseSeconds: 15,
 			ErrorCloseSeconds:   30,
 		},

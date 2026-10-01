@@ -47,7 +47,7 @@ func newWindow(native fyne.Window, settings config.GUISettings, postMessage func
 	w.result = widget.NewLabel("")
 	w.result.Wrapping = fyne.TextWrapWord
 	content := container.NewBorder(nil, container.NewVBox(w.result, container.NewHBox(w.send, cancel)), nil, nil, w.entry)
-	native.SetContent(withBackground(content, settings.BackgroundImageDir))
+	native.SetContent(withBackground(content, settings.BackgroundImageDir, settings.BackgroundOpacity))
 	native.Resize(fyne.NewSize(440, 260))
 	native.SetCloseIntercept(w.close)
 	native.Canvas().AddShortcut(&desktop.CustomShortcut{KeyName: fyne.KeyReturn, Modifier: fyne.KeyModifierSuper}, func(fyne.Shortcut) { w.submit() })

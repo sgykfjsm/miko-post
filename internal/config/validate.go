@@ -445,6 +445,10 @@ func (g GUISettings) validate(found *problems) {
 	if g.BackgroundImageDir != "" && !filepath.IsAbs(g.BackgroundImageDir) {
 		found.addf("gui.background_image_dir must be an absolute path or empty")
 	}
+	// The comparison is written so that NaN, which fails both, is refused too.
+	if !(g.BackgroundOpacity >= 0 && g.BackgroundOpacity <= 1) {
+		found.addf("gui.background_opacity must be between 0 and 1 (got %v)", g.BackgroundOpacity)
+	}
 	// Zero is allowed for both: it means close as soon as the result is
 	// rendered, which is a legitimate preference, unlike a negative delay.
 	if g.SuccessCloseSeconds < 0 {

@@ -11,15 +11,16 @@ unreadable, oversized, or missing images fall back to another candidate, or blac
 when none is usable. Limits: 8 MiB encoded and 16 million pixels.
 
 Images preserve their aspect ratio and fit inside the window, with black bars if
-needed. Fixed 12% opacity over black keeps text readable. The editor background is
+needed. The image shows over black at `[gui].background_opacity` (0 to 1, default 0.12), which keeps text readable at the default. The editor background is
 transparent; widgets use dark-theme foregrounds. The selected image stays fixed
-through editing and result display. No opacity setting or image posting is added.
+through editing and result display. No image posting is added.
 
 Configuration example:
 
 ```toml
 [gui]
 background_image_dir = "/Users/you/Pictures/miko-backgrounds"
+background_opacity = 0.3   # optional; 0 hides the image, 1 shows it unchanged
 ```
 
 Verification covers selection, both formats, fallback, limits, no recursion,

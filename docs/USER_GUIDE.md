@@ -17,10 +17,12 @@ Add an absolute directory to the default XDG configuration:
 ```toml
 [gui]
 background_image_dir = "/Users/you/Pictures/miko-backgrounds"
+background_opacity = 0.3
 ```
 
-Each window selects one usable top-level PNG/JPEG image and displays it faintly over
-black. An empty setting disables the image. Missing, unreadable, corrupt or oversized
+Each window selects one usable top-level PNG/JPEG image and displays it over
+black at `background_opacity`: 0 hides it, 1 shows it unchanged, and the default 0.12 is faint.
+If the image is hard to see, raise it; text becomes harder to read as it grows. An empty setting disables the image. Missing, unreadable, corrupt or oversized
 images fall back to another candidate or black; they do not prevent posting.
 See [background behavior and limits](gui-background.md) for details.
 
