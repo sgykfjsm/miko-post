@@ -139,6 +139,8 @@ Keyboard behavior on macOS:
 - `Cmd+Enter`: send
 - `Cmd+Q`: quit the application
 
+Input methods on macOS (accepted extension, FR-022a): the GLFW layer under Fyne reports the origin of the view as the caret and keeps the text being composed to itself. The GUI therefore replaces four `GLFWContentView` text-input methods at run time (`internal/gui/ime_darwin.m`): the candidate window is placed from the entry's caret, the composing text is drawn as an underlined overlay with its own caret (`internal/gui/preedit.go`) and never enters the message, and the keys that steer a conversion are ignored while one is open. If the hook cannot be installed, `mp` prints a note on stderr and the window works without these refinements. Upstream tracks the underlying gap in fyne-io/fyne#618 and glfw/glfw#2130; this extension can be removed once the driver supports it.
+
 The buttons and keyboard shortcuts must share the same validation and submission paths.
 
 ## 6. Posting orchestration
