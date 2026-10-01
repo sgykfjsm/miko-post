@@ -104,7 +104,9 @@ destination's result is printed, with a short reason for any that failed.
 | `Esc` | close without posting |
 | `Cmd+Q` | quit |
 
-Send is disabled while a post is in flight. After a post the window closes on its own, after 15
+Send is disabled while a post is in flight. After a post in which every destination succeeded,
+Send and Cancel give way to a single Quit button and the message cannot be sent again; after a
+failure Send stays so you can retry. The window closes on its own, after 15
 seconds on success or 30 seconds on failure (`[gui]` settings). Interacting with it first cancels
 the automatic close. An optional faint background image is described in
 [docs/USER_GUIDE.md](docs/USER_GUIDE.md).

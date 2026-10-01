@@ -20,7 +20,7 @@ type timer interface{ Stop() bool }
 type window struct {
 	native                fyne.Window
 	entry                 *messageEntry
-	send                  *commandButton
+	send, cancel, quit    *commandButton
 	result                *widget.Label
 	post                  func(post.Message) post.Outcome
 	settings              config.GUISettings
@@ -33,6 +33,7 @@ type window struct {
 	pending               timer
 	generation            uint64
 	busy, closing, closed bool
+	done                  bool // a post succeeded: nothing more can be sent from this window
 	status                int
 }
 
@@ -43,10 +44,12 @@ func newWindow(native fyne.Window, settings config.GUISettings, postMessage func
 	w.entry = newMessageEntry(w.submit, w.close)
 	w.entry.SetPlaceHolder("What’s on your mind?")
 	w.send = newCommandButton("Send", w.submit, w.close)
-	cancel := newCommandButton("Cancel", w.close, w.close)
+	w.cancel = newCommandButton("Cancel", w.close, w.close)
+	w.quit = newCommandButton("Quit", w.close, w.close)
+	w.quit.Hide()
 	w.result = widget.NewLabel("")
 	w.result.Wrapping = fyne.TextWrapWord
-	content := container.NewBorder(nil, container.NewVBox(w.result, container.NewHBox(w.send, cancel)), nil, nil, w.entry)
+	content := container.NewBorder(nil, container.NewVBox(w.result, container.NewHBox(w.send, w.cancel, w.quit)), nil, nil, w.entry)
 	native.SetContent(withBackground(content, settings.BackgroundImageDir, settings.BackgroundOpacity))
 	native.Resize(fyne.NewSize(440, 260))
 	native.SetCloseIntercept(w.close)
@@ -70,7 +73,7 @@ func (w *window) stopTimer() {
 }
 
 func (w *window) submit() {
-	if w.busy || w.closing || w.closed {
+	if w.busy || w.closing || w.closed || w.done {
 		return
 	}
 	w.stopTimer()
@@ -101,7 +104,16 @@ func (w *window) finished(outcome post.Outcome) {
 		w.close()
 		return
 	}
-	w.send.Enable()
+	if outcome.Succeeded() {
+		// Sending again would post the same message twice. Only Quit is left; a
+		// failure keeps Send so the message can be corrected and retried.
+		w.done = true
+		w.send.Hide()
+		w.cancel.Hide()
+		w.quit.Show()
+	} else {
+		w.send.Enable()
+	}
 	// Asked once per post; the warning renders at most once per session while
 	// `lost` stays true for the rest of it. Read here rather than at
 	// construction because the open may have succeeded and a later write

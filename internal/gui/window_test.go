@@ -73,6 +73,10 @@ func (h *harness) drain(t *testing.T) {
 		t.Fatal("worker did not deliver outcome")
 	}
 }
+func failure() post.Outcome {
+	return post.Outcome{Results: []post.SinkResult{{Name: "obsidian", Success: false}}}
+}
+
 func success(post.Message) post.Outcome {
 	return post.Outcome{Results: []post.SinkResult{{Name: "obsidian", Success: true}}}
 }
@@ -80,7 +84,7 @@ func success(post.Message) post.Outcome {
 func TestButtonsAndShortcutShareSubmissionAndRejectDuplicates(t *testing.T) {
 	started := make(chan post.Message, 2)
 	finish := make(chan struct{})
-	h := setup(t, func(m post.Message) post.Outcome { started <- m; <-finish; return success(m) })
+	h := setup(t, func(m post.Message) post.Outcome { started <- m; <-finish; return failure() })
 	if h.w.native.Canvas().Focused() != h.w.entry {
 		t.Fatal("no initial focus")
 	}
@@ -277,5 +281,49 @@ func TestLargeConfiguredDeadlineDoesNotWrap(t *testing.T) {
 	h.drain(t)
 	if h.timers[0].delay != time.Duration(math.MaxInt64) {
 		t.Fatalf("deadline wrapped: %v", h.timers[0].delay)
+	}
+}
+
+func TestOnlyQuitRemainsAfterASuccessfulPost(t *testing.T) {
+	posted := 0
+	h := setup(t, func(m post.Message) post.Outcome { posted++; return success(m) })
+	if h.w.quit.Visible() {
+		t.Fatal("Quit is shown before anything was posted")
+	}
+	h.w.entry.SetText("hello")
+	test.Tap(h.w.send)
+	h.drain(t)
+	if h.w.send.Visible() || h.w.cancel.Visible() || !h.w.quit.Visible() {
+		t.Fatalf("buttons after success: send=%v cancel=%v quit=%v", h.w.send.Visible(), h.w.cancel.Visible(), h.w.quit.Visible())
+	}
+	h.w.submit()
+	h.w.entry.TypedShortcut(&desktop.CustomShortcut{KeyName: fyne.KeyReturn, Modifier: fyne.KeyModifierSuper})
+	select {
+	case <-h.queued:
+		t.Fatal("a second post was started")
+	default:
+	}
+	if posted != 1 {
+		t.Fatalf("posted %d times", posted)
+	}
+	test.Tap(h.w.quit)
+	if !h.w.closed || h.w.status != 0 {
+		t.Fatalf("Quit did not close with success: closed=%v status=%d", h.w.closed, h.w.status)
+	}
+}
+
+func TestSendRemainsAfterAFailedPost(t *testing.T) {
+	posted := 0
+	h := setup(t, func(post.Message) post.Outcome { posted++; return failure() })
+	h.w.entry.SetText("hello")
+	test.Tap(h.w.send)
+	h.drain(t)
+	if !h.w.send.Visible() || h.w.send.Disabled() || h.w.quit.Visible() {
+		t.Fatalf("a failure must leave Send usable: visible=%v disabled=%v quit=%v", h.w.send.Visible(), h.w.send.Disabled(), h.w.quit.Visible())
+	}
+	test.Tap(h.w.send)
+	h.drain(t)
+	if posted != 2 {
+		t.Fatalf("retry after failure did not post: %d", posted)
 	}
 }
