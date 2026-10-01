@@ -123,7 +123,7 @@ defines the placement, opacity and decoding bounds.
 
 The message field receives focus at launch. Cancel closes the window without posting.
 
-During submission, Send is disabled to prevent duplicate posts. The GUI invokes the shared posting service, waits for every enabled sink to complete, and displays a compact result for each sink.
+During submission, Send is disabled to prevent duplicate posts. After a post in which every enabled sink succeeded, Send and Cancel are replaced by a Quit button and further submission (including `Cmd+Enter`) is refused; a failed post leaves Send available for a retry. The GUI invokes the shared posting service, waits for every enabled sink to complete, and displays a compact result for each sink.
 
 Default auto-close delays:
 

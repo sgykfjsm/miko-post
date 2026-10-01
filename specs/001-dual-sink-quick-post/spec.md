@@ -80,12 +80,14 @@ that the application exits on its own afterwards with a status matching the outc
 4. **Given** the window is open, **When** the user presses `Esc` or activates Cancel, **Then** the
    window closes without contacting any destination.
 5. **Given** a completed submission where every enabled destination succeeded, **When** the result
-   is displayed, **Then** the application closes and terminates on its own after the configured
-   success delay (15 seconds by default), exiting with success.
+   is displayed, **Then** Send and Cancel are replaced by a Quit control (and `Cmd+Enter` no longer
+   sends), so the same message cannot be posted twice, and the application closes and terminates on
+   its own after the configured success delay (15 seconds by default), exiting with success. Quit
+   closes it at once with the same status.
 6. **Given** a completed submission where at least one enabled destination failed, **When** the
-   result is displayed, **Then** every failed destination and a short reason for each is shown, and
-   the application closes and terminates after the configured failure delay (30 seconds by
-   default), exiting with failure.
+   result is displayed, **Then** every failed destination and a short reason for each is shown, Send
+   stays available so the message can be corrected and retried, and the application closes and
+   terminates after the configured failure delay (30 seconds by default), exiting with failure.
 7. **Given** a result is displayed and its auto-close delay is counting down, **When** the user
    interacts with the window at all (any keypress, click, or focus), **Then** the auto-close timer
    is cancelled and the result remains on screen until the user dismisses it themselves.
@@ -383,7 +385,8 @@ it, while a subsequently launched window still used the default.
 **Windowed interface**
 
 - **FR-020**: The window MUST contain a multi-line message field, a Send control, a Cancel control,
-  and a compact result/error area, with no additional controls.
+  and a compact result/error area, with no additional controls. After a post in which every enabled
+  destination succeeded, the Send and Cancel controls MUST give way to a single Quit control.
 - **FR-020a** (accepted extension, issue #122): An optional absolute
   `gui.background_image_dir` MUST select one usable top-level PNG/JPEG image at launch,
   keep it fixed for that window, and display it faintly over black without reducing
@@ -404,7 +407,9 @@ it, while a subsequently launched window still used the default.
   window's corner and the composing text hidden until it is confirmed.
 - **FR-023**: Controls and keyboard shortcuts MUST share the same validation and submission paths.
 - **FR-024**: The Send control MUST be disabled for the duration of a submission so a post cannot
-  be submitted twice.
+  be submitted twice, and after a fully successful post the window MUST refuse further submissions
+  (the Send control is replaced by Quit, and `Cmd+Enter` does nothing). A failed post leaves Send
+  available for a retry.
 - **FR-025**: The window MUST wait for every enabled destination to finish, then display a compact
   per-destination result.
 - **FR-026**: The window MUST schedule an automatic close after a configurable delay: 15 seconds by

@@ -82,8 +82,11 @@ func TestTheWindowWarnsWhenDiagnosticsCouldNotBeWritten(t *testing.T) {
 // rest of the session. A window that renders that answer on each post shows the
 // warning again on the second post, and the third — which is one failure
 // reported many times, not many failures reported once.
+//
+// Posts are repeated here with a failing destination, because a successful post
+// ends the window's ability to send (only Quit is left).
 func TestTheWindowWarnsAboutDiagnosticsExactlyOncePerSession(t *testing.T) {
-	h := setupDegrading(t, succeeds, unwritable)
+	h := setupDegrading(t, fails, unwritable)
 
 	first := submitAndSettle(t, h, "first post")
 	if !strings.Contains(first, degradedLogPath) {
@@ -121,7 +124,7 @@ func TestAHealthyLogProducesNoWarning(t *testing.T) {
 // miss it entirely.
 func TestADegradationThatBeginsMidSessionIsStillReported(t *testing.T) {
 	healthy := true
-	h := setupDegrading(t, succeeds, func() *logging.Degradation {
+	h := setupDegrading(t, fails, func() *logging.Degradation {
 		if healthy {
 			return nil
 		}
@@ -217,21 +220,19 @@ func TestNextIsSafeOnAZeroWarning(t *testing.T) {
 // stale invitation back, pointing the user at a log that was never written. That
 // is the one post they actually need to diagnose. The suppression is keyed on
 // whether diagnostics are lost, not on whether a warning is being printed now.
+//
+// A successful post now ends the window's ability to send, so the spending post
+// is simulated by asking the warning directly, as the window does after a
+// success; the property is about the warning, not about the buttons.
 func TestAFailedPostAfterTheWarningIsSpentStillHidesTheLogPath(t *testing.T) {
-	h := setupDegrading(t, succeeds, unwritable)
+	h := setupDegrading(t, fails, unwritable)
 
-	first := submitAndSettle(t, h, "a successful post that spends the warning")
-	if !strings.Contains(first, degradedLogPath) {
-		t.Fatalf("the first post did not warn, so the warning was never spent:\n%s", first)
-	}
-
-	if strings.Contains(first, "Details: ") {
-		t.Errorf("a successful post offered a details line:\n%s", first)
+	first, lost := h.w.warning.check()
+	if !strings.Contains(first, degradedLogPath) || !lost {
+		t.Fatalf("the first check did not warn, so the warning was never spent: %q lost=%v", first, lost)
 	}
 
 	// Now a post that fails, with the warning already gone.
-	h.w.post = fails
-
 	second := submitAndSettle(t, h, "a failed post afterwards")
 
 	if strings.Contains(second, "Details: ") {

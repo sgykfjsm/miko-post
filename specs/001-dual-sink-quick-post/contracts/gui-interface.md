@@ -4,7 +4,7 @@
 
 ## Composition (FR-020)
 
-The window contains exactly: a multi-line message field, a Send control, a Cancel control, and a
+The window contains exactly: a multi-line message field, a Send control, a Cancel control (both replaced by a Quit control after a fully successful post), and a
 compact result/error area. Nothing else.
 
 ## Focus (FR-021)
