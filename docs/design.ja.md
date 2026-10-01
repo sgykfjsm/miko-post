@@ -131,7 +131,7 @@ GUIはFyneで実装し、次だけを持つ。
 macOSでのキーボード操作:
 
 - `Esc`: キャンセルし、投稿せず閉じる
-- `Enter`: 改行を入力する
+- `Shift+Enter`: 改行を入力する(通常の `Enter` は無視する。macOS のドライバが IME 変換確定の Enter をキー入力として渡すため)
 - `Cmd+Enter`: 送信する
 - `Cmd+Q`: アプリを終了する
 
@@ -439,7 +439,7 @@ app.jsonl -> app.jsonl.20260827114203
 13. JSONLログで1投稿のイベントを対応付けられ、成功時は本文を省略し、失敗時は本文を残し、secretを含まない
 14. 10 MiBまたは7日経過の早い方でログをrotateし、自動削除しない
 15. 半角スペース、全角スペース、タブ、改行だけのメッセージは、sink実行前に拒否される
-16. `Esc`、`Enter`、`Cmd+Enter`、`Cmd+Q` が、それぞれキャンセル、改行、送信、終了として動作する
+16. `Esc`、`Shift+Enter`、`Cmd+Enter`、`Cmd+Q` が、それぞれキャンセル、改行、送信、終了として動作する
 17. Telegram HTTP request timeoutの既定値が30秒、各sink全体timeoutの既定値が60秒であり、別々に設定できる
 18. v0.1では一般的なHTTP retryを行わず、MarkdownV2のplain text fallbackだけは仕様どおり実行する
 19. rotated logが `app.jsonl.20260827114203` のようなローカルtimestamp suffixを持つ

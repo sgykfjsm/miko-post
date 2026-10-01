@@ -135,7 +135,7 @@ Both values are configurable. A failure display identifies every failed sink and
 Keyboard behavior on macOS:
 
 - `Esc`: cancel and close without posting
-- `Enter`: insert a line break
+- `Shift+Enter`: insert a line break (a plain `Enter` is ignored: the macOS driver passes the IME-confirming Enter through as a key press)
 - `Cmd+Enter`: send
 - `Cmd+Q`: quit the application
 
@@ -445,7 +445,7 @@ app.jsonl -> app.jsonl.20260827114203
 13. JSONL logs correlate events for one post, omit successful message bodies, include the body on failure, and contain no secrets.
 14. Logs rotate at 10 MiB or seven days, whichever occurs first, with no automatic deletion.
 15. ASCII-space-only, full-width-space-only, tab-only, and line-break-only messages are rejected before any sink runs.
-16. `Esc`, `Enter`, `Cmd+Enter`, and `Cmd+Q` perform cancel, newline, send, and quit respectively.
+16. `Esc`, `Shift+Enter`, `Cmd+Enter`, and `Cmd+Q` perform cancel, newline, send, and quit respectively.
 17. Telegram HTTP requests default to a 30-second timeout; each sink invocation defaults to a separate 60-second overall timeout.
 18. No general HTTP retry occurs in v0.1; MarkdownV2 plain-text fallback continues to work as specified.
 19. Rotated logs use a local timestamp suffix such as `app.jsonl.20260827114203`.

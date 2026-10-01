@@ -11,10 +11,11 @@ import (
 type messageEntry struct {
 	widget.Entry
 	submit, cancel func()
+	shiftHeld      func() bool
 }
 
 func newMessageEntry(submit, cancel func()) *messageEntry {
-	e := &messageEntry{submit: submit, cancel: cancel}
+	e := &messageEntry{submit: submit, cancel: cancel, shiftHeld: shiftHeld}
 	e.MultiLine = true
 	e.Wrapping = fyne.TextWrapWord
 	e.ExtendBaseWidget(e)
@@ -40,7 +41,19 @@ func (e *messageEntry) TypedKey(k *fyne.KeyEvent) {
 		e.cancel()
 		return
 	}
+	// Only Shift+Return inserts a line break. The macOS driver hands the Return
+	// that confirms an IME conversion to the entry as an ordinary key press, so
+	// a plain Return would add a stray line break before the committed text.
+	// Fyne cannot say whether a composition is active, hence the blanket rule.
+	if (k.Name == fyne.KeyReturn || k.Name == fyne.KeyEnter) && !e.shiftHeld() {
+		return
+	}
 	e.Entry.TypedKey(k)
+}
+
+func shiftHeld() bool {
+	d, ok := fyne.CurrentApp().Driver().(desktop.Driver)
+	return ok && d.CurrentKeyModifiers()&fyne.KeyModifierShift != 0
 }
 
 // commandButton makes Esc dismiss the window even when a button holds keyboard
