@@ -5,6 +5,7 @@ import (
 	"image/color"
 	"image/jpeg"
 	"image/png"
+	"math"
 	"os"
 	"path/filepath"
 	"testing"
@@ -102,12 +103,12 @@ func TestBackgroundLayerPreservesEditorInteraction(t *testing.T) {
 	dir := t.TempDir()
 	backgroundFixture(t, dir, "white.png", color.White)
 	entry := widget.NewEntry()
-	obj := withBackground(entry, dir).(*fyne.Container)
+	obj := withBackground(entry, dir, 0.12).(*fyne.Container)
 	if len(obj.Objects) != 3 {
 		t.Fatalf("layers=%d", len(obj.Objects))
 	}
 	img, ok := obj.Objects[1].(*canvas.Image)
-	if !ok || img.FillMode != canvas.ImageFillContain || img.Translucency != 0.88 {
+	if !ok || img.FillMode != canvas.ImageFillContain || math.Abs(img.Translucency-0.88) > 1e-9 {
 		t.Fatal("image display policy changed")
 	}
 	w := a.NewWindow("background")
@@ -117,5 +118,19 @@ func TestBackgroundLayerPreservesEditorInteraction(t *testing.T) {
 	test.Type(entry, "Readable 日本語")
 	if entry.Text != "Readable 日本語" {
 		t.Fatal("background intercepts editor")
+	}
+}
+
+func TestBackgroundOpacityMapsToTranslucency(t *testing.T) {
+	a := test.NewApp()
+	defer a.Quit()
+	dir := t.TempDir()
+	backgroundFixture(t, dir, "white.png", color.White)
+	for _, opacity := range []float64{0, 0.3, 1} {
+		obj := withBackground(widget.NewEntry(), dir, opacity).(*fyne.Container)
+		img := obj.Objects[1].(*canvas.Image)
+		if math.Abs(img.Translucency-(1-opacity)) > 1e-9 {
+			t.Errorf("opacity %v: translucency %v", opacity, img.Translucency)
+		}
 	}
 }

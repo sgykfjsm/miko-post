@@ -88,12 +88,15 @@ func (t backgroundTheme) Color(name fyne.ThemeColorName, _ fyne.ThemeVariant) co
 	}
 	return t.Theme.Color(name, theme.VariantDark)
 }
-func withBackground(content fyne.CanvasObject, dir string) fyne.CanvasObject {
+
+// withBackground shows the chosen image at the given opacity (0 to 1) over
+// black; canvas.Image expresses the same thing inversely as Translucency.
+func withBackground(content fyne.CanvasObject, dir string, opacity float64) fyne.CanvasObject {
 	layers := []fyne.CanvasObject{canvas.NewRectangle(color.Black)}
 	if img := chooseBackground(dir); img != nil {
 		background := canvas.NewImageFromImage(img)
 		background.FillMode = canvas.ImageFillContain
-		background.Translucency = 0.88
+		background.Translucency = 1 - opacity
 		layers = append(layers, background)
 	}
 	layers = append(layers, container.NewThemeOverride(content, backgroundTheme{theme.DefaultTheme()}))

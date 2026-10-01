@@ -95,6 +95,10 @@ sink_timeout_seconds = 60
 # window opens and shown faintly behind it. Empty means a plain background.
 background_image_dir = ""
 
+# How strongly that image shows over black, from 0 (hidden) to 1 (unchanged).
+# Raise it if the image is hard to see; text gets harder to read as it grows.
+background_opacity = 0.12
+
 # Seconds before the window closes itself after a post, and the process exits
 # with the post's status. 0 closes it as soon as the result is shown. Any
 # interaction with the window before then cancels that post's automatic close.
