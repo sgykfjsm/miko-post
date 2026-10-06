@@ -109,6 +109,43 @@ seconds on success or 30 seconds on failure (`[gui]` settings). Interacting with
 the automatic close. An optional faint background image is described in
 [docs/USER_GUIDE.md](docs/USER_GUIDE.md).
 
+### Launching with a hotkey
+
+`mp` has no hotkey of its own, but `mp` with no arguments opens the window, so any hotkey tool
+that runs a command can launch it. This example uses
+[skhd.zig](https://github.com/jackielii/skhd.zig), a Zig port of skhd that reads the same
+`skhdrc` format:
+
+```bash
+brew install jackielii/tap/skhd-zig
+```
+
+Add one line to `~/.config/skhd/skhdrc` (or `~/.skhdrc`). The key combination is only an
+example; pick one that no other app uses:
+
+```text
+ctrl + alt - m : "$HOME/go/bin/mp" >/dev/null 2>&1 &
+```
+
+Then install and start the service:
+
+```bash
+skhd --install-service
+skhd --start-service
+```
+
+macOS asks for the Accessibility permission the first time. Turn `skhd` on under System
+Settings > Privacy & Security > Accessibility, then run `skhd --restart-service`. Run the same
+command after every change to `skhdrc`.
+
+- Give `mp` as a full path, because the hotkey tool's `PATH` may not include `$(go env GOPATH)/bin`.
+  Adjust the path if you installed somewhere else.
+- The trailing `&` keeps the hotkey from waiting for the window to close.
+- The window is opened without arguments, so the settings file is the default one. Keep the token
+  in `config.toml` rather than in an environment variable, which the hotkey tool may not pass on.
+- Pressing the hotkey again while a window is open opens another one; `mp` does not limit itself
+  to one window.
+
 ### What each destination receives
 
 - **Telegram** gets the text unchanged, sent as MarkdownV2. If Telegram rejects the formatting,
